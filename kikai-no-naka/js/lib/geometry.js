@@ -202,32 +202,13 @@ export function ring(outerR, innerR, thickness, segments = 48) {
 /* ------------------------------------------------------------------ */
 
 /**
- * インボリュート歯形の平歯車。
+ * インボリュート歯形の輪郭（頂点列）だけを作る。
+ * 平歯車にも、内歯車（リングギヤ）にも使いまわす。
  *
  * @param {object} o
- * @param {number} o.teeth 歯数
- * @param {number} o.module モジュール（ピッチ円直径 = module * teeth）
- * @param {number} o.thickness 歯幅
- * @param {number} [o.bore] 軸穴の半径（0 で穴なし）
- * @param {number} [o.hub] ハブ（軸まわりの厚い部分）の半径
- * @param {number} [o.hubHeight] ハブの張り出し
- * @param {number} [o.spokes] スポーク数（0 で無垢の円板）
- * @param {number} [o.web] スポーク部の薄板の厚み比（0..1）
- * @param {number} [o.pressureAngle] 圧力角
+ * @returns {{points: THREE.Vector2[], pitchR: number, tipR: number, rootR: number, baseR: number}}
  */
-export function gearGeometry(o) {
-  const {
-    teeth,
-    module: m,
-    thickness,
-    bore = 0,
-    hub = 0,
-    hubHeight = 0,
-    spokes = 0,
-    pressureAngle = 20 * (Math.PI / 180),
-    profileSteps = 7,
-  } = o;
-
+export function gearOutline({ teeth, module: m, pressureAngle = 20 * (Math.PI / 180), profileSteps = 7 }) {
   const pitchR = (m * teeth) / 2;
   const baseR = pitchR * Math.cos(pressureAngle);
   const tipR = pitchR + m * 1.0;
@@ -275,6 +256,40 @@ export function gearGeometry(o) {
     const arcSteps = 3;
     for (let i = 1; i < arcSteps; i++) push(rootR, lerp(a0, a1, i / arcSteps));
   }
+
+  return { points: pts, pitchR, tipR, rootR, baseR };
+}
+
+/**
+ * インボリュート歯形の平歯車。
+ *
+ * @param {object} o
+ * @param {number} o.teeth 歯数
+ * @param {number} o.module モジュール（ピッチ円直径 = module * teeth）
+ * @param {number} o.thickness 歯幅
+ * @param {number} [o.bore] 軸穴の半径（0 で穴なし）
+ * @param {number} [o.hub] ハブ（軸まわりの厚い部分）の半径
+ * @param {number} [o.hubHeight] ハブの張り出し
+ * @param {number} [o.spokes] スポーク数（0 で無垢の円板）
+ * @param {number} [o.web] スポーク部の薄板の厚み比（0..1）
+ * @param {number} [o.pressureAngle] 圧力角
+ */
+export function gearGeometry(o) {
+  const {
+    teeth,
+    module: m,
+    thickness,
+    bore = 0,
+    hub = 0,
+    hubHeight = 0,
+    spokes = 0,
+    pressureAngle = 20 * (Math.PI / 180),
+    profileSteps = 7,
+  } = o;
+
+  const { points: pts, pitchR, tipR, rootR } = gearOutline({
+    teeth, module: m, pressureAngle, profileSteps,
+  });
 
   const rounded = roundCorners(pts, m * 0.22, 2, 0.28);
   const shape = new THREE.Shape(rounded);
@@ -895,4 +910,162 @@ export function combine(list) {
   const merged = mergeAll(geos);
   geos.forEach((g) => g.dispose());
   return merged;
+}
+
+/* ------------------------------------------------------------------ */
+/* 追加の部品（後から増やした機械のために）                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 内歯車（リングギヤ）。えんぴつけずりの遊星機構などに使う。
+ *
+ * 外歯車の輪郭をピッチ円で内外反転（r → 2·pitchR − r）すると、
+ * 歯先が中心を向いた内歯の形になる。これを円板の穴として使う。
+ */
+export function ringGearGeometry({ teeth, module: m, thickness, outerR, pressureAngle = 20 * (Math.PI / 180) }) {
+  const { points, pitchR } = gearOutline({ teeth, module: m, pressureAngle, profileSteps: 5 });
+  const hole = points.map((p) => {
+    const r = p.length() || 1e-6;
+    const rr = 2 * pitchR - r;
+    return new THREE.Vector2((p.x / r) * rr, (p.y / r) * rr);
+  });
+  // 反転すると巻き方向が逆になるので、戻しておく
+  hole.reverse();
+
+  const outer = [];
+  const ro = outerR ?? pitchR + m * 2.6;
+  for (let i = 0; i < 64; i++) {
+    const a = (i / 64) * TAU;
+    outer.push(new THREE.Vector2(Math.cos(a) * ro, Math.sin(a) * ro));
+  }
+
+  const shape = new THREE.Shape(outer);
+  shape.holes.push(new THREE.Path(roundCorners(hole, m * 0.18, 2, 0.3)));
+
+  const bevel = Math.min(m * 0.14, thickness * 0.28);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness - bevel * 2,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 1,
+    steps: 1,
+    curveSegments: 10,
+    UVGenerator: radialUVGenerator(ro),
+  });
+  geo.translate(0, 0, -thickness / 2);
+  geo.rotateX(-Math.PI / 2);
+  return toCreasedNormals(geo, 0.62);
+}
+
+/** らせん状の切れ刃（えんぴつけずりのカッター）が通る曲線 */
+class TaperedHelix extends THREE.Curve {
+  constructor(r0, r1, height, turns, phase) {
+    super();
+    this.r0 = r0;
+    this.r1 = r1;
+    this.height = height;
+    this.turns = turns;
+    this.phase = phase;
+  }
+  getPoint(t, target = new THREE.Vector3()) {
+    const a = this.phase + t * TAU * this.turns;
+    const r = lerp(this.r0, this.r1, t);
+    return target.set(Math.cos(a) * r, (t - 0.5) * this.height, Math.sin(a) * r);
+  }
+}
+
+/**
+ * えんぴつけずりのらせん刃。
+ * 円錐台の本体に、ねじれた稜線（切れ刃）を何本か巻きつける。
+ */
+export function helicalCutter({ r0 = 0.0028, r1 = 0.0072, length = 0.026, flutes = 6, turns = 0.55, edge = 0.0009 }) {
+  const parts = [
+    lathe(
+      [
+        [0, -length / 2],
+        [r0, -length / 2],
+        [r1, length / 2],
+        [0, length / 2],
+      ],
+      { segments: 26, center: false },
+    ),
+  ];
+  for (let i = 0; i < flutes; i++) {
+    const curve = new TaperedHelix(r0 + edge * 0.5, r1 + edge * 0.5, length, turns, (i / flutes) * TAU);
+    parts.push(new THREE.TubeGeometry(curve, 26, edge, 4, false));
+  }
+  return mergeAll(parts);
+}
+
+/** 六角柱（えんぴつの軸） */
+export function hexPrism(acrossFlats, length, { corner = 0.0002 } = {}) {
+  const r = acrossFlats / Math.sqrt(3);
+  const pts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU + Math.PI / 6;
+    pts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+  }
+  const geo = extrudeOutline(pts, [], length, { corner, bevel: acrossFlats * 0.02, curveSegments: 4 });
+  geo.rotateX(Math.PI / 2); // 長さ方向を Y へ
+  return geo;
+}
+
+/**
+ * 削りかす。うずまきに巻いた薄い帯。
+ */
+export function shavingGeometry({ width = 0.008, turns = 1.6, r0 = 0.0022, r1 = 0.0048, samples = 26, seed = 0 }) {
+  const pts = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    const a = seed + t * TAU * turns;
+    const r = lerp(r0, r1, t);
+    pts.push(new THREE.Vector3(Math.cos(a) * r, (t - 0.5) * width * 0.35, Math.sin(a) * r));
+  }
+  const geo = makeRibbon({ segments: samples, width });
+  geo.userData.update(pts, false);
+  return geo;
+}
+
+/** 星形の輪郭 */
+export function starPoints(outer, inner, points = 5, rotate = -Math.PI / 2) {
+  const pts = [];
+  for (let i = 0; i < points * 2; i++) {
+    const a = rotate + (i / (points * 2)) * TAU;
+    const r = i % 2 === 0 ? outer : inner;
+    pts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+  }
+  return pts;
+}
+
+/** ハート形の輪郭 */
+export function heartPoints(size, steps = 40) {
+  const pts = [];
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * TAU;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    pts.push(new THREE.Vector2((x / 17) * size, (y / 17) * size));
+  }
+  return pts;
+}
+
+/**
+ * ガチャのカプセル（上下 2 色の球）。half = 'top' | 'bottom'
+ */
+export function capsuleHalf(radius, half = 'top', segments = 24) {
+  const pts = [];
+  const steps = 14;
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * (Math.PI / 2);
+    const r = Math.sin(a) * radius;
+    const y = Math.cos(a) * radius;
+    pts.push([r, half === 'top' ? y : -y]);
+  }
+  if (half === 'top') pts.reverse();
+  // ふちのつば
+  pts.push([radius * 1.02, half === 'top' ? -0.0002 : 0.0002]);
+  pts.push([radius * 0.96, 0]);
+  pts.push([0, 0]);
+  return lathe(pts, { segments, center: false, creaseAngle: 1.1 });
 }

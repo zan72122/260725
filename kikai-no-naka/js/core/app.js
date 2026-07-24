@@ -184,9 +184,16 @@ export class App {
 
     const previous = this.machine;
     if (previous) {
-      this._transition = { t: 0, out: previous, outMaterials: this.materials, in: null };
       this.stage.pivot.remove(previous.root);
-      this._pendingDispose = { machine: previous, materials: this.materials };
+      if (immediate) {
+        // 演出なしの切り替えなら、その場で捨てる
+        previous.dispose();
+        this.materials?.dispose();
+      } else {
+        this._transition = { t: 0, out: previous, in: null };
+        // 続けて何度も切り替えられても取りこぼさないよう、待ち行列にためる
+        (this._pendingDispose ||= []).push({ machine: previous, materials: this.materials });
+      }
     }
 
     this.audio.clearVoices();
@@ -231,7 +238,7 @@ export class App {
     this.savePrefs();
 
     if (!immediate) {
-      this._transition = this._transition || { t: 0, out: null, outMaterials: null };
+      this._transition = this._transition || { t: 0, out: null };
       this._transition.in = machine;
       machine.root.scale.setScalar(0.55);
       this.audio.chime(660, { gain: 0.13 });
@@ -388,8 +395,10 @@ export class App {
 
     if (k >= 1) {
       if (this._pendingDispose) {
-        this._pendingDispose.machine.dispose();
-        this._pendingDispose.materials?.dispose();
+        for (const d of this._pendingDispose) {
+          d.machine.dispose();
+          d.materials?.dispose();
+        }
         this._pendingDispose = null;
       }
       if (tr.in) {

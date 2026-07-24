@@ -207,10 +207,13 @@ export class AudioEngine {
       { ratio: 6.27, amp: 0.16, dec: decay * 0.22 },
       { ratio: 17.55, amp: 0.05, dec: decay * 0.08 },
     ];
+    const nyquist = this.ctx.sampleRate / 2;
     for (const p of partials) {
+      const f = freq * p.ratio;
+      if (f >= nyquist * 0.94) continue; // 聞こえない上に警告が出るだけ
       const osc = this.ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.value = freq * p.ratio;
+      osc.frequency.value = f;
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0, t);
       g.gain.linearRampToValueAtTime(p.amp, t + 0.004);

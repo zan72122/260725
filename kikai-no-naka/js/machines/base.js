@@ -71,6 +71,31 @@ export function hitCylinder(parent, radius, height, pos, rot) {
   return hitProxy(parent, new THREE.CylinderGeometry(radius, radius, height, 12, 1), { pos, rot });
 }
 
+/**
+ * 2点のあいだに棒を張る。長さと向きを毎フレーム作り直したいときに使う。
+ * ジオメトリは「ローカル +Y 方向に長さ 1」であること。
+ *
+ * @param {THREE.Mesh} m
+ * @param {THREE.Vector3} a
+ * @param {THREE.Vector3} b
+ */
+const _sbDir = new THREE.Vector3();
+const _sbUp = new THREE.Vector3(0, 1, 0);
+export function stretchBetween(m, a, b, thickness = 1) {
+  _sbDir.subVectors(b, a);
+  const len = _sbDir.length();
+  if (len < 1e-6) {
+    m.visible = false;
+    return 0;
+  }
+  m.visible = true;
+  m.position.copy(a).addScaledVector(_sbDir, 0.5);
+  m.scale.set(thickness, len, thickness);
+  _sbDir.divideScalar(len);
+  m.quaternion.setFromUnitVectors(_sbUp, _sbDir);
+  return len;
+}
+
 /* ------------------------------------------------------------------ */
 /* 機械の基底クラス                                                    */
 /* ------------------------------------------------------------------ */

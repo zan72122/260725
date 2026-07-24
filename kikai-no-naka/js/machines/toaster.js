@@ -285,7 +285,7 @@ export class Toaster extends Machine {
     this.springTop = 0.0050 + 0.0640;
 
     // パン
-    const bread = group({ parent: c, pos: [0, 0.0570, 0] });
+    const bread = group({ parent: c, pos: [0, 0.0620, 0] });
     this.breadGroup = bread;
     const shape = [];
     const w = 0.0250;
@@ -577,9 +577,9 @@ export class Toaster extends Machine {
     const c = this.char;
     // 白 → きつね色 → こげ茶 → 炭
     const col = this.mats.bread.color;
-    const r = lerp(lerp(1.0, 0.80, d), 0.18, c);
-    const g = lerp(lerp(0.98, 0.50, d), 0.12, c);
-    const b = lerp(lerp(0.90, 0.24, d), 0.10, c);
+    const r = lerp(lerp(0.98, 0.78, d), 0.18, c);
+    const g = lerp(lerp(0.90, 0.48, d), 0.12, c);
+    const b = lerp(lerp(0.72, 0.22, d), 0.10, c);
     col.setRGB(r, g, b);
     // 焼けているあいだは、うっすら熱を持って見える
     this.mats.bread.emissive.setRGB(0.28, 0.05, 0.0);
