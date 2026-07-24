@@ -19,6 +19,8 @@
     },
     soundOn: true,
     voiceOn: true,
+    trips: {},        // おでかけした かいすう（2かいめから みちのり短縮）
+    freshWash: false, // せんたくしたての ふくが タンスに ある
   };
 
   const RSave = {

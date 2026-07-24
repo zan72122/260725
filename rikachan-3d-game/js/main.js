@@ -112,6 +112,7 @@
 
       this.modes = {
         home: RHome,
+        travel: RTravel,
         dressup: RDressup,
         job_cake: RJobCake,
         job_idol: RJobIdol,
@@ -191,7 +192,7 @@
               { icon: '🎂', label: 'ケーキやさん', id: 'job_cake' },
               { icon: '🎤', label: 'アイドル', id: 'job_idol' },
               { icon: '💐', label: 'おはなやさん', id: 'job_flower' },
-            ], (id) => this.switchMode(id));
+            ], (id) => RTravel.start(id)); // げんかん→まち→おみせ の おでかけつき
           } else if (nav === 'help') {
             RUI.submenu('どの おてつだいに する？', [
               { icon: '🧹', label: 'おそうじ', id: 'help_clean' },
@@ -241,6 +242,7 @@
     },
 
     switchMode(name) {
+      RSeq.clear();
       if (this.mode && this.mode.exit) this.mode.exit();
       RWorld.clearParticles();
       RUI.hideAllGameUI();
@@ -261,6 +263,7 @@
         requestAnimationFrame(loop);
         const dt = Math.min(0.05, clock.getDelta());
         time += dt;
+        RSeq.update(dt);
         if (this.mode && this.mode.update) this.mode.update(time, dt);
         if (this.mode && this.mode.group) RWorld.updateEnvironment(this.mode.group, time, dt);
         RWorld.updateCamera(dt);

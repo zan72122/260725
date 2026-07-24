@@ -169,21 +169,30 @@
     wall.position.y = 2.5;
     group.add(wall);
 
-    // まど
+    // まど（ひらけるよう、ガラスは可動パネルにする）
     const win = new THREE.Group();
     const winFrame = box(2.2, 1.8, 0.12, 0xffffff);
-    const winSky = box(1.9, 1.5, 0.06, 0xa8dcff);
-    winSky.position.z = 0.04;
-    const winBar1 = box(0.08, 1.5, 0.14, 0xffffff); winBar1.position.z = 0.06;
-    const winBar2 = box(1.9, 0.08, 0.14, 0xffffff); winBar2.position.z = 0.06;
-    win.add(winFrame, winSky, winBar1, winBar2);
+    const winOpening = box(1.9, 1.5, 0.04, 0xa8dcff); // そとのそら
+    winOpening.position.z = 0.02;
+    const winPane = new THREE.Group(); // うごくガラス
+    const paneGlass = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.5, 0.05),
+      mat(0xd0ecff, { transparent: true, opacity: 0.55 }));
+    const winBar1 = box(0.08, 1.5, 0.1, 0xffffff); winBar1.position.z = 0.04;
+    const winBar2 = box(1.9, 0.08, 0.1, 0xffffff); winBar2.position.z = 0.04;
+    winPane.add(paneGlass, winBar1, winBar2);
+    winPane.position.z = 0.08;
+    win.add(winFrame, winOpening, winPane);
     win.position.set(0, 2.6, -6.7);
+    win.userData.pane = winPane;
+    win.userData.open = false;
     group.add(win);
     // カーテン
+    const curtains = [];
     [-1.25, 1.25].forEach((x) => {
       const cur = box(0.5, 2.1, 0.1, 0xffb3d9);
       cur.position.set(x, 2.6, -6.6);
       group.add(cur);
+      curtains.push(cur);
     });
 
     // ベッド
@@ -254,6 +263,47 @@
     toybox.add(ball, ball2);
     toybox.position.set(2.2, 0, -4.6);
     group.add(toybox);
+
+    /* ---- ここから おしゃれ・おてつだい用の家具 ---- */
+    // タンス（ひきだし開閉）＋うえに ぼうしばこ
+    const tansu = RProps.makeTansu();
+    tansu.position.set(-1.9, 0, -5.9);
+    tansu.rotation.y = 0.1;
+    group.add(tansu);
+    const hatBox = RProps.makeHatBox();
+    hatBox.position.set(0.1, 1.78, 0);
+    tansu.add(hatBox);
+
+    // ハンガーラック
+    const rack = RProps.makeHangerRack();
+    rack.position.set(0.7, 0, -6.0);
+    rack.rotation.y = -0.05;
+    group.add(rack);
+
+    // げんかんドア＋くつばこ
+    const door = RProps.makeDoor();
+    door.position.set(4.2, 0, -5.2);
+    door.rotation.y = -0.55;
+    group.add(door);
+    const shoeBox = RProps.makeShoeBox();
+    shoeBox.position.set(2.9, 0, -5.8);
+    shoeBox.rotation.y = -0.25;
+    group.add(shoeBox);
+    const matMesh = box(1.2, 0.04, 0.8, 0xff9ecd);
+    matMesh.position.set(4.0, 0.02, -4.2);
+    matMesh.rotation.y = -0.55;
+    group.add(matMesh);
+
+    // ゴミばこ・そうじロッカー
+    const trash = RProps.makeTrashBin();
+    trash.position.set(5.1, 0, -3.0);
+    group.add(trash);
+    const locker = RProps.makeLocker();
+    locker.position.set(-3.6, 0, -5.5);
+    locker.rotation.y = 0.35;
+    group.add(locker);
+
+    group.userData.refs = { win, winPane, curtains, tansu, hatBox, rack, door, shoeBox, trash, locker, dresser, bed, table, shelf, toybox, mat: matMesh };
   };
 
   /* ---------------- ねこの「ミルク」 ---------------- */
@@ -438,6 +488,75 @@
         grav: -1.5,
         life: 0.7 + Math.random() * 0.5,
         spin: new THREE.Vector3(4, 4, 0),
+        shrink: true,
+      });
+    }
+  };
+
+  // ほこりの もわもわ（ゆっくり のぼって きえる）
+  RWorld.dustPuff = function (pos, count) {
+    for (let i = 0; i < (count || 5); i++) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08 + Math.random() * 0.07, 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0xb8b8b8, transparent: true, opacity: 0.75 })
+      );
+      spawnParticle(m, {
+        pos: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.1, (Math.random() - 0.5) * 0.5)),
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.7 + Math.random() * 0.6, (Math.random() - 0.5) * 0.5),
+        grav: -0.15,
+        life: 0.9 + Math.random() * 0.6,
+        spin: new THREE.Vector3(0, 1, 0),
+        shrink: true,
+      });
+    }
+  };
+
+  // ゆげ（しろい もわもわ が のぼる）
+  RWorld.steam = function (pos, count) {
+    for (let i = 0; i < (count || 3); i++) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06 + Math.random() * 0.05, 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })
+      );
+      spawnParticle(m, {
+        pos: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3)),
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.8 + Math.random() * 0.4, (Math.random() - 0.5) * 0.2),
+        grav: 0.2,
+        life: 0.8 + Math.random() * 0.5,
+        spin: new THREE.Vector3(0, 0, 0),
+        shrink: true,
+      });
+    }
+  };
+
+  // いいにおいマーク（ピンクのハートが ゆらゆら ながれていく）
+  RWorld.smellDrift = function (pos, dir, count) {
+    for (let i = 0; i < (count || 2); i++) {
+      const h = RWorld.makeHeart(0xffb3d9, 0.5 + Math.random() * 0.3);
+      spawnParticle(h, {
+        pos: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.3, Math.random() * 0.2, 0)),
+        vel: dir.clone().multiplyScalar(0.8 + Math.random() * 0.4).add(new THREE.Vector3(0, 0.35 + Math.random() * 0.2, 0)),
+        grav: 0.05,
+        life: 1.6 + Math.random() * 0.7,
+        spin: new THREE.Vector3(0, 2, 0.6),
+        shrink: true,
+      });
+    }
+  };
+
+  // みずしぶき（じょうろ・せんたく）／いろをかえれば こむぎこ・きじ にも
+  RWorld.waterDrops = function (pos, count, spread, color) {
+    for (let i = 0; i < (count || 6); i++) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 6, 5),
+        new THREE.MeshBasicMaterial({ color: color || 0x7ec4e8, transparent: true, opacity: 0.85 })
+      );
+      spawnParticle(m, {
+        pos: pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * (spread || 0.3), 0, (Math.random() - 0.5) * (spread || 0.3))),
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, -0.5 - Math.random() * 0.8, (Math.random() - 0.5) * 0.4),
+        grav: -4,
+        life: 0.5 + Math.random() * 0.3,
+        spin: new THREE.Vector3(0, 0, 0),
         shrink: true,
       });
     }

@@ -104,6 +104,25 @@
     meow()     { const t = RAudio.ctx.currentTime; tone(700, t, 0.28, 'sawtooth', 0.1, null, 0.6); },
     gift()     { const t = RAudio.ctx.currentTime;
                  [784, 988, 1175, 1568, 2093].forEach((f, i) => tone(f, t + i * 0.07, 0.3, 'sine', 0.25)); },
+    step()     { const t = RAudio.ctx.currentTime; tone(160, t, 0.07, 'sine', 0.12, null, 0.6); },
+    kon()      { const t = RAudio.ctx.currentTime; tone(900, t, 0.05, 'square', 0.12, null, 0.8); noise(t, 0.03, 0.1, 3000); },
+    paka()     { const t = RAudio.ctx.currentTime; noise(t, 0.08, 0.2, 2000); tone(500, t + 0.03, 0.15, 'sine', 0.2, null, 1.6); },
+    pour()     { noise(RAudio.ctx.currentTime, 0.5, 0.14, 600); },
+    squeak()   { const t = RAudio.ctx.currentTime; tone(1300, t, 0.12, 'sine', 0.12, null, 1.5); },
+    pon()      { const t = RAudio.ctx.currentTime; tone(220, t, 0.16, 'sine', 0.4, null, 0.55); noise(t, 0.05, 0.12, 1500); },
+    clip()     { const t = RAudio.ctx.currentTime; tone(1500, t, 0.04, 'square', 0.1); },
+    beep()     { const t = RAudio.ctx.currentTime; tone(1760, t, 0.15, 'square', 0.15); tone(1760, t + 0.25, 0.15, 'square', 0.15); tone(1760, t + 0.5, 0.3, 'square', 0.15); },
+    rumble()   { noise(RAudio.ctx.currentTime, 0.4, 0.06, 150); },
+    rain()     { noise(RAudio.ctx.currentTime, 0.6, 0.1, 4000); },
+    gust()     { noise(RAudio.ctx.currentTime, 0.5, 0.16, 900); },
+    doorOpen() { const t = RAudio.ctx.currentTime; tone(300, t, 0.35, 'sine', 0.14, null, 1.8); noise(t, 0.15, 0.06, 1200); },
+    drawer()   { const t = RAudio.ctx.currentTime; noise(t, 0.2, 0.1, 700); tone(240, t, 0.2, 'sine', 0.1, null, 1.3); },
+    shakeCloth(){ noise(RAudio.ctx.currentTime, 0.12, 0.25, 1800); },
+    snip()     { const t = RAudio.ctx.currentTime; tone(2400, t, 0.05, 'square', 0.12); noise(t, 0.04, 0.15, 4000); },
+    chime()    { const t = RAudio.ctx.currentTime; [1568, 1319, 1047].forEach((f, i) => tone(f, t + i * 0.18, 0.5, 'sine', 0.2)); },
+    charin()   { const t = RAudio.ctx.currentTime; tone(2093, t, 0.08, 'square', 0.14); tone(2637, t + 0.06, 0.3, 'sine', 0.18); },
+    slide()    { noise(RAudio.ctx.currentTime, 0.25, 0.08, 500); },
+    thunk()    { const t = RAudio.ctx.currentTime; tone(120, t, 0.15, 'sine', 0.3, null, 0.5); },
   };
 
   RAudio.sfx = function (name, arg) {
@@ -190,17 +209,21 @@
     speechSynthesis.onvoiceschanged = pickVoice;
   }
 
-  RAudio.speak = function (text) {
+  RAudio.speak = function (text, opts) {
     if (!RAudio.voiceOn || !window.speechSynthesis) return;
+    opts = opts || {};
     try {
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'ja-JP';
       if (jaVoice) u.voice = jaVoice;
-      u.pitch = 1.5;
-      u.rate = 0.95;
+      u.pitch = opts.pitch !== undefined ? opts.pitch : 1.5;
+      u.rate = opts.rate !== undefined ? opts.rate : 0.95;
       u.volume = 0.9;
       speechSynthesis.speak(u);
     } catch (e) { /* no-op */ }
   };
+
+  // ママのこえ（すこしおちついたトーン）
+  RAudio.speakMama = function (text) { RAudio.speak(text, { pitch: 1.15, rate: 0.9 }); };
 })();

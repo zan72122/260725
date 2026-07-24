@@ -293,6 +293,88 @@ html, body {
 }
 #mg-action.with-toolbar { bottom: calc(env(safe-area-inset-bottom, 0px) + 15vmin); }
 
+/* ---------- スキップボタン ---------- */
+.skip-btn {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  z-index: 45;
+  font-family: inherit;
+  font-size: clamp(15px, 3.2vmin, 26px);
+  font-weight: bold;
+  color: #b0569a;
+  background: rgba(255,255,255,0.85);
+  border: 3px solid #ffb3d9;
+  border-radius: 30px;
+  padding: 1.4vmin 3.2vmin;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+}
+.skip-btn:active { transform: scale(0.92); }
+
+/* ---------- ハンコぽん 演出 ---------- */
+.stampanim-box {
+  position: relative;
+  background: #fff;
+  border: 5px solid #ff9ecd;
+  border-radius: 36px;
+  padding: 4vmin 5vmin 5vmin;
+  box-shadow: 0 12px 40px rgba(200,60,140,0.35);
+  text-align: center;
+}
+#sa-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1.6vmin;
+  margin: 2vmin auto;
+  width: min(64vw, 400px);
+}
+#sa-hanko {
+  position: absolute;
+  top: 8%;
+  right: 12%;
+  width: clamp(44px, 9vmin, 76px);
+  animation: hankoHover 0.9s ease-in-out infinite;
+  z-index: 2;
+}
+.hanko-grip {
+  width: 55%; margin: 0 auto;
+  height: clamp(34px, 7vmin, 60px);
+  background: linear-gradient(180deg, #e8b06a, #d9a066);
+  border-radius: 40% 40% 20% 20%;
+}
+.hanko-base {
+  width: 100%;
+  height: clamp(16px, 3.4vmin, 28px);
+  background: linear-gradient(180deg, #8a5a2b, #6a4520);
+  border-radius: 8px;
+  border-bottom: 4px solid #e84d6a;
+}
+@keyframes hankoHover {
+  0%,100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-8px) rotate(4deg); }
+}
+#sa-hanko.pressing {
+  animation: hankoPress 0.5s ease-in forwards;
+}
+@keyframes hankoPress {
+  0% { transform: translateY(0) rotate(-4deg); }
+  55% { transform: translateY(38%) rotate(0deg) scale(1.02); }
+  70% { transform: translateY(34%) scale(0.96, 1.06); }
+  100% { transform: translateY(36%); }
+}
+#sa-pon {
+  position: absolute;
+  top: 30%; right: 4%;
+  font-size: clamp(24px, 6vmin, 48px);
+  font-weight: bold;
+  color: #e8244d;
+  text-shadow: 2px 2px 0 #fff;
+  transform: rotate(12deg);
+  animation: stampIn 0.35s ease-out;
+  z-index: 3;
+}
+
 /* ---------- ほめポップアップ ---------- */
 #praise {
   position: absolute; top: 34%; left: 50%;

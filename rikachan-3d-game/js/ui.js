@@ -15,9 +15,22 @@
     hide(id) { $(id).classList.add('hidden'); },
 
     hideAllGameUI() {
-      ['homenav', 'dressup-ui', 'minigame-ui', 'submenu', 'reward', 'stampcard', 'present'].forEach(RUI.hide);
+      ['homenav', 'dressup-ui', 'minigame-ui', 'submenu', 'reward', 'stampcard', 'present', 'stampanim'].forEach(RUI.hide);
       RUI.hide('mg-guide'); RUI.hide('mg-toolbar'); RUI.hide('mg-action');
       $('mg-toolbar').innerHTML = '';
+      RUI.hideSkip();
+    },
+
+    /* ---------- スキップボタン（おでかけ・じゅんび を とばす） ---------- */
+    showSkip(onTap) {
+      const b = $('btn-skip');
+      b.classList.remove('hidden');
+      b.onclick = () => { RAudio.sfx('tap'); onTap(); };
+    },
+    hideSkip() {
+      const b = $('btn-skip');
+      b.classList.add('hidden');
+      b.onclick = null;
     },
 
     /* ---------- 上部バー ---------- */
