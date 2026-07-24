@@ -1,0 +1,17 @@
+{
+  "name": "じゃんがりあん ものがたり",
+  "short_name": "じゃんがりあん",
+  "description": "ちいさな ジャンガリアンハムスターと あそぶ 3D おにわゲーム",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#9fd9ff",
+  "theme_color": "#9fd9ff",
+  "icons": [
+    {
+      "src": "assets/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

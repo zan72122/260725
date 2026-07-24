@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="じゃんがりあん">
+<title>じゃんがりあん ものがたり</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ======= HUD ======= -->
+<div id="hud" class="hidden">
+  <div id="hud-left">
+    <div class="hud-chip" id="chip-seeds"><span class="chip-icon">🌻</span><span id="seed-count">0</span></div>
+    <div class="hud-chip" id="chip-stored"><span class="chip-icon">🏠</span><span id="stored-count">0</span></div>
+    <div class="hud-chip" id="chip-level"><span class="chip-icon">⭐</span><span id="level-num">1</span></div>
+    <div class="hud-chip" id="chip-pouch">
+      <span class="chip-icon">🐹</span>
+      <span id="pouch-dots">
+        <i class="pdot"></i><i class="pdot"></i><i class="pdot"></i>
+        <i class="pdot"></i><i class="pdot"></i><i class="pdot"></i>
+      </span>
+    </div>
+  </div>
+  <div id="hud-right">
+    <button class="round-btn small-btn" id="btn-sound" aria-label="おんがく">🎵</button>
+    <button class="round-btn small-btn" id="btn-daynight" aria-label="よるとひる">🌙</button>
+  </div>
+</div>
+
+<!-- ======= banner (mission / hints) ======= -->
+<div id="banner" class="hidden"></div>
+
+<!-- ======= big celebration message ======= -->
+<div id="big-msg" class="hidden"></div>
+
+<!-- ======= toast ======= -->
+<div id="toast" class="hidden"></div>
+
+<!-- ======= wheel gauge ======= -->
+<div id="gauge-wrap" class="hidden">
+  <div id="gauge-label">たっぷ たっぷ！ 🎡</div>
+  <div id="gauge-bar"><div id="gauge-fill"></div></div>
+</div>
+
+<!-- ======= action buttons ======= -->
+<div id="controls" class="hidden">
+  <div id="controls-left">
+    <button class="round-btn" id="btn-hat" aria-label="ぼうし">🎩</button>
+    <button class="round-btn" id="btn-hide" aria-label="かくれんぼ">🙈</button>
+    <button class="round-btn" id="btn-call" aria-label="おともだち">📣</button>
+  </div>
+  <div id="controls-right">
+    <button class="round-btn big-btn" id="btn-jump" aria-label="ジャンプ">ぴょん！</button>
+  </div>
+</div>
+
+<!-- ======= title screen ======= -->
+<div id="title-screen">
+  <div id="title-card">
+    <div id="title-hamster">🐹</div>
+    <h1 id="title-logo"><span>じゃんがりあん</span><span>ものがたり</span></h1>
+    <p id="title-sub">🌻 たねを あつめて あそぼう！ 🌻</p>
+    <button id="btn-start">はじめる ▶</button>
+    <p id="title-note">たてでも よこでも あそべるよ</p>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/hamster.js"></script>
+<script src="js/world.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
