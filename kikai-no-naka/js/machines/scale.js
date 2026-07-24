@@ -112,7 +112,9 @@ export class Scale extends Machine {
       needle: M.part('plastic', { color: 0xe0553f, roughness: 0.3 }),
       tick: M.part('plastic', { color: 0x77705c, roughness: 0.5 }),
       tickBold: M.part('plastic', { color: 0x3a3428, roughness: 0.45 }),
-      frame: M.part('coated', { color: 0xd7dee6, roughness: 0.42 }),
+      // わくは 少し沈んだ色にする。明るすぎると、手前のバネやピニオンが
+      // 白い板に溶けこんで、なにが動いているのか分からなくなる。
+      frame: M.part('coated', { color: 0xa8b4c1, roughness: 0.46 }),
       rubber: M.plain('rubber'),
 
       apple: M.part('plastic', { color: 0xe0553f, roughness: 0.28 }),

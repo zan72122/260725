@@ -207,6 +207,7 @@ export class App {
       tier: this.tier,
     });
     machine.build();
+    machine.adoptStrayShells();
     machine.setXray(this._xray);
     // 「ポンッ」と何かが飛び出したら、カメラを少し揺らす
     machine.onPop = () => this.rig.kick(0.9);

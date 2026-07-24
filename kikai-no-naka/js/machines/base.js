@@ -184,6 +184,26 @@ export class Machine {
     return object;
   }
 
+  /**
+   * すけすけ用マテリアルを使っているのに addShell() を通っていないメッシュを拾う。
+   *
+   * シェーダは差し替わっているので色だけ 0.42 倍に暗くなり、けれど
+   * transparent / depthWrite が切り替わらないので、いつまでも不透明のまま残る。
+   * 「中が見えるはずの場所に、黒っぽい板が 1 枚居座る」という形で出る。
+   * 組み立ての順番を間違えると簡単に起きるので、最後に必ずここで掃除する。
+   */
+  adoptStrayShells() {
+    const known = new Set(this.shellMeshes);
+    this.root.traverse((o) => {
+      if (!o.isMesh || o.userData.isHitProxy || known.has(o)) return;
+      const mat = o.material;
+      if (!mat || mat.userData?.shellBaseTransparent === undefined) return;
+      known.add(o);
+      this.shellMeshes.push(o);
+      o.userData.castShadowDefault = o.castShadow;
+    });
+  }
+
   /* ---------------------------------------------------------------- */
   /* ループ                                                            */
   /* ---------------------------------------------------------------- */
