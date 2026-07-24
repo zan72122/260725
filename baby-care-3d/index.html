@@ -41,8 +41,8 @@
 
   /* need meters (top) */
   #meters {
-    position:absolute; top:calc(env(safe-area-inset-top, 0px) + 1.2vmin); left:50%; transform:translateX(-50%);
-    display:flex; gap:1.6vmin; pointer-events:none;
+    position:absolute; top:calc(env(safe-area-inset-top, 0px) + 1.2vmin); left:0; right:0;
+    display:flex; gap:1.6vmin; pointer-events:none; justify-content:center;
   }
   .meter { width:15vmin; max-width:92px; background:rgba(255,255,255,.85); border-radius:3vmin; padding:1vmin 1.2vmin; box-shadow:0 .6vmin 1.2vmin rgba(0,0,0,.12); text-align:center; }
   .meter .micon { font-size:4.6vmin; line-height:1.15; }
@@ -76,8 +76,8 @@
 
   /* activity buttons (bottom bar) */
   #activity-bar {
-    position:absolute; bottom:calc(env(safe-area-inset-bottom, 0px) + 1.4vmin); left:50%; transform:translateX(-50%);
-    display:flex; gap:2vmin; pointer-events:none;
+    position:absolute; bottom:calc(env(safe-area-inset-bottom, 0px) + 1.4vmin); left:0; right:0;
+    display:flex; gap:2vmin; pointer-events:none; justify-content:center;
   }
   .act-btn {
     pointer-events:auto; border:none; cursor:pointer; width:16vmin; height:16vmin; min-width:64px; min-height:64px; max-width:110px; max-height:110px;
@@ -98,13 +98,13 @@
 
   /* contextual panel (feed foods / dress swatches) */
   #context-panel {
-    position:absolute; left:50%; transform:translateX(-50%);
-    bottom:calc(env(safe-area-inset-bottom, 0px) + 20vmin);
-    display:flex; gap:1.6vmin; pointer-events:none; flex-wrap:wrap; justify-content:center; max-width:96vw;
+    position:absolute; left:0; right:0; margin:0 auto;
+    bottom:calc(env(safe-area-inset-bottom, 0px) + 18.5vmin);
+    display:flex; gap:1.2vmin; pointer-events:none; flex-wrap:wrap; justify-content:center; max-width:96vw;
   }
   .ctx-btn {
-    pointer-events:auto; border:none; cursor:pointer; width:12vmin; height:12vmin; min-width:52px; min-height:52px; max-width:88px; max-height:88px;
-    border-radius:50%; background:rgba(255,255,255,.92); font-size:6.4vmin;
+    pointer-events:auto; border:none; cursor:pointer; width:10.5vmin; height:10.5vmin; min-width:50px; min-height:50px; max-width:72px; max-height:72px;
+    border-radius:50%; background:rgba(255,255,255,.92); font-size:5.6vmin;
     box-shadow:0 .8vmin 0 rgba(0,0,0,.08), 0 1.2vmin 2vmin rgba(0,0,0,.15);
     display:flex; align-items:center; justify-content:center; transition:transform .15s;
   }
@@ -187,7 +187,7 @@
     #activity-bar { flex-direction:column; left:auto; right:1.4vmin; bottom:50%; transform:translateY(50%); gap:1.4vmin; }
     .act-btn { width:13vmin; height:13vmin; }
     #context-panel { bottom:calc(env(safe-area-inset-bottom, 0px) + 2vmin); max-width:70vw; }
-    #meters { left:1.6vmin; transform:none; }
+    #meters { left:1.6vmin; right:auto; justify-content:flex-start; }
   }
 </style>
 </head>
@@ -242,10 +242,15 @@
 <script src="lib/three.min.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/particles.js"></script>
+<script src="src/care.js"></script>
 <script src="src/baby.js"></script>
 <script src="src/world.js"></script>
 <script src="src/ui.js"></script>
-<script src="src/activities.js"></script>
+<script src="src/activities/feed.js"></script>
+<script src="src/activities/bath.js"></script>
+<script src="src/activities/dress.js"></script>
+<script src="src/activities/play.js"></script>
+<script src="src/activities/sleep.js"></script>
 <script src="src/main.js"></script>
 </body>
 </html>

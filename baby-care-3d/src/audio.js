@@ -188,8 +188,149 @@
     },
     drum: function () {
       tone({ freq: 150, freqEnd: 60, type: 'sine', dur: 0.18, vol: 0.4 });
+    },
+    /* ---- ごはん用 ---- */
+    suck: function () {
+      // ちゅうちゅう（ほにゅうびん）
+      noise({ dur: 0.16, vol: 0.16, filterFreq: 700, freqEnd: 350, type: 'bandpass', filterQ: 3 });
+      tone({ freq: 240, freqEnd: 180, type: 'sine', dur: 0.14, vol: 0.12 });
+    },
+    puha: function () {
+      // のみおわり「ぷはー」
+      noise({ dur: 0.45, vol: 0.18, filterFreq: 1300, freqEnd: 500, type: 'bandpass', filterQ: 0.7 });
+      tone({ freq: 500, freqEnd: 280, type: 'sine', dur: 0.4, vol: 0.14, attack: 0.06 });
+    },
+    burp: function () {
+      // げっぷ
+      tone({ freq: 130, freqEnd: 70, type: 'sawtooth', dur: 0.32, vol: 0.22, attack: 0.03 });
+      tone({ freq: 95, freqEnd: 55, type: 'square', dur: 0.3, vol: 0.1, when: 0.05 });
+      noise({ dur: 0.28, vol: 0.1, filterFreq: 420, freqEnd: 180, type: 'lowpass', filterQ: 3 });
+    },
+    strawStab: function () {
+      // ストロー「プスッ」
+      noise({ dur: 0.07, vol: 0.32, filterFreq: 2600, freqEnd: 700, type: 'bandpass', filterQ: 2 });
+      tone({ freq: 900, freqEnd: 300, type: 'triangle', dur: 0.06, vol: 0.16 });
+    },
+    slurp: function () {
+      // さいごの「ズゾゾー」
+      noise({ dur: 0.7, vol: 0.26, filterFreq: 1500, freqEnd: 300, type: 'bandpass', filterQ: 4 });
+      tone({ freq: 350, freqEnd: 130, type: 'sawtooth', dur: 0.65, vol: 0.07 });
+    },
+    peel: function () {
+      // かわを「びりっ」
+      noise({ dur: 0.18, vol: 0.3, filterFreq: 1800, freqEnd: 3600, type: 'bandpass', filterQ: 1.5 });
+    },
+    pat: function () {
+      // せなか・むねをとんとん
+      tone({ freq: 130, freqEnd: 85, type: 'sine', dur: 0.1, vol: 0.28 });
+      noise({ dur: 0.06, vol: 0.08, filterFreq: 500, type: 'lowpass' });
+    },
+    refuse: function () {
+      // いやいや（ぷいっ）
+      tone({ freq: 400, freqEnd: 340, type: 'triangle', dur: 0.12, vol: 0.2 });
+      tone({ freq: 360, freqEnd: 300, type: 'triangle', dur: 0.14, vol: 0.2, when: 0.14 });
+    },
+    /* ---- あそぶ用 ---- */
+    crash: function () {
+      // つみきが「ガッシャーン」
+      noise({ dur: 0.5, vol: 0.5, filterFreq: 2400, freqEnd: 300, type: 'lowpass', filterQ: 1 });
+      var ns = [520, 390, 300, 240];
+      for (var i = 0; i < ns.length; i++) {
+        tone({ freq: ns[i], freqEnd: ns[i] * 0.6, type: 'square', dur: 0.16, vol: 0.08, when: i * 0.07 });
+      }
+    },
+    bounce: function () {
+      // ふうせんを「ポン」
+      tone({ freq: 300, freqEnd: 520, type: 'sine', dur: 0.12, vol: 0.3 });
+    },
+    pofu: function () {
+      // ゆかに「ぽふっ」
+      noise({ dur: 0.14, vol: 0.2, filterFreq: 500, freqEnd: 200, type: 'lowpass' });
+      tone({ freq: 170, freqEnd: 110, type: 'sine', dur: 0.14, vol: 0.16 });
+    },
+    taikoLow: function () {
+      tone({ freq: 120, freqEnd: 55, type: 'sine', dur: 0.28, vol: 0.5 });
+      noise({ dur: 0.05, vol: 0.1, filterFreq: 900, type: 'lowpass' });
+    },
+    taikoHigh: function () {
+      tone({ freq: 260, freqEnd: 160, type: 'sine', dur: 0.14, vol: 0.36 });
+      noise({ dur: 0.04, vol: 0.14, filterFreq: 2400, type: 'highpass' });
+    },
+    peekabooCall: function () {
+      // 「いない いない…」
+      tone({ freq: 392, type: 'triangle', dur: 0.18, vol: 0.18 });
+      tone({ freq: 392, type: 'triangle', dur: 0.18, vol: 0.18, when: 0.28 });
+    },
+    peekabooBaa: function () {
+      // 「ばあ！」
+      tone({ freq: 523.25, freqEnd: 784, type: 'square', dur: 0.3, vol: 0.14 });
+      tone({ freq: 659.25, freqEnd: 988, type: 'square', dur: 0.3, vol: 0.12, when: 0.02 });
+      noise({ dur: 0.12, vol: 0.1, filterFreq: 3000, type: 'highpass' });
+    },
+    /* ---- おふろ・みだしなみ用 ---- */
+    pour: function () {
+      // じゃばじゃばおゆはり
+      noise({ dur: 0.9, vol: 0.22, filterFreq: 900, freqEnd: 1400, type: 'bandpass', filterQ: 0.8 });
+    },
+    sneeze: function () {
+      // 「ハックション！」
+      tone({ freq: 600, freqEnd: 900, type: 'sine', dur: 0.18, vol: 0.16 });
+      noise({ dur: 0.22, vol: 0.34, filterFreq: 2200, freqEnd: 500, type: 'bandpass', filterQ: 1, when: 0.2 });
+      tone({ freq: 500, freqEnd: 200, type: 'sine', dur: 0.25, vol: 0.18, when: 0.2 });
+    },
+    shiver: function () {
+      // ぶるぶる
+      for (var i = 0; i < 4; i++) {
+        tone({ freq: 300 + (i % 2) * 40, type: 'triangle', dur: 0.06, vol: 0.1, when: i * 0.07 });
+      }
+    },
+    dryer: function () {
+      // ドライヤー「ブオー」
+      noise({ dur: 1.2, vol: 0.2, filterFreq: 600, freqEnd: 900, type: 'bandpass', filterQ: 0.6 });
+      tone({ freq: 110, type: 'sawtooth', dur: 1.1, vol: 0.06 });
+    },
+    stink: function () {
+      // 「くさい！」コミカルな下降ワウ
+      tone({ freq: 380, freqEnd: 200, type: 'sawtooth', dur: 0.35, vol: 0.12 });
+      tone({ freq: 300, freqEnd: 150, type: 'sawtooth', dur: 0.4, vol: 0.1, when: 0.3 });
+    },
+    washer: function () {
+      // せんたくきゴトゴト
+      noise({ dur: 0.5, vol: 0.14, filterFreq: 300, freqEnd: 500, type: 'lowpass', filterQ: 2 });
+      tone({ freq: 90, freqEnd: 120, type: 'sine', dur: 0.45, vol: 0.12 });
+    },
+    brush: function () {
+      // はみがきシャカシャカ
+      noise({ dur: 0.09, vol: 0.2, filterFreq: 3600, freqEnd: 2600, type: 'bandpass', filterQ: 2 });
+    },
+    spit: function () {
+      // 「ぺっ」
+      noise({ dur: 0.12, vol: 0.24, filterFreq: 1400, freqEnd: 400, type: 'bandpass', filterQ: 1.5 });
+      tone({ freq: 300, freqEnd: 140, type: 'sine', dur: 0.12, vol: 0.12, when: 0.05 });
+    },
+    pageTurn: function () {
+      // ページをめくる
+      noise({ dur: 0.2, vol: 0.16, filterFreq: 1600, freqEnd: 3400, type: 'bandpass', filterQ: 1 });
+    },
+    kenken: function () {
+      // けんけんバランス
+      tone({ freq: 220, freqEnd: 420, type: 'sine', dur: 0.14, vol: 0.2 });
+    },
+    hairFlutter: function () {
+      noise({ dur: 0.3, vol: 0.1, filterFreq: 1200, freqEnd: 2000, type: 'bandpass', filterQ: 0.8 });
     }
   };
+
+  /* 楽器用：任意の音程を鳴らす（木琴・たいこ以外にも使える） */
+  function playNote(freq, kind) {
+    if (!ensureCtx() || muted) return;
+    if (kind === 'xylo') {
+      tone({ freq: freq, type: 'triangle', dur: 0.5, vol: 0.26, attack: 0.005 });
+      tone({ freq: freq * 3, type: 'sine', dur: 0.22, vol: 0.08, attack: 0.005 });
+    } else {
+      tone({ freq: freq, type: 'triangle', dur: 0.35, vol: 0.2 });
+    }
+  }
 
   /* ---------- BGM（16分音符ステップシーケンサ） ----------
    * 配列: [メロディ半音番号 or null, ...]  A4=69 基準の MIDI ノート
@@ -278,6 +419,7 @@
       if (muted) return;
       if (SFX[name]) SFX[name]();
     },
+    note: playNote,
     startMusic: startMusic,
     stopMusic: stopMusic,
     setMuted: function (m) {

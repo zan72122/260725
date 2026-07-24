@@ -14,6 +14,8 @@
   var currentName = '';
   var saveTimer = 0;
   var sadTimer = 0;
+  var wetTimer = 9;
+  var idleTimer = 8;
 
   var METER_DECAY = { food: 0.010, clean: 0.007, happy: 0.009, sleep: 0.006 };
   var METER_ACT = { food: 'feed', clean: 'bath', happy: 'play', sleep: 'sleep' };
@@ -93,6 +95,19 @@
     });
     baby.group.position.set(0, 0, 0.5);
     scene.add(baby.group);
+
+    // 場面をまたぐ痕跡の復元（シミ・はだか・天気・ちらかり・口まわり）
+    world.setWeather(CARE.state.weather);
+    world.setMess(CARE.state.toysOut);
+    if (CARE.state.naked) {
+      baby.setNaked(true);
+    } else {
+      baby.setOutfitStyle(CARE.state.outfitStyle);
+      for (var si = 0; si < CARE.state.clothesStains.length; si++) {
+        baby.addStain(CARE.state.clothesStains[si]);
+      }
+    }
+    if (CARE.state.mouthDirt > 0.2) baby.addCrumbDots(2);
 
     clock = new THREE.Clock();
 
@@ -184,10 +199,12 @@
       var v = m[k] - METER_DECAY[k] * dt * 0.35;
       UI.setMeter(k, Math.max(0.05, v));
     }
-    // バッジ表示
-    for (var k2 in METER_ACT) {
-      UI.setNeedy(METER_ACT[k2], m[k2] < 0.3 && METER_ACT[k2] !== currentName);
-    }
+    // バッジ表示（メーター + 痕跡の連鎖）
+    UI.setNeedy('feed', m.food < 0.3 && currentName !== 'feed');
+    UI.setNeedy('bath', (m.clean < 0.3 || CARE.state.mouthDirt > 0.5) && currentName !== 'bath');
+    UI.setNeedy('sleep', m.sleep < 0.3 && currentName !== 'sleep');
+    UI.setNeedy('play', (m.happy < 0.3 || CARE.state.toysOut > 0) && currentName !== 'play');
+    UI.setNeedy('dress', (CARE.state.naked || CARE.state.clothesStains.length > 0) && currentName !== 'dress');
     // げんきがないとしょんぼり（ねんね中いがい）
     var minV = Math.min(m.food, m.clean, m.happy, m.sleep);
     if (minV < 0.18 && baby.mood === 'idle' && currentName !== 'sleep') {
@@ -199,6 +216,51 @@
         setTimeout(function () {
           if (baby.mood === 'sad') baby.setMood('idle');
         }, 1600);
+      }
+    }
+
+    // ふきのこしの痕跡：おふろのあとぬれたまま → ときどきハックション
+    if (CARE.state.wet && currentName !== 'bath') {
+      wetTimer -= dt;
+      if (wetTimer <= 0) {
+        wetTimer = 9;
+        SND.play('sneeze');
+        baby.setMood('surprised');
+        baby.giggle();
+        UI.bigFeedback('🤧');
+        FX.burst('drops', new THREE.Vector3(
+          baby.group.position.x, baby.group.position.y + 1.2, baby.group.position.z
+        ), 4);
+        setTimeout(function () {
+          if (baby.mood === 'surprised') baby.setMood('idle');
+        }, 1200);
+      }
+    }
+
+    // 自発行動：ほしいものを指差してアピール（ガイドつき操作のさいちゅうはしない）
+    var busy = current && current.isBusy && current.isBusy();
+    if (!busy && currentName !== 'sleep' && currentName !== 'bath' && baby.mood === 'idle') {
+      idleTimer -= dt;
+      if (idleTimer <= 0) {
+        idleTimer = 8 + Math.random() * 5;
+        var wants = null;
+        if (m.food < 0.35) wants = '🍎';
+        else if (m.clean < 0.35) wants = '🛁';
+        else if (m.sleep < 0.35) wants = '💤';
+        else if (m.happy < 0.35) wants = '🎈';
+        if (wants) {
+          baby.pointTo(Math.random() < 0.5 ? -1 : 1, 1.8);
+          var hw = new THREE.Vector3();
+          baby.head.getWorldPosition(hw);
+          hw.y += 0.5;
+          var sp = G.project(hw);
+          UI.showThought(wants, sp.x, sp.y);
+          setTimeout(function () { UI.hideThought(); }, 2400);
+        } else if (Math.random() < 0.35) {
+          // ごきげんならバイバイやおててをふる
+          baby.wave();
+          SND.play('happyBaby');
+        }
       }
     }
   }
@@ -267,6 +329,7 @@
   /* ---------- エントリーポイント ---------- */
 
   window.addEventListener('load', function () {
+    CARE.load();
     UI.init({ onActivity: switchActivity });
     makeTitleClouds();
     init();

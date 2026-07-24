@@ -194,6 +194,107 @@
     this.mobile.add(mobileBar);
     this.mobile.position.set(1.8, 3.6, -1.5);
     scene.add(this.mobile);
+
+    /* --- てんじょうランプ（ねんね用スイッチつき） --- */
+    this.lamp = new THREE.Group();
+    var cord = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.7, 6), lambert(0xcccccc));
+    cord.position.y = 0.55;
+    this.lamp.add(cord);
+    var shade = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.3, 16, 1, true), lambert(0xffc9d6));
+    shade.material.side = THREE.DoubleSide;
+    shade.position.y = 0.18;
+    this.lamp.add(shade);
+    this.bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10),
+      new THREE.MeshBasicMaterial({ color: 0xfff2b8 }));
+    this.lamp.add(this.bulb);
+    this.lampLight = new THREE.PointLight(0xffe9b8, 0, 7);
+    this.lamp.add(this.lampLight);
+    this.lamp.position.set(-0.9, 3.3, -0.8);
+    scene.add(this.lamp);
+    this.lampOn = false;
+
+    /* --- あめ（まどのそと） --- */
+    this.rainDrops = [];
+    var rainMat = new THREE.MeshBasicMaterial({ color: 0xbfe4ff, transparent: true, opacity: 0.8 });
+    for (var r = 0; r < 14; r++) {
+      var drop = new THREE.Mesh(new THREE.PlaneGeometry(0.02, 0.14), rainMat.clone());
+      drop.position.set(-1.9 + (Math.random() - 0.5) * 2.1, 2.6 + (Math.random() - 0.5) * 1.6, -3.135);
+      drop.visible = false;
+      scene.add(drop);
+      this.rainDrops.push(drop);
+    }
+    this.weather = 'sunny';
+
+    /* --- ちらかったおもちゃ（お片付けまで残る痕跡） --- */
+    this.messGroup = new THREE.Group();
+    var messDefs = [
+      { kind: 'block', color: 0xff6fa5, x: -1.7, z: 1.3, r: 0.5 },
+      { kind: 'block', color: 0x7fd8ff, x: 1.9, z: 0.9, r: 1.2 },
+      { kind: 'block', color: 0xffd44d, x: -2.3, z: 0.2, r: 2.1 },
+      { kind: 'ball', color: 0x9dff8a, x: 2.4, z: 1.5, r: 0 },
+      { kind: 'block', color: 0xc9a6ff, x: -1.2, z: 1.8, r: 0.8 },
+      { kind: 'ball', color: 0xffab6b, x: 1.4, z: 1.9, r: 0 }
+    ];
+    this.messToys = [];
+    for (var mt = 0; mt < messDefs.length; mt++) {
+      var def = messDefs[mt];
+      var toy;
+      if (def.kind === 'block') {
+        toy = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), lambert(def.color));
+        toy.position.set(def.x, 0.1, def.z);
+        toy.rotation.y = def.r;
+      } else {
+        toy = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), lambert(def.color));
+        toy.position.set(def.x, 0.13, def.z);
+      }
+      toy.visible = false;
+      this.messGroup.add(toy);
+      this.messToys.push(toy);
+    }
+    scene.add(this.messGroup);
+
+    this.curtainClose = 0; // 0=あいてる 1=しまってる
+    this._curtBaseL = this.curtL.position.x;
+    this._curtBaseR = this.curtR.position.x;
+  };
+
+  /* ---------- 天気（雨のときは、そらとまどが変わる） ---------- */
+
+  World.prototype.setWeather = function (w) {
+    this.weather = w;
+    var rain = w === 'rain';
+    for (var i = 0; i < this.rainDrops.length; i++) this.rainDrops[i].visible = rain && this.night < 0.5;
+    this.setNight(this.night); // そら色を再計算
+  };
+
+  /* ---------- カーテン（0=あける 1=しめる） ---------- */
+
+  World.prototype.setCurtains = function (f) {
+    this.curtainClose = Math.max(0, Math.min(1, f));
+    var winCenter = -1.9;
+    // とじると、まどのまんなかへ広がる
+    var targetL = winCenter - 0.6, targetR = winCenter + 0.6;
+    this.curtL.position.x = this._curtBaseL + (targetL - this._curtBaseL) * this.curtainClose;
+    this.curtR.position.x = this._curtBaseR + (targetR - this._curtBaseR) * this.curtainClose;
+    var sc = 1 + this.curtainClose * 2.0;
+    this.curtL.scale.x = sc;
+    this.curtR.scale.x = sc;
+  };
+
+  /* ---------- ランプ ---------- */
+
+  World.prototype.setLampOn = function (on) {
+    this.lampOn = on;
+    this.bulb.material.color.setHex(on ? 0xfff2b8 : 0x9a8a72);
+    this.lampLight.intensity = on ? 0.9 : 0;
+  };
+
+  /* ---------- ちらかり（0〜6こ） ---------- */
+
+  World.prototype.setMess = function (n) {
+    for (var i = 0; i < this.messToys.length; i++) {
+      this.messToys[i].visible = i < n;
+    }
   };
 
   /* ---------- 昼夜切り替え（f: 0=ひる 1=よる） ---------- */
@@ -205,12 +306,26 @@
     this.dir.intensity = 0.12 + day * 0.26;
     this.nightLight.intensity = f * 0.9;
 
-    this.skyMat.color.setRGB(
-      0.62 * day + 0.08 * f,
-      0.85 * day + 0.07 * f,
-      1.0 * day + 0.25 * f
-    );
-    this.sun.visible = f < 0.5;
+    if (this.weather === 'rain') {
+      // あめのそら（はいいろ）
+      this.skyMat.color.setRGB(
+        0.55 * day + 0.08 * f,
+        0.6 * day + 0.07 * f,
+        0.68 * day + 0.25 * f
+      );
+    } else {
+      this.skyMat.color.setRGB(
+        0.62 * day + 0.08 * f,
+        0.85 * day + 0.07 * f,
+        1.0 * day + 0.25 * f
+      );
+    }
+    this.sun.visible = f < 0.5 && this.weather !== 'rain';
+    if (this.rainDrops) {
+      for (var rd = 0; rd < this.rainDrops.length; rd++) {
+        this.rainDrops[rd].visible = this.weather === 'rain' && f < 0.5;
+      }
+    }
     this.moon.visible = f >= 0.5;
     for (var i = 0; i < this.windowStars.length; i++) {
       this.windowStars[i].material.opacity = Math.max(0, f - 0.4) / 0.6;
@@ -222,6 +337,17 @@
 
   World.prototype.update = function (dt, t) {
     this.mobile.rotation.y = t * 0.4;
+    // あめつぶ
+    if (this.weather === 'rain') {
+      for (var r = 0; r < this.rainDrops.length; r++) {
+        var drop = this.rainDrops[r];
+        drop.position.y -= dt * 2.2;
+        if (drop.position.y < 1.7) {
+          drop.position.y = 3.5;
+          drop.position.x = -1.9 + (Math.random() - 0.5) * 2.1;
+        }
+      }
+    }
     // まどのくもをゆっくりながす
     for (var i = 0; i < this.clouds.length; i++) {
       var c = this.clouds[i];
