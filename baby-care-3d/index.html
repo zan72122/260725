@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>あかちゃん おせわランド 3D</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html, body { width:100%; height:100%; overflow:hidden; position:fixed; background:#ffe9f0; font-family:'Hiragino Maru Gothic ProN','ヒラギノ丸ゴ ProN W4','Rounded Mplus 1c','M PLUS Rounded 1c','Comic Sans MS',sans-serif; touch-action:none; }
+  #game-canvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  /* ============ Title screen ============ */
+  #title-screen {
+    position:absolute; inset:0; z-index:50;
+    background:linear-gradient(180deg,#ffd6e8 0%,#ffe9f0 45%,#d6f0ff 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:4vmin; transition:opacity .6s ease; overflow:hidden;
+  }
+  #title-screen.hidden { opacity:0; pointer-events:none; }
+  #title-logo { font-size:8vmin; font-weight:bold; color:#ff6fa5; text-shadow:0 .8vmin 0 #fff, 0 1.2vmin 2vmin rgba(255,111,165,.35); text-align:center; line-height:1.3; z-index:2; }
+  #title-logo .sub { display:block; font-size:4.2vmin; color:#8ec9ff; text-shadow:0 .5vmin 0 #fff; }
+  #title-baby { font-size:22vmin; line-height:1; animation:bob 2.2s ease-in-out infinite; z-index:2; filter:drop-shadow(0 2vmin 2vmin rgba(255,111,165,.3)); }
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(-4deg);} 50%{transform:translateY(-3vmin) rotate(4deg);} }
+  #start-btn {
+    font-family:inherit; font-size:6vmin; font-weight:bold; color:#fff; border:none; cursor:pointer;
+    background:linear-gradient(180deg,#ffa1c4,#ff6fa5); border-radius:6vmin; padding:3vmin 10vmin;
+    box-shadow:0 1.4vmin 0 #e0538c, 0 2.4vmin 3vmin rgba(255,111,165,.4); z-index:2;
+    animation:pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.07);} }
+  #start-btn:active { transform:translateY(1vmin) scale(.98); box-shadow:0 .4vmin 0 #e0538c; }
+  .cloud { position:absolute; background:#fff; border-radius:50%; opacity:.85; animation:drift linear infinite; }
+  @keyframes drift { from{transform:translateX(-30vw);} to{transform:translateX(130vw);} }
+
+  /* ============ HUD ============ */
+  #hud { position:absolute; inset:0; z-index:10; pointer-events:none; opacity:0; transition:opacity .6s; }
+  #hud.visible { opacity:1; }
+
+  /* need meters (top) */
+  #meters {
+    position:absolute; top:calc(env(safe-area-inset-top, 0px) + 1.2vmin); left:50%; transform:translateX(-50%);
+    display:flex; gap:1.6vmin; pointer-events:none;
+  }
+  .meter { width:15vmin; max-width:92px; background:rgba(255,255,255,.85); border-radius:3vmin; padding:1vmin 1.2vmin; box-shadow:0 .6vmin 1.2vmin rgba(0,0,0,.12); text-align:center; }
+  .meter .micon { font-size:4.6vmin; line-height:1.15; }
+  .meter .bar { height:1.8vmin; min-height:7px; background:#eee; border-radius:1vmin; overflow:hidden; margin-top:.6vmin; }
+  .meter .fill { height:100%; width:100%; border-radius:1vmin; transition:width .5s ease; }
+  .meter.low { animation:meterAlert 1s ease-in-out infinite; }
+  @keyframes meterAlert { 0%,100%{transform:scale(1);} 50%{transform:scale(1.12);} }
+  #m-food .fill  { background:linear-gradient(90deg,#ffb84d,#ff8a3d); }
+  #m-clean .fill { background:linear-gradient(90deg,#7fd8ff,#3db3ff); }
+  #m-happy .fill { background:linear-gradient(90deg,#ffd44d,#ffb13d); }
+  #m-sleep .fill { background:linear-gradient(90deg,#c9a6ff,#9a6fff); }
+
+  /* star counter */
+  #star-box {
+    position:absolute; top:calc(env(safe-area-inset-top, 0px) + 1.2vmin); right:1.6vmin;
+    background:rgba(255,255,255,.9); border-radius:3vmin; padding:1.2vmin 2.2vmin;
+    font-size:4.6vmin; font-weight:bold; color:#f5a623; box-shadow:0 .6vmin 1.2vmin rgba(0,0,0,.12);
+    pointer-events:auto; display:flex; align-items:center; gap:.8vmin;
+  }
+  #star-box.bump { animation:starBump .5s ease; }
+  @keyframes starBump { 0%{transform:scale(1);} 40%{transform:scale(1.35) rotate(-6deg);} 100%{transform:scale(1);} }
+
+  /* sound + sticker buttons */
+  #corner-btns { position:absolute; top:calc(env(safe-area-inset-top, 0px) + 1.2vmin); left:1.6vmin; display:flex; gap:1.4vmin; }
+  .round-btn {
+    pointer-events:auto; width:9vmin; height:9vmin; min-width:48px; min-height:48px; border:none; cursor:pointer;
+    border-radius:50%; background:rgba(255,255,255,.9); font-size:4.6vmin;
+    box-shadow:0 .6vmin 1.2vmin rgba(0,0,0,.15); display:flex; align-items:center; justify-content:center;
+  }
+  .round-btn:active { transform:scale(.9); }
+
+  /* activity buttons (bottom bar) */
+  #activity-bar {
+    position:absolute; bottom:calc(env(safe-area-inset-bottom, 0px) + 1.4vmin); left:50%; transform:translateX(-50%);
+    display:flex; gap:2vmin; pointer-events:none;
+  }
+  .act-btn {
+    pointer-events:auto; border:none; cursor:pointer; width:16vmin; height:16vmin; min-width:64px; min-height:64px; max-width:110px; max-height:110px;
+    border-radius:4vmin; background:rgba(255,255,255,.92); box-shadow:0 1vmin 0 rgba(0,0,0,.08), 0 1.6vmin 2.4vmin rgba(0,0,0,.15);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.4vmin;
+    transition:transform .15s ease; position:relative;
+  }
+  .act-btn .aicon { font-size:7vmin; line-height:1.1; }
+  .act-btn .alabel { font-size:2.6vmin; font-weight:bold; color:#a76; }
+  .act-btn.active { background:linear-gradient(180deg,#fff3b8,#ffe27a); transform:translateY(-1.4vmin) scale(1.08); }
+  .act-btn:active { transform:scale(.92); }
+  .act-btn .alert-dot {
+    position:absolute; top:-1vmin; right:-1vmin; width:5vmin; height:5vmin; min-width:22px; min-height:22px;
+    background:#ff5f6d; border-radius:50%; display:none; align-items:center; justify-content:center;
+    font-size:3vmin; color:#fff; animation:pulse 1s infinite; box-shadow:0 .4vmin 1vmin rgba(255,95,109,.5);
+  }
+  .act-btn.needy .alert-dot { display:flex; }
+
+  /* contextual panel (feed foods / dress swatches) */
+  #context-panel {
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom, 0px) + 20vmin);
+    display:flex; gap:1.6vmin; pointer-events:none; flex-wrap:wrap; justify-content:center; max-width:96vw;
+  }
+  .ctx-btn {
+    pointer-events:auto; border:none; cursor:pointer; width:12vmin; height:12vmin; min-width:52px; min-height:52px; max-width:88px; max-height:88px;
+    border-radius:50%; background:rgba(255,255,255,.92); font-size:6.4vmin;
+    box-shadow:0 .8vmin 0 rgba(0,0,0,.08), 0 1.2vmin 2vmin rgba(0,0,0,.15);
+    display:flex; align-items:center; justify-content:center; transition:transform .15s;
+  }
+  .ctx-btn:active { transform:scale(.88); }
+  .ctx-btn.selected { outline:.8vmin solid #ffd44d; }
+
+  /* big center feedback emoji */
+  #big-feedback {
+    position:absolute; top:38%; left:50%; transform:translate(-50%,-50%) scale(0);
+    font-size:20vmin; z-index:20; pointer-events:none; opacity:0;
+  }
+  #big-feedback.show { animation:bigPop 1.1s ease forwards; }
+  @keyframes bigPop {
+    0%{transform:translate(-50%,-50%) scale(0) rotate(-15deg); opacity:0;}
+    30%{transform:translate(-50%,-50%) scale(1.25) rotate(6deg); opacity:1;}
+    55%{transform:translate(-50%,-50%) scale(1) rotate(0deg); opacity:1;}
+    100%{transform:translate(-50%,-62%) scale(1.05); opacity:0;}
+  }
+
+  /* thought bubble (baby's request) */
+  #thought {
+    position:absolute; z-index:15; pointer-events:none; opacity:0; transition:opacity .3s;
+    transform:translate(-50%,-115%);
+    background:#fff; border-radius:50%; width:16vmin; height:16vmin; min-width:70px; min-height:70px;
+    display:flex; align-items:center; justify-content:center; font-size:8vmin;
+    box-shadow:0 1vmin 2vmin rgba(0,0,0,.18);
+  }
+  #thought.show { opacity:1; animation:thoughtBob 1.6s ease-in-out infinite; }
+  @keyframes thoughtBob { 0%,100%{margin-top:0;} 50%{margin-top:-1.4vmin;} }
+  #thought::after {
+    content:''; position:absolute; bottom:-2.4vmin; left:20%; width:4vmin; height:4vmin; background:#fff; border-radius:50%;
+    box-shadow:0 .4vmin 1vmin rgba(0,0,0,.12);
+  }
+
+  /* sticker book overlay */
+  #sticker-book {
+    position:absolute; inset:0; z-index:40; background:rgba(120,80,150,.45); backdrop-filter:blur(4px);
+    display:none; align-items:center; justify-content:center; pointer-events:auto;
+  }
+  #sticker-book.open { display:flex; }
+  #sticker-card {
+    background:linear-gradient(180deg,#fffdf5,#fff3e0); border-radius:5vmin; padding:4vmin;
+    width:min(88vw,640px); max-height:82vh; overflow-y:auto; text-align:center;
+    box-shadow:0 3vmin 6vmin rgba(0,0,0,.3);
+  }
+  #sticker-card h2 { color:#ff6fa5; font-size:5.6vmin; margin-bottom:2.4vmin; }
+  #sticker-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:2.4vmin; }
+  .sticker-slot {
+    aspect-ratio:1; background:#fff; border-radius:3vmin; display:flex; align-items:center; justify-content:center;
+    font-size:9vmin; box-shadow:inset 0 0 0 .5vmin #ffe0ec;
+  }
+  .sticker-slot.locked { filter:grayscale(1); opacity:.32; }
+  .sticker-slot.new { animation:stickerNew .8s ease; }
+  @keyframes stickerNew { 0%{transform:scale(0) rotate(-180deg);} 70%{transform:scale(1.3);} 100%{transform:scale(1);} }
+  #sticker-close {
+    margin-top:3vmin; font-family:inherit; border:none; cursor:pointer; background:#ff9dbf; color:#fff;
+    font-size:4.6vmin; font-weight:bold; border-radius:4vmin; padding:1.8vmin 8vmin; box-shadow:0 1vmin 0 #e0538c;
+  }
+  #sticker-close:active { transform:translateY(.8vmin); box-shadow:0 .2vmin 0 #e0538c; }
+  #sticker-progress { margin-top:2vmin; font-size:3.4vmin; color:#c79; }
+
+  /* celebration banner */
+  #celebrate {
+    position:absolute; top:30%; left:50%; transform:translate(-50%,-50%) scale(0); z-index:30; pointer-events:none;
+    background:linear-gradient(180deg,#fff8dc,#ffe9a8); border-radius:5vmin; padding:3vmin 6vmin;
+    font-size:7vmin; font-weight:bold; color:#ff8a3d; text-align:center;
+    box-shadow:0 2vmin 5vmin rgba(255,170,60,.45);
+  }
+  #celebrate.show { animation:celebratePop 2.6s ease forwards; }
+  @keyframes celebratePop {
+    0%{transform:translate(-50%,-50%) scale(0) rotate(-8deg);}
+    18%{transform:translate(-50%,-50%) scale(1.15) rotate(3deg);}
+    28%{transform:translate(-50%,-50%) scale(1);}
+    82%{transform:translate(-50%,-50%) scale(1); opacity:1;}
+    100%{transform:translate(-50%,-60%) scale(.9); opacity:0;}
+  }
+
+  /* landscape tweaks: move activity bar to right side on short screens */
+  @media (orientation:landscape) and (max-height:520px) {
+    #activity-bar { flex-direction:column; left:auto; right:1.4vmin; bottom:50%; transform:translateY(50%); gap:1.4vmin; }
+    .act-btn { width:13vmin; height:13vmin; }
+    #context-panel { bottom:calc(env(safe-area-inset-bottom, 0px) + 2vmin); max-width:70vw; }
+    #meters { left:1.6vmin; transform:none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div id="title-screen">
+  <div id="title-logo">あかちゃん<br>おせわランド<span class="sub">〜 3D babycare 〜</span></div>
+  <div id="title-baby">👶</div>
+  <button id="start-btn">▶ あそぶ！</button>
+</div>
+
+<div id="hud">
+  <div id="meters">
+    <div class="meter" id="m-food"><div class="micon">🍎</div><div class="bar"><div class="fill"></div></div></div>
+    <div class="meter" id="m-clean"><div class="micon">🛁</div><div class="bar"><div class="fill"></div></div></div>
+    <div class="meter" id="m-happy"><div class="micon">😊</div><div class="bar"><div class="fill"></div></div></div>
+    <div class="meter" id="m-sleep"><div class="micon">⚡</div><div class="bar"><div class="fill"></div></div></div>
+  </div>
+
+  <div id="star-box"><span>⭐</span><span id="star-count">0</span></div>
+
+  <div id="corner-btns">
+    <button class="round-btn" id="sound-btn">🔊</button>
+    <button class="round-btn" id="book-btn">📖</button>
+  </div>
+
+  <div id="context-panel"></div>
+
+  <div id="activity-bar">
+    <button class="act-btn" data-act="feed"><span class="aicon">🍼</span><span class="alabel">ごはん</span><span class="alert-dot">❗</span></button>
+    <button class="act-btn" data-act="bath"><span class="aicon">🛁</span><span class="alabel">おふろ</span><span class="alert-dot">❗</span></button>
+    <button class="act-btn" data-act="dress"><span class="aicon">👕</span><span class="alabel">きせかえ</span><span class="alert-dot">❗</span></button>
+    <button class="act-btn" data-act="play"><span class="aicon">🎈</span><span class="alabel">あそぶ</span><span class="alert-dot">❗</span></button>
+    <button class="act-btn" data-act="sleep"><span class="aicon">🌙</span><span class="alabel">ねんね</span><span class="alert-dot">❗</span></button>
+  </div>
+</div>
+
+<div id="thought"></div>
+<div id="big-feedback"></div>
+<div id="celebrate"></div>
+
+<div id="sticker-book">
+  <div id="sticker-card">
+    <h2>📖 シールずかん</h2>
+    <div id="sticker-grid"></div>
+    <div id="sticker-progress"></div>
+    <button id="sticker-close">とじる</button>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/particles.js"></script>
+<script src="src/baby.js"></script>
+<script src="src/world.js"></script>
+<script src="src/ui.js"></script>
+<script src="src/activities.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
