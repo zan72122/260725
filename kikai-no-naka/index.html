@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>きかいのなか — さわって みる ちいさな きかい</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="みぢかな きかいを すけすけに して、なかの ぶひんを ゆびで さわって あそぶ 3D おもちゃ。">
+<meta name="theme-color" content="#f6e7ce">
+<meta name="color-scheme" content="light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="きかいのなか">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="stylesheet" href="css/style.css">
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="app">
+  <canvas id="stage" aria-label="きかいの 3D モデル"></canvas>
+  <div id="ui" class="ui"></div>
+
+  <!-- 起動画面: iOS で音を鳴らすために、最初の一回だけタップが必要 -->
+  <div id="boot" class="boot">
+    <div class="boot-inner">
+      <div class="boot-art" aria-hidden="true">
+        <svg viewBox="-100 -100 200 200" class="boot-gears" id="boot-gears"></svg>
+      </div>
+      <h1 class="boot-title">きかいのなか</h1>
+      <p class="boot-sub">さわって みよう</p>
+      <button class="boot-btn" id="boot-btn">はじめる</button>
+      <p class="boot-loading" id="boot-loading">よみこみちゅう…</p>
+    </div>
+  </div>
+
+  <noscript>
+    <div class="noscript">このおもちゃで あそぶには JavaScript を オンに してください。</div>
+  </noscript>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
