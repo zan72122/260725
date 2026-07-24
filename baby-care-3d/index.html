@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>ぽかぽかベビーケア 3D</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main id="app" aria-label="ぽかぽかベビーケア 3Dゲーム">
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <section id="hud">
+      <div class="topbar">
+        <div class="brand"><span class="logo">🍼</span><span>ぽかぽかベビーケア</span></div>
+        <div class="meter" aria-label="にこにこメーター"><span>😊</span><div><i id="happyFill"></i></div></div>
+      </div>
+      <div id="speech" role="status" aria-live="polite">おせわカードをえらんでね！</div>
+      <div id="stars" aria-label="集めたきらきら"></div>
+      <nav id="cards" aria-label="おせわメニュー"></nav>
+      <button id="magic" type="button" aria-label="まほうのキラキラ">✨ まほう</button>
+    </section>
+    <div id="portraitHint">たてでもよこでも遊べるよ</div>
+  </main>
+  <script src="js/three.min.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
