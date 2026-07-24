@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="やわらかあそび">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffe9f4">
+<meta name="format-detection" content="telephone=no">
+<meta name="description" content="4さいのおともだちのための、12しゅるいの やわらかそざい シミュレーター。ねんど・スライム・おみず・すな…さわって かたちが かわるよ！">
+<title>やわらか そざい あそび</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon.svg">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ タイトル ============ -->
+  <section id="screenTitle" class="screen is-on">
+    <canvas id="titleCv" class="title-cv" aria-hidden="true"></canvas>
+    <div class="title-inner">
+      <h1 class="title-logo">
+        <span class="l l1">や</span><span class="l l2">わ</span><span class="l l3">ら</span><span class="l l4">か</span>
+        <br>
+        <span class="l l5">そ</span><span class="l l6">ざ</span><span class="l l7">い</span>
+        <br>
+        <span class="l l8">あ</span><span class="l l9">そ</span><span class="l l10">び</span>
+      </h1>
+      <p class="title-sub">さわると かたちが かわるよ！</p>
+      <button id="btnStart" class="big-btn" type="button">はじめる</button>
+      <p class="title-note">おとが なります。おとの おおきさを ちょうせいしてね。</p>
+    </div>
+  </section>
+
+  <!-- ============ そざいえらび ============ -->
+  <section id="screenPicker" class="screen">
+    <header class="picker-head">
+      <h2 class="picker-title">どれで あそぶ？</h2>
+      <div class="star-chip"><span class="st">⭐</span><b id="starCountPicker">0</b></div>
+    </header>
+    <div id="pickerGrid" class="picker-grid"></div>
+    <p class="picker-foot">ゆびで さわったり、ながく おしたり、２ほんゆびで ひっぱったり…！</p>
+  </section>
+
+  <!-- ============ あそぶ ============ -->
+  <section id="screenPlay" class="screen screen-play">
+    <div id="topbar" class="bar bar-top">
+      <button class="icon-btn" id="btnHome" type="button"><span>🏠</span><i>おうち</i></button>
+      <div class="mat-badge"><span id="matEmoji">🟡</span><b id="matName">ねんど</b></div>
+      <div class="spacer"></div>
+      <div class="star-chip mini"><span class="st">⭐</span><b id="starCount">0</b></div>
+      <button class="icon-btn" id="btnPhoto" type="button"><span>📷</span><i>しゃしん</i></button>
+      <button class="icon-btn" id="btnReset" type="button"><span>🔄</span><i>さいしょ</i></button>
+      <button class="icon-btn" id="btnGear" type="button"><span>⚙️</span><i>せってい</i></button>
+    </div>
+
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div id="mascot" class="mascot" aria-hidden="true">
+        <div class="mascot-bubble" id="mascotSay">ぷにぷに！</div>
+        <div class="mascot-body"><div class="m-eye l"></div><div class="m-eye r"></div><div class="m-mouth"></div><div class="m-cheek l"></div><div class="m-cheek r"></div></div>
+      </div>
+      <button id="btnMagic" class="magic-btn" type="button" aria-label="まほう">✨</button>
+      <div id="hintBubble" class="hint-bubble"></div>
+      <div id="toast" class="toast"></div>
+    </div>
+
+    <div id="toolbar" class="bar bar-tools"></div>
+    <div id="colorbar" class="bar bar-colors"></div>
+  </section>
+
+  <!-- ============ せってい ============ -->
+  <div id="sheetWrap" class="overlay">
+    <div class="sheet">
+      <h3>せってい</h3>
+      <div class="row"><label>おと</label><input id="setVol" type="range" min="0" max="100" value="70"></div>
+      <div class="row"><label>おんがく</label><button class="tgl" id="setBgm" type="button">ON</button></div>
+      <div class="row"><label>ぶるぶる</label><button class="tgl" id="setHap" type="button">ON</button></div>
+      <div class="row"><label>むじゅうりょく</label><button class="tgl off" id="setZeroG" type="button">OFF</button></div>
+      <div class="row"><label>スローモーション</label><button class="tgl off" id="setSlow" type="button">OFF</button></div>
+      <div class="row"><label>そざいの りょう</label><input id="setAmount" type="range" min="40" max="160" value="100"></div>
+      <div class="row"><label>きれいさ</label><button class="tgl" id="setQuality" type="button">たかい</button></div>
+      <div class="row small"><label>ヒント</label><button class="tgl" id="setHint" type="button">ON</button></div>
+      <button class="big-btn small" id="sheetClose" type="button">とじる</button>
+    </div>
+  </div>
+
+  <!-- ============ しゃしん ============ -->
+  <div id="photoWrap" class="overlay">
+    <div class="photo-box">
+      <img id="photoImg" alt="とったしゃしん">
+      <div class="photo-btns">
+        <a id="photoSave" class="big-btn small" download="yawaraka.png">ほぞん</a>
+        <button class="big-btn small ghost" id="photoClose" type="button">とじる</button>
+      </div>
+      <p class="photo-note">ほぞんできないときは、しゃしんを ながおし してね</p>
+    </div>
+  </div>
+
+  <!-- ============ レベルアップ ============ -->
+  <div id="levelWrap" class="overlay levelup">
+    <div class="level-box">
+      <div class="level-star">⭐</div>
+      <h3 id="levelTitle">レベルアップ！</h3>
+      <p id="levelText">あたらしい いろが ふえたよ！</p>
+      <button class="big-btn small" id="levelClose" type="button">やったー！</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/core/util.js"></script>
+<script src="js/core/system.js"></script>
+<script src="js/core/audio.js"></script>
+<script src="js/core/input.js"></script>
+<script src="js/core/sprites.js"></script>
+<script src="js/core/fx.js"></script>
+<script src="js/sim/pbd.js"></script>
+<script src="js/sim/grid.js"></script>
+<script src="js/sim/bubbles.js"></script>
+<script src="js/sim/fibers.js"></script>
+<script src="js/materials/materials.js"></script>
+<script src="js/scenes/scene-pbd.js"></script>
+<script src="js/scenes/scene-grid.js"></script>
+<script src="js/scenes/scene-bubble.js"></script>
+<script src="js/scenes/scene-fiber.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

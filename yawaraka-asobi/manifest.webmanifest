@@ -1,0 +1,16 @@
+{
+  "name": "やわらか そざい あそび",
+  "short_name": "やわらかあそび",
+  "description": "12しゅるいの やわらか そざい シミュレーター。さわると かたちが かわるよ！",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffe9f4",
+  "theme_color": "#ffe9f4",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
