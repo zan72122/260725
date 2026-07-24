@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>リナちゃん だいすき！ おしゃれ・おしごと・おてつだい</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎀</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game-root">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ===== タイトル画面 ===== -->
+  <div id="screen-title" class="screen">
+    <div class="title-box">
+      <div class="title-deco">🌸 ⭐ 🌸</div>
+      <h1 class="title-main">リナちゃん<br>だいすき！</h1>
+      <div class="title-sub">おしゃれ・おしごと・おてつだい</div>
+      <button id="btn-start" class="big-btn pulse">▶ はじめる</button>
+      <div class="title-deco">🎀 💗 🎀</div>
+    </div>
+  </div>
+
+  <!-- ===== 上部バー ===== -->
+  <div id="topbar" class="hidden">
+    <div id="coin-box" class="chip">💗 <span id="coin-count">0</span></div>
+    <div id="stamp-box" class="chip">📖 <span id="stamp-count">0</span></div>
+    <div class="chip-spacer"></div>
+    <button id="btn-voice" class="chip chip-btn">🗣️</button>
+    <button id="btn-sound" class="chip chip-btn">🔊</button>
+    <button id="btn-home" class="chip chip-btn">🏠</button>
+  </div>
+
+  <!-- ===== 下部ナビ（おうち） ===== -->
+  <div id="homenav" class="hidden">
+    <button class="nav-btn" data-nav="dressup"><span class="nav-icon">👗</span><span class="nav-label">おしゃれ</span></button>
+    <button class="nav-btn" data-nav="jobs"><span class="nav-icon">🍰</span><span class="nav-label">おしごと</span></button>
+    <button class="nav-btn" data-nav="help"><span class="nav-icon">🧹</span><span class="nav-label">おてつだい</span></button>
+  </div>
+
+  <!-- ===== サブメニュー（おしごと／おてつだい えらび） ===== -->
+  <div id="submenu" class="overlay hidden">
+    <div class="submenu-box">
+      <div id="submenu-title" class="submenu-title">どれにする？</div>
+      <div id="submenu-cards" class="submenu-cards"></div>
+      <button id="submenu-close" class="round-btn">✖</button>
+    </div>
+  </div>
+
+  <!-- ===== きせかえUI ===== -->
+  <div id="dressup-ui" class="hidden">
+    <div id="dressup-tabs"></div>
+    <div id="dressup-items"></div>
+    <button id="btn-dress-done" class="big-btn done-btn">✨ きめた！</button>
+  </div>
+
+  <!-- ===== ミニゲーム共通UI ===== -->
+  <div id="minigame-ui" class="hidden">
+    <div id="mg-guide" class="mg-guide hidden"></div>
+    <div id="mg-toolbar" class="hidden"></div>
+    <button id="mg-action" class="big-btn done-btn hidden">かんせい！</button>
+  </div>
+
+  <!-- ===== ほめポップアップ ===== -->
+  <div id="praise" class="hidden"><span id="praise-text">すごーい！</span></div>
+
+  <!-- ===== ごほうび画面 ===== -->
+  <div id="reward" class="overlay hidden">
+    <div class="reward-box">
+      <div id="reward-stars">⭐⭐⭐</div>
+      <div id="reward-text">よくできました！</div>
+      <div id="reward-coins">💗 +3</div>
+      <button id="reward-ok" class="big-btn pulse">やったー！</button>
+    </div>
+  </div>
+
+  <!-- ===== スタンプカード ===== -->
+  <div id="stampcard" class="overlay hidden">
+    <div class="stamp-box">
+      <div class="submenu-title">すたんぷカード</div>
+      <div id="stamp-grid"></div>
+      <div id="stamp-hint">10こ あつめると プレゼント！</div>
+      <button id="stamp-close" class="round-btn">✖</button>
+    </div>
+  </div>
+
+  <!-- ===== プレゼント演出 ===== -->
+  <div id="present" class="overlay hidden">
+    <div class="present-box">
+      <div id="present-gift" class="present-gift">🎁</div>
+      <div id="present-text" class="hidden">あたらしい おようふく！</div>
+      <button id="present-ok" class="big-btn hidden">わーい！</button>
+    </div>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/save.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/character.js"></script>
+<script src="js/world.js"></script>
+<script src="js/dressup.js"></script>
+<script src="js/jobs.js"></script>
+<script src="js/help.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
