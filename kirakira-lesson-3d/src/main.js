@@ -20,7 +20,7 @@
     var canvas = document.getElementById('game-canvas');
     renderer = new THREE.WebGLRenderer({
       canvas: canvas, antialias: true, alpha: false,
-      powerPreference: 'high-performance', preserveDrawingBuffer: true
+      powerPreference: 'high-performance'
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(window.innerWidth, window.innerHeight, false);

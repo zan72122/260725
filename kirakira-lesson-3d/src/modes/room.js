@@ -236,6 +236,7 @@
       });
       SND.play('place');
       FX.burst('star', new THREE.Vector3(x, 0.5, z), 10);
+      saveRoom();
     }
     return g;
   }

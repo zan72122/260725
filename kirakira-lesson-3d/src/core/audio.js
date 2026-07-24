@@ -37,6 +37,16 @@ var SND = (function () {
     } catch (e) { reverb = null; }
 
     if (ctx.state === 'suspended') ctx.resume();
+
+    // iOS は「ユーザー そうさ の なか」でないと しゃべれないので、
+    // ここ（タップ の ハンドラ の なか）で から の はつわ を して かいきん する。
+    if ('speechSynthesis' in window) {
+      try {
+        var warm = new SpeechSynthesisUtterance(' ');
+        warm.volume = 0; warm.lang = 'ja-JP';
+        window.speechSynthesis.speak(warm);
+      } catch (e) { }
+    }
     return true;
   }
 
