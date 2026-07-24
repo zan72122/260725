@@ -176,9 +176,11 @@ JG.FX = (function () {
   // ---------- 文字/記号スプライト ----------
   function textSprite(text, opts) {
     opts = opts || {};
-    var size = 128;
+    var w = opts.w || 128;
+    var h = 128;
     var c = document.createElement('canvas');
-    c.width = c.height = size;
+    c.width = w;
+    c.height = h;
     var g = c.getContext('2d');
     g.font = 'bold ' + (opts.px || 90) + 'px "Hiragino Maru Gothic ProN", sans-serif';
     g.textAlign = 'center';
@@ -186,20 +188,20 @@ JG.FX = (function () {
     if (opts.bubble) {
       g.fillStyle = 'rgba(255,255,255,0.95)';
       g.beginPath();
-      g.arc(size / 2, size / 2, size * 0.44, 0, Math.PI * 2);
+      g.ellipse(w / 2, h / 2, w * 0.46, h * 0.44, 0, 0, Math.PI * 2);
       g.fill();
       g.strokeStyle = opts.bubbleStroke || '#7ec8ff';
       g.lineWidth = 7;
       g.stroke();
     }
     g.fillStyle = opts.color || '#ff8330';
-    g.fillText(text, size / 2, size / 2 + (opts.dy || 4));
+    g.fillText(text, w / 2, h / 2 + (opts.dy || 4));
     var tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     var mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
     var sp = new THREE.Sprite(mat);
     var s = opts.scale || 1.6;
-    sp.scale.set(s, s, 1);
+    sp.scale.set(s * (w / h), s, 1);
     return sp;
   }
 

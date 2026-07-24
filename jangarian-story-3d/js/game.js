@@ -219,6 +219,7 @@
     btnHat: document.getElementById('btn-hat'),
     btnHide: document.getElementById('btn-hide'),
     btnCall: document.getElementById('btn-call'),
+    tapHint: document.getElementById('tap-hint'),
     btnSound: document.getElementById('btn-sound'),
     btnDayNight: document.getElementById('btn-daynight')
   };
@@ -369,6 +370,7 @@
     hide.active = false;
     for (var q = 0; q < 3; q++) qSprites[q].visible = false;
     if (found && hide.friend) {
+      guide.notifyProgress();
       var f = hide.friend;
       f.mode = 'follow';
       f.follow = 20;
@@ -385,7 +387,7 @@
   // ---------------- くるくる (かいしゃぐるま) ----------------
   var wheel = {
     mode: false, spinV: 0, gauge: 0, cool: 0, time: 0,
-    yaw: 0
+    yaw: 0, sinceTap: 0
   };
   (function () {
     var th = world.wheel.group.rotation.y;
@@ -393,10 +395,12 @@
   })();
 
   function enterWheel() {
+    guide.notifyProgress();
     wheel.mode = true;
     wheel.spinV = 0.6;
     wheel.gauge = 0;
     wheel.time = 0;
+    wheel.sinceTap = 0;
     marker.visible = false;
     moveTarget = null;
     P.x = world.wheel.x; P.z = world.wheel.z; P.y = 0.3; P.vy = 0;
@@ -410,6 +414,7 @@
 
   function exitWheel(success) {
     wheel.mode = false;
+    el.tapHint.classList.add('hidden');
     wheel.cool = 9;
     el.gaugeWrap.classList.add('hidden');
     // ひろばがわに おりる
@@ -442,6 +447,54 @@
     // あきがなければ そのばに キラキラだけ
     fx.star.spawn(x, 1, z, { n: 10, colors: SPARKLE_GOLD, speed: 2.5, up: 3.5, life: 1 });
   }
+
+  // ---------------- 段階ガイド ----------------
+  function getGuideGoal(auto) {
+    if (wheel.mode) return null;
+    if (hide.active) {
+      if (auto) return { x: hide.correct.x, z: hide.correct.z, kind: 'hide' };
+      var best = null, bd = 1e9;
+      for (var i = 0; i < hide.spots.length; i++) {
+        var sp = hide.spots[i];
+        if (hide.visited.indexOf(sp) !== -1) continue;
+        var d = U.dist2d(P.x, P.z, sp.x, sp.z);
+        if (d < bd) { bd = d; best = sp; }
+      }
+      best = best || hide.correct;
+      return { x: best.x, z: best.z, kind: 'hide' };
+    }
+    if (state.pouch >= 6) {
+      return { x: world.house.doorX, z: world.house.doorZ, kind: 'house' };
+    }
+    var ns = null, nd = 1e9;
+    for (var s = 0; s < seeds.length; s++) {
+      if (!seeds[s].active) continue;
+      var sd2 = U.dist2d(P.x, P.z, seeds[s].mesh.position.x, seeds[s].mesh.position.z);
+      if (sd2 < nd) { nd = sd2; ns = seeds[s]; }
+    }
+    if (ns) return { x: ns.mesh.position.x, z: ns.mesh.position.z, kind: 'seed' };
+    if (state.pouch > 0) {
+      return { x: world.house.doorX, z: world.house.doorZ, kind: 'house' };
+    }
+    return null;
+  }
+
+  var guide = JG.Guide({
+    scene: scene,
+    glowTex: FX.circleTex(),
+    getPlayer: function () { return P; },
+    getGoal: getGuideGoal,
+    isBusy: function () { return wheel.mode; },
+    autoMove: function (x, z) {
+      moveTarget = { x: x, z: z };
+      marker.visible = true;
+      marker.position.set(x, 0.06, z);
+    },
+    squeak: function () { S.sfx.squeak(); },
+    trail: function (x, y, z) {
+      fx.trail.spawn(x, y, z, { n: 1, colors: [[0.6, 0.85, 1]], speed: 0.3, up: 0.5, life: 0.5 });
+    }
+  });
 
   // ---------------- ボール ----------------
   var ballV = { x: 0, z: 0 };
@@ -483,6 +536,7 @@
     if (wheel.mode) {
       if (isFirstDown) {
         wheel.spinV = Math.min(10, wheel.spinV + 2.3);
+        wheel.sinceTap = 0;
         S.sfx.tick();
       }
       return;
@@ -594,6 +648,7 @@
   function greetFriend(fr) {
     if (fr.mode === 'hiding') return;
     if (fr.greetCool > 0) return;
+    guide.notifyProgress();
     fr.greetCool = 5;
     fr.mode = 'follow';
     fr.follow = 22;
@@ -607,6 +662,7 @@
     e.preventDefault();
     S.unlock();
     if (!state.started) return;
+    guide.notifyInput();
     dragging = true;
     dragPointerId = e.pointerId;
     onTap(e.clientX, e.clientY, true);
@@ -633,6 +689,7 @@
       e.preventDefault();
       e.stopPropagation();
       S.unlock();
+      if (state.started) guide.notifyInput();
       fn();
     });
   }
@@ -710,6 +767,7 @@
     S.sfx.jingle();
     later(0.4, function () { S.sfx.squeak(); });
     showBanner('ようこそ！🐹 がめんを たっぷして あるこう', 6);
+    if (state.seeds === 0) guide.boost();   // はじめてなら すぐ おてほんガイド
     syncHUD();
   });
 
@@ -719,6 +777,7 @@
     sd.mesh.visible = false;
     sd.respawn = U.rand(4, 8);
     state.seeds++;
+    guide.notifyProgress();
     if (state.pouch < 6) state.pouch++;
     player.cheekLevel = state.pouch / 6;
     player.cheekPulse = 0.4;
@@ -752,6 +811,7 @@
   scene.add(houseMarker);
 
   function deliverSeeds() {
+    guide.notifyProgress();
     var n = state.pouch;
     state.stored += n;
     state.pouch = 0;
@@ -806,6 +866,7 @@
     if (prevBallX < world.goal.x && b.x >= world.goal.x &&
         Math.abs(b.z - world.goal.z) < world.goal.halfW - 0.4 &&
         ballResetTimer <= 0) {
+      guide.notifyProgress();
       bigMsg('ゴーール！⚽');
       S.sfx.fanfare();
       fx.confetti.spawn(world.goal.x, 2.5, world.goal.z, { n: 70, colors: CONFETTI_COLORS, speed: 5, up: 6, life: 1.7 });
@@ -895,6 +956,8 @@
     if (wheel.mode) {
       // くるくるのなか
       wheel.time += dt;
+      wheel.sinceTap += dt;
+      el.tapHint.classList.toggle('hidden', wheel.sinceTap < 2.2);
       wheel.spinV *= (1 - 1.15 * dt);
       world.wheel.spin.rotation.z -= wheel.spinV * dt * 1.6;
       wheel.gauge = Math.min(100, wheel.gauge + wheel.spinV * dt * 3.4);
@@ -1120,6 +1183,7 @@
       if (ap.userData.state === 'ground' &&
           U.dist2d(P.x, P.z, ap.position.x, ap.position.z) < 1.2) {
         ap.userData.state = 'eaten';
+        guide.notifyProgress();
         ap.visible = false;
         ap.userData.timer = 25;
         S.sfx.munch();
@@ -1243,6 +1307,7 @@
       updateBall(dt);
       updateUITimers(dt);
       runQueue(dt);
+      guide.update(dt, t);
       S.update();
     }
     updateDayNight(dt);
@@ -1278,6 +1343,7 @@
     hide: hide,
     seeds: seeds,
     world: world,
+    guide: guide,
     moveTo: function (x, z) { moveTarget = { x: x, z: z }; }
   };
 })();
