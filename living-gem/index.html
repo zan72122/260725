@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>生きている宝石 ― ひかりの水族館</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html, body { width:100%; height:100%; overflow:hidden; position:fixed; background:#050818;
+    font-family:'Hiragino Maru Gothic ProN','ヒラギノ丸ゴ ProN W4','Rounded Mplus 1c','M PLUS Rounded 1c',sans-serif; touch-action:none; color:#eaf2ff; }
+  #gl { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  /* ============ Title screen ============ */
+  #title-screen { position:absolute; inset:0; z-index:60; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3.4vmin; background:radial-gradient(120% 90% at 50% 20%, #17244d 0%, #0a1030 55%, #050818 100%);
+    transition:opacity .8s ease; overflow:hidden; }
+  #title-screen.hidden { opacity:0; pointer-events:none; }
+  #title-gem { font-size:19vmin; line-height:1; animation:gemFloat 3.2s ease-in-out infinite;
+    filter:drop-shadow(0 0 4vmin rgba(120,190,255,.75)) drop-shadow(0 0 10vmin rgba(255,140,220,.4)); }
+  @keyframes gemFloat { 0%,100%{transform:translateY(0) rotate(-5deg);} 50%{transform:translateY(-2.6vmin) rotate(5deg);} }
+  #title-logo { text-align:center; line-height:1.45; z-index:2; }
+  #title-logo .main { font-size:7.4vmin; font-weight:bold; color:#cfe6ff;
+    text-shadow:0 0 2vmin rgba(140,200,255,.9), 0 0 6vmin rgba(255,150,230,.5); letter-spacing:.4vmin; }
+  #title-logo .sub { display:block; font-size:3.6vmin; color:#9fd4ff; margin-top:1.4vmin; letter-spacing:.6vmin; opacity:.9; }
+  #title-desc { font-size:2.9vmin; color:#b9c9ef; text-align:center; line-height:1.9; z-index:2; }
+  #start-btn { font-family:inherit; font-size:5.2vmin; font-weight:bold; color:#0a1030; border:none; cursor:pointer;
+    background:linear-gradient(180deg,#bfe6ff,#7fb8ff); border-radius:6vmin; padding:2.6vmin 9vmin; z-index:2;
+    box-shadow:0 0 3vmin rgba(140,200,255,.8), 0 1vmin 0 rgba(60,110,200,.9); animation:btnPulse 1.6s ease-in-out infinite; }
+  @keyframes btnPulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.06);} }
+  #start-btn:active { transform:scale(.97); }
+  .tw { position:absolute; color:#cfe6ff; animation:twinkle linear infinite; pointer-events:none; }
+  @keyframes twinkle { 0%,100%{opacity:.15; transform:scale(.7);} 50%{opacity:1; transform:scale(1.2);} }
+
+  /* ============ HUD ============ */
+  #hud { position:absolute; inset:0; z-index:20; pointer-events:none; opacity:0; transition:opacity .8s; }
+  #hud.visible { opacity:1; }
+
+  #hint { position:absolute; top:calc(2vmin + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+    max-width:86vw; background:rgba(14,24,58,.82); border:1px solid rgba(140,200,255,.45); border-radius:3.4vmin;
+    padding:1.6vmin 3.4vmin; font-size:3.1vmin; color:#d9e9ff; text-align:center; line-height:1.6;
+    box-shadow:0 0 2.4vmin rgba(90,150,255,.35); backdrop-filter:blur(4px); transition:opacity .5s, transform .5s; white-space:nowrap; }
+  #hint.gone { opacity:0; transform:translateX(-50%) translateY(-3vmin); }
+
+  #facet-count { position:absolute; top:calc(2vmin + env(safe-area-inset-top)); left:2.4vmin; font-size:3vmin; color:#9fd4ff;
+    background:rgba(14,24,58,.7); border:1px solid rgba(140,200,255,.3); border-radius:2.6vmin; padding:1.2vmin 2.6vmin; }
+
+  .corner-btns { position:absolute; top:calc(2vmin + env(safe-area-inset-top)); right:2.4vmin; display:flex; gap:2vmin; pointer-events:auto; }
+  .icon-btn { width:9vmin; height:9vmin; border-radius:50%; border:1px solid rgba(140,200,255,.45); cursor:pointer;
+    background:rgba(14,24,58,.78); font-size:4.6vmin; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 0 1.6vmin rgba(90,150,255,.3); color:#d9e9ff; }
+  .icon-btn:active { transform:scale(.92); }
+
+  /* ---- mode bar ---- */
+  #mode-bar { position:absolute; bottom:calc(2.6vmin + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%);
+    display:flex; gap:2.2vmin; pointer-events:auto; }
+  .mode-btn { font-family:inherit; display:flex; flex-direction:column; align-items:center; gap:.5vmin; cursor:pointer; border:none;
+    background:rgba(14,24,58,.82); border:1px solid rgba(140,200,255,.35); border-radius:3.4vmin; padding:1.7vmin 3.2vmin;
+    color:#cfe0ff; font-size:2.6vmin; min-width:16vmin; box-shadow:0 0 1.8vmin rgba(90,150,255,.25); transition:all .2s; }
+  .mode-btn .ic { font-size:5.4vmin; line-height:1; }
+  .mode-btn.active { background:linear-gradient(180deg, rgba(120,190,255,.95), rgba(80,140,240,.95)); color:#081030;
+    box-shadow:0 0 3.4vmin rgba(130,190,255,.85); border-color:#cfe6ff; transform:translateY(-.8vmin); }
+  .mode-btn:active { transform:scale(.95); }
+
+  /* ---- pour panel ---- */
+  #pour-panel { position:absolute; bottom:calc(16vmin + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%) translateY(6vmin);
+    background:rgba(12,20,50,.92); border:1px solid rgba(140,200,255,.4); border-radius:4vmin; padding:2.6vmin 3vmin 2.2vmin;
+    display:flex; gap:2vmin; pointer-events:auto; opacity:0; visibility:hidden; transition:all .3s ease; backdrop-filter:blur(6px);
+    box-shadow:0 0 4vmin rgba(60,120,255,.35); max-width:94vw; flex-wrap:wrap; justify-content:center; }
+  #pour-panel.open { opacity:1; visibility:visible; transform:translateX(-50%) translateY(0); }
+  .ing-btn { font-family:inherit; display:flex; flex-direction:column; align-items:center; gap:.6vmin; cursor:pointer;
+    background:rgba(255,255,255,.06); border:1px solid rgba(140,200,255,.25); border-radius:3vmin; padding:1.5vmin 1.8vmin;
+    color:#cfe0ff; font-size:2.4vmin; width:13.4vmin; transition:all .2s; position:relative; }
+  .ing-btn .ic { font-size:5.2vmin; line-height:1; filter:grayscale(.9) opacity(.55); transition:filter .2s; }
+  .ing-btn .amt { display:flex; gap:.6vmin; height:1.4vmin; }
+  .ing-btn .amt i { width:2.6vmin; height:1.2vmin; border-radius:1vmin; background:rgba(255,255,255,.14); }
+  .ing-btn[data-lv="1"] .amt i:nth-child(1), .ing-btn[data-lv="2"] .amt i { background:#8fd8ff; box-shadow:0 0 1vmin rgba(140,220,255,.9); }
+  .ing-btn[data-lv="1"] .ic, .ing-btn[data-lv="2"] .ic { filter:none; }
+  .ing-btn[data-lv="1"], .ing-btn[data-lv="2"] { border-color:rgba(160,220,255,.75); background:rgba(120,190,255,.14); }
+  .ing-btn:active { transform:scale(.94); }
+
+  /* ---- discovery banner ---- */
+  #disc-banner { position:absolute; top:26%; left:50%; transform:translate(-50%,-50%) scale(.6); z-index:40;
+    background:linear-gradient(180deg, rgba(40,42,110,.95), rgba(20,22,70,.95)); border:2px solid #ffd97f; border-radius:4vmin;
+    padding:3vmin 6vmin; text-align:center; opacity:0; visibility:hidden; transition:all .45s cubic-bezier(.2,1.6,.4,1);
+    box-shadow:0 0 6vmin rgba(255,215,130,.55); pointer-events:none; }
+  #disc-banner.show { opacity:1; visibility:visible; transform:translate(-50%,-50%) scale(1); }
+  #disc-banner .t { font-size:3vmin; color:#ffd97f; letter-spacing:.5vmin; }
+  #disc-banner .ic { font-size:9vmin; line-height:1.3; }
+  #disc-banner .n { font-size:4.4vmin; font-weight:bold; color:#fff; text-shadow:0 0 2vmin rgba(255,215,130,.8); }
+  #disc-banner .d { font-size:2.8vmin; color:#cfe0ff; margin-top:1vmin; }
+
+  /* ---- album ---- */
+  #album { position:absolute; inset:0; z-index:50; background:rgba(5,8,24,.88); display:flex; align-items:center; justify-content:center;
+    opacity:0; visibility:hidden; transition:opacity .3s; pointer-events:auto; backdrop-filter:blur(5px); }
+  #album.open { opacity:1; visibility:visible; }
+  #album-card { background:linear-gradient(180deg,#141c46,#0c1234); border:1px solid rgba(140,200,255,.5); border-radius:4vmin;
+    padding:4vmin 4.6vmin; width:min(88vw, 120vmin); max-height:84vh; overflow-y:auto; box-shadow:0 0 6vmin rgba(80,140,255,.4); }
+  #album-card h2 { font-size:4.6vmin; color:#ffd97f; text-align:center; margin-bottom:3vmin; letter-spacing:.5vmin;
+    text-shadow:0 0 2vmin rgba(255,215,130,.6); }
+  .disc-row { display:flex; align-items:center; gap:3vmin; padding:2.2vmin 2.4vmin; border-radius:3vmin; margin-bottom:1.6vmin;
+    background:rgba(255,255,255,.05); border:1px solid rgba(140,200,255,.18); }
+  .disc-row.found { background:rgba(120,190,255,.12); border-color:rgba(255,217,127,.55); }
+  .disc-row .ic { font-size:7vmin; width:9vmin; text-align:center; filter:grayscale(1) opacity(.35); }
+  .disc-row.found .ic { filter:none; }
+  .disc-row .tx .n { font-size:3.4vmin; font-weight:bold; color:#e7f0ff; }
+  .disc-row .tx .d { font-size:2.7vmin; color:#9fb4e6; margin-top:.5vmin; line-height:1.5; }
+  #album-close { display:block; margin:2.6vmin auto 0; font-family:inherit; font-size:3.4vmin; color:#081030; border:none; cursor:pointer;
+    background:linear-gradient(180deg,#bfe6ff,#7fb8ff); border-radius:4vmin; padding:1.8vmin 8vmin; font-weight:bold; }
+
+  /* sparkle burst */
+  .spark { position:absolute; pointer-events:none; z-index:30; font-size:4vmin; animation:sparkFly .8s ease-out forwards; }
+  @keyframes sparkFly { 0%{opacity:1; transform:translate(0,0) scale(1);} 100%{opacity:0; transform:translate(var(--dx),var(--dy)) scale(.3);} }
+
+  #err { position:absolute; inset:auto 0 0 0; z-index:99; background:rgba(120,0,20,.9); color:#fff; font-size:12px; padding:6px 10px;
+    display:none; white-space:pre-wrap; max-height:40vh; overflow:auto; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title-screen">
+  <div id="title-gem">💎</div>
+  <div id="title-logo">
+    <span class="main">生きている宝石</span>
+    <span class="sub">― ひかりの水族館 ―</span>
+  </div>
+  <div id="title-desc">宝石のなかに ジュースや ほしを そそいで<br>けずって まわして ひかりを あてよう。<br>かくれた げんしょうを みつけられるかな？</div>
+  <button id="start-btn">✨ はじめる</button>
+</div>
+
+<div id="hud">
+  <div id="facet-count">💎 めん: <span id="fc">10</span></div>
+  <div class="corner-btns">
+    <button class="icon-btn" id="btn-sound" title="おと">🔊</button>
+    <button class="icon-btn" id="btn-album" title="はっけんアルバム">📖</button>
+    <button class="icon-btn" id="btn-reset" title="あたらしいほうせき">🔄</button>
+  </div>
+  <div id="hint">まずは 🫗そそぐ で ジュースを いれてみよう！</div>
+
+  <div id="pour-panel">
+    <button class="ing-btn" data-ing="blue"  data-lv="0"><span class="ic">🟦</span><span>あおジュース</span><span class="amt"><i></i><i></i></span></button>
+    <button class="ing-btn" data-ing="pink"  data-lv="0"><span class="ic">🌸</span><span>ももジュース</span><span class="amt"><i></i><i></i></span></button>
+    <button class="ing-btn" data-ing="gold"  data-lv="0"><span class="ic">✨</span><span>きんのつぶ</span><span class="amt"><i></i><i></i></span></button>
+    <button class="ing-btn" data-ing="bub"   data-lv="0"><span class="ic">🫧</span><span>あわ</span><span class="amt"><i></i><i></i></span></button>
+    <button class="ing-btn" data-ing="star"  data-lv="0"><span class="ic">⭐</span><span>ひかるほし</span><span class="amt"><i></i><i></i></span></button>
+    <button class="ing-btn" data-ing="jelly" data-lv="0"><span class="ic">🪼</span><span>クラゲ</span><span class="amt"><i></i><i></i></span></button>
+  </div>
+
+  <div id="mode-bar">
+    <button class="mode-btn" id="m-pour"><span class="ic">🫗</span>そそぐ</button>
+    <button class="mode-btn active" id="m-spin"><span class="ic">🔄</span>まわす</button>
+    <button class="mode-btn" id="m-cut"><span class="ic">⛏️</span>けずる</button>
+    <button class="mode-btn" id="m-light"><span class="ic">🔦</span>ひかり</button>
+  </div>
+</div>
+
+<div id="disc-banner">
+  <div class="t">★ はっけん！ ★</div>
+  <div class="ic">✨</div>
+  <div class="n">なまえ</div>
+  <div class="d">せつめい</div>
+</div>
+
+<div id="album">
+  <div id="album-card">
+    <h2>📖 はっけんアルバム</h2>
+    <div id="disc-list"></div>
+    <button id="album-close">とじる</button>
+  </div>
+</div>
+
+<div id="err"></div>
+
+<script>
+'use strict';
+// ============================================================
+//  生きている宝石 ― ひかりの水族館
+//  A raytraced faceted gem with living fluid inside. No deps.
+// ============================================================
+
+const VSH = `
+attribute vec2 aPos;
+varying vec2 vUV;
+void main(){ vUV = aPos; gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+const FSH = `
+precision highp float;
+varying vec2 vUV;
+uniform vec2  uRes;
+uniform float uTime;
+uniform mat3  uRot;        // gem local -> world
+uniform mat3  uRotT;       // world -> gem local
+uniform vec4  uPlanes[40]; // xyz normal (local, unit), w offset
+uniform int   uPlaneCount;
+uniform vec3  uLight;      // unit dir from origin toward the light
+uniform float uBlue, uPink, uGold, uBub, uStar, uJelly;
+uniform float uMixAmt;     // 0 settled .. 1 fully swirled
+uniform vec3  uSlosh;      // advected phase for liquid wobble
+uniform float uSpin;       // current spin energy 0..1
+uniform float uHeart, uSix, uTunnel, uJShadow, uGalaxy;
+uniform float uFlash;      // cut feedback flash
+uniform float uSteps;      // volume march steps
+
+const int MAXP = 40;
+const float IOR = 1.45;
+
+// ---------- utils ----------
+float hash1(vec3 p){ p = fract(p*0.3183099 + vec3(0.71,0.113,0.419)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+vec3  hash3(vec3 p){ return vec3(hash1(p), hash1(p+31.7), hash1(p+57.3)); }
+float noise3(vec3 p){
+  vec3 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(mix(hash1(i+vec3(0,0,0)),hash1(i+vec3(1,0,0)),f.x),
+                 mix(hash1(i+vec3(0,1,0)),hash1(i+vec3(1,1,0)),f.x),f.y),
+             mix(mix(hash1(i+vec3(0,0,1)),hash1(i+vec3(1,0,1)),f.x),
+                 mix(hash1(i+vec3(0,1,1)),hash1(i+vec3(1,1,1)),f.x),f.y),f.z);
+}
+float fbm(vec3 p){ return 0.55*noise3(p) + 0.3*noise3(p*2.13) + 0.15*noise3(p*4.7); }
+vec3 hue(float t){ return 0.55 + 0.45*cos(6.28318*(t + vec3(0.0,0.33,0.67))); }
+
+// ---------- convex polytope (the gem) ----------
+// returns tNear/tFar; nrm = entry normal (local); xnrm = exit normal (local)
+bool gemHit(vec3 ro, vec3 rd, out float tN, out float tF, out vec3 nrm, out vec3 xnrm){
+  tN = -1e9; tF = 1e9; nrm = vec3(0.0,1.0,0.0); xnrm = vec3(0.0,1.0,0.0);
+  for(int i=0;i<MAXP;i++){
+    if(i>=uPlaneCount) break;
+    vec3 n = uPlanes[i].xyz; float d = uPlanes[i].w;
+    float dn = dot(n, rd);
+    float dist = d - dot(n, ro);
+    if(abs(dn) < 1e-6){ if(dist < 0.0) return false; continue; }
+    float t = dist/dn;
+    if(dn < 0.0){ if(t > tN){ tN = t; nrm = n; } }
+    else        { if(t < tF){ tF = t; xnrm = n; } }
+    if(tN > tF) return false;
+  }
+  return tF > max(tN, 0.0);
+}
+
+// ---------- environment ----------
+vec3 envColor(vec3 d){
+  float up = d.y*0.5+0.5;
+  vec3 c = mix(vec3(0.015,0.02,0.06), vec3(0.10,0.16,0.34), up);
+  c += vec3(0.10,0.14,0.30)*pow(max(dot(d,uLight),0.0), 6.0);
+  c += vec3(1.0,0.92,0.75)*pow(max(dot(d,uLight),0.0), 60.0)*2.4;
+  return c;
+}
+
+// giant jellyfish shadow silhouette on the wall (2D sdf-ish, wall coords)
+float jellyShadow(vec2 w){
+  if(uJShadow < 0.5) return 0.0;
+  vec2 c = w - vec2(uLight.x*-2.6, 0.55 + 0.14*sin(uTime*0.7));
+  c.x += 0.16*sin(uTime*0.9);
+  float bell = length(vec2(c.x, max(c.y,0.0)*1.25))/1.15;
+  float s = smoothstep(1.0, 0.86, bell);
+  if(c.y < 0.0){
+    float t1 = 0.0;
+    for(int k=0;k<5;k++){
+      float fx = float(k)-2.0;
+      float x = c.x - fx*0.34 - 0.14*sin(uTime*1.3 + c.y*2.2 + fx*1.7);
+      t1 = max(t1, smoothstep(0.11,0.04,abs(x)) * smoothstep(-2.4,-0.1,c.y));
+    }
+    s = max(s*smoothstep(-0.6,0.1,c.y), t1*0.85);
+  }
+  return s;
+}
+
+// background: wall z = -3, floor y = -1.7  (+ caustics from facets)
+vec3 background(vec3 ro, vec3 rd, float withCaustics){
+  vec3 col;
+  float tw = 1e9; float tf = 1e9;
+  if(rd.z < -1e-4) tw = (-3.0 - ro.z)/rd.z;
+  if(rd.y < -1e-4) tf = (-1.7 - ro.y)/rd.y;
+  if(tw < tf && tw < 1e8){
+    vec3 p = ro + rd*tw;
+    float g = 1.0 - 0.16*length(p.xy*vec2(0.5,0.8));
+    col = vec3(0.035,0.05,0.13)*max(g,0.25);
+    col += vec3(0.05,0.08,0.18)*pow(max(dot(normalize(vec3(p.xy,0.0)-vec3(0.0)), uLight),0.0),2.0)*0.5;
+    // soft wavy water-light on the wall
+    col += vec3(0.03,0.05,0.10)*fbm(vec3(p.xy*1.4, uTime*0.12));
+    if(withCaustics > 0.5){
+      // colored light patches thrown by each facet
+      vec3 c = vec3(0.0);
+      for(int i=0;i<MAXP;i++){
+        if(i>=uPlaneCount) break;
+        vec3 nW = uRot * uPlanes[i].xyz;
+        vec3 rf = refract(-uLight, nW, 1.0/IOR);
+        if(length(rf) < 0.5) continue;
+        if(rf.z > -0.05) continue;
+        vec3 hp = rf * (-3.0/rf.z);
+        float dd = length(p.xy - hp.xy);
+        float spot = exp(-dd*dd*2.6);
+        c += hue(float(i)*0.31 + dd*0.9) * spot;
+      }
+      col += c * (2.1/(1.0+float(uPlaneCount)*0.22)) * vec3(1.0,0.95,0.9);
+      float sh = jellyShadow(p.xy);
+      col = mix(col, col*0.16 + vec3(0.0,0.02,0.05), sh);
+      col += vec3(0.1,0.5,0.6)*sh*smoothstep(0.7,1.0,sh)*0.25;
+    }
+  } else if(tf < 1e8){
+    vec3 p = ro + rd*tf;
+    float r = length(p.xz);
+    col = vec3(0.03,0.045,0.11)*(1.0-0.1*r);
+    col += vec3(0.10,0.16,0.30)*exp(-r*r*0.55);  // glow pool under the gem
+    col += vec3(0.02,0.04,0.08)*fbm(vec3(p.xz*1.6, uTime*0.15));
+    if(withCaustics > 0.5){
+      vec3 c = vec3(0.0);
+      for(int i=0;i<MAXP;i++){
+        if(i>=uPlaneCount) break;
+        vec3 nW = uRot * uPlanes[i].xyz;
+        vec3 rf = refract(-uLight, nW, 1.0/IOR);
+        if(length(rf) < 0.5) continue;
+        if(rf.y > -0.05) continue;
+        vec3 hp = rf * (-1.7/rf.y);
+        float dd = length(p.xz - hp.xz);
+        c += hue(float(i)*0.31 + dd*1.1) * exp(-dd*dd*3.4);
+      }
+      col += c * (1.6/(1.0+float(uPlaneCount)*0.22));
+    }
+  } else {
+    col = envColor(rd);
+  }
+  return col;
+}
+
+// ---------- the living interior ----------
+vec3 axisA; vec3 axisU; vec3 axisB;   // world up/right/fwd expressed in local space
+
+vec4 fieldSample(vec3 p){
+  vec3 col = vec3(0.0); float den = 0.0;
+
+  // six-way kaleidoscope fold (discovery)
+  if(uSix > 0.5){
+    float px = dot(p, axisA), py = dot(p, axisU), pz = dot(p, axisB);
+    float r = length(vec2(px,pz));
+    float a = atan(pz, px);
+    a = mod(a, 1.047197551);            // 60 deg
+    px = cos(a)*r; pz = sin(a)*r;
+    p = axisA*px + axisU*py + axisB*pz;
+  }
+
+  float h = dot(p, axisU);              // world height inside gem
+  float pa = dot(p, axisA), pb = dot(p, axisB);
+
+  // ---- liquids ----
+  float wob = (fbm(p*2.2 + uSlosh) - 0.5) * (0.22 + 0.9*uSpin);
+  float blueTop = -1.05 + uBlue*1.15;
+  float pinkTop = blueTop + uPink*1.15;
+  float hh = h + wob;
+  if(hh < pinkTop){
+    vec3 bl = vec3(0.10,0.42,0.95);
+    vec3 pk = vec3(0.98,0.38,0.72);
+    vec3 lc;
+    if(uMixAmt > 0.03){
+      float sw = fbm(p*2.6 + uSlosh*1.6 + vec3(0.0,uTime*0.05,0.0));
+      float m = smoothstep(0.47, 0.53, mix(smoothstep(-1.0,1.0,(hh-blueTop)*3.0), sw, uMixAmt));
+      float wantPink = (uPink > 0.01) ? 1.0 : 0.0;
+      float wantBlue = (uBlue > 0.01) ? 1.0 : 0.0;
+      lc = mix(mix(bl,pk,wantPink*(1.0-wantBlue)), mix(bl,pk,m), wantPink*wantBlue);
+    } else {
+      lc = (hh < blueTop) ? bl : pk;
+    }
+    float surf = exp(-abs(hh-pinkTop)*14.0)*1.2 + exp(-abs(hh-blueTop)*14.0)*0.6;
+    float body = 0.55 + 0.45*fbm(p*3.0 + uSlosh*0.7);
+    col += lc * (0.85*body + surf*0.7);
+    den += 1.15*body + surf*0.4;
+  }
+
+  // ---- gold particles (drift + swirl) ----
+  if(uGold > 0.01){
+    vec3 q = p*5.5 + vec3(uSlosh.x*0.8, uTime*0.22 + uSlosh.y*0.8, uSlosh.z*0.8);
+    vec3 id = floor(q); vec3 f = fract(q)-0.5;
+    if(hash1(id) < uGold*0.62){
+      vec3 j = (hash3(id)-0.5)*0.7;
+      float d = length(f-j);
+      float tw2 = 0.5+0.5*sin(uTime*5.0 + hash1(id+9.1)*40.0);
+      float g = smoothstep(0.16,0.02,d)*(0.35+0.85*tw2);
+      col += vec3(1.15,0.85,0.35)*g*4.0;
+      den += g*2.0;
+    }
+  }
+
+  // ---- bubbles / hearts ----
+  if(uBub > 0.01){
+    float rise = uTime*0.34;
+    vec3 pb2 = vec3(pa, h - rise, pb);
+    vec3 q = pb2*3.2;
+    vec3 id = floor(q); vec3 f = fract(q)-0.5;
+    if(hash1(id+3.3) < uBub*0.62){
+      vec3 j = (hash3(id+7.7)-0.5)*0.55;
+      vec3 fq = f - j;
+      float rr = 0.10 + 0.13*hash1(id+13.1);
+      float bshape;
+      if(uHeart > 0.5){
+        float rxz = length(vec2(fq.x, fq.z));
+        bshape = length(vec2(rxz, fq.y - sqrt(rxz)*0.8 + rr*0.35)) - rr*0.95;
+      } else {
+        bshape = length(fq) - rr;
+      }
+      float rim = smoothstep(0.045,0.0,abs(bshape)) ;
+      float inner = smoothstep(0.0,-0.06,bshape)*0.35;
+      vec3 bc = (uHeart>0.5)? vec3(1.0,0.45,0.65) : vec3(0.65,0.9,1.05);
+      col += bc*(rim*2.6 + inner);
+      den += rim*1.6 + inner*0.6;
+    }
+  }
+
+  // ---- glowing stars ----
+  if(uStar > 0.01){
+    vec3 q = p*2.6 + vec3(0.0, uTime*0.05, 0.0);
+    vec3 id = floor(q); vec3 f = fract(q)-0.5;
+    if(hash1(id+21.0) < uStar*0.5){
+      vec3 j = (hash3(id+17.0)-0.5)*0.6;
+      float d = length(f-j);
+      float tw2 = 0.35+0.65*pow(0.5+0.5*sin(uTime*3.0+hash1(id+5.0)*40.0), 2.0);
+      float s = smoothstep(0.13,0.0,d);
+      float cross = (smoothstep(0.03,0.0,abs(f.x-j.x)) + smoothstep(0.03,0.0,abs(f.y-j.y)))*smoothstep(0.3,0.05,d)*0.5;
+      col += vec3(1.1,1.0,0.7)*(s*3.2+cross)*tw2;
+      den += (s*1.8+cross*0.4)*tw2;
+    }
+  }
+
+  // ---- jellyfish ----
+  if(uJelly > 0.01){
+    for(int k=0;k<3;k++){
+      if(float(k) >= uJelly*3.01) break;
+      float fk = float(k);
+      vec3 c = 0.42*vec3(sin(uTime*0.13+fk*2.1), 0.7*sin(uTime*0.09+fk*4.2), cos(uTime*0.11+fk*1.4));
+      vec3 q = p - c;
+      vec3 qu = vec3(dot(q,axisA), dot(q,axisU), dot(q,axisB));
+      float pulse = 0.15 + 0.025*sin(uTime*2.2 + fk*2.0);
+      vec3 qb = qu; qb.y = qu.y*(qu.y>0.0 ? 1.35 : 2.2);
+      float d = length(qb) - pulse;
+      float glow = exp(-max(d,0.0)*26.0);
+      vec3 jc = mix(vec3(0.35,0.95,1.05), vec3(1.05,0.45,0.95), hash1(vec3(fk+1.0)));
+      col += jc*glow*2.0;
+      den += glow*1.5;
+      if(qu.y < 0.0 && qu.y > -0.55){
+        float wig = 0.05*sin(qu.y*9.0 + uTime*2.6 + fk*3.0);
+        float rr = length(qu.xz + wig);
+        float tnt = exp(-rr*rr*260.0)*smoothstep(-0.55,-0.05,qu.y);
+        col += jc*tnt*1.4; den += tnt*0.8;
+      }
+    }
+  }
+
+  // ---- tiny galaxy (discovery) ----
+  if(uGalaxy > 0.5){
+    vec3 g = normalize(vec3(0.25,1.0,0.18));
+    float zg = dot(p,g);
+    vec3 pg = p - zg*g;
+    float r = length(pg);
+    vec3 gA = normalize(cross(g, vec3(1.0,0.0,0.0)));
+    vec3 gB = cross(g, gA);
+    float ang = atan(dot(pg,gA), dot(pg,gB));
+    float arms = 0.55 + 0.5*sin(ang*2.0 - r*10.0 + uTime*0.5);
+    float dgal = exp(-r*3.2)*exp(-abs(zg)*7.0);
+    vec3 gc = mix(vec3(0.65,0.75,1.25), vec3(1.25,0.85,0.55), clamp(r*2.2,0.0,1.0));
+    col += gc * dgal * arms * 2.6;
+    col += vec3(1.2,1.1,0.9)*exp(-r*11.0)*exp(-abs(zg)*9.0)*3.0;
+    den += dgal*(1.2+arms);
+  }
+
+  // ambient inner haze so the gem never looks empty
+  col += vec3(0.03,0.06,0.12)*(0.35+0.3*fbm(p*1.6+uSlosh*0.3));
+  den += 0.08;
+
+  return vec4(col, den);
+}
+
+// march the interior between two points (local space)
+vec4 marchInside(vec3 ro, vec3 rd, float t0, float t1, float steps, vec3 rdW){
+  vec3 acc = vec3(0.0); float alpha = 0.0;
+  float dt = (t1-t0)/steps;
+  for(int i=0;i<48;i++){
+    if(float(i) >= steps) break;
+    float t = t0 + (float(i)+0.5)*dt;
+    vec3 p = ro + rd*t;
+    vec4 s = fieldSample(p);
+    // rainbow tunnel rings along the view axis (discovery)
+    if(uTunnel > 0.5){
+      vec3 pw = uRot * p;
+      float rad = length(cross(pw, rdW));
+      float ring = pow(0.5+0.5*sin(dot(pw,rdW)*16.0 - uTime*2.4), 3.0);
+      s.rgb += hue(dot(pw,rdW)*0.7 - uTime*0.15) * ring * exp(-rad*2.4) * 2.2;
+      s.a += ring*exp(-rad*2.4)*0.5;
+    }
+    float a = clamp(s.a*dt*1.35, 0.0, 1.0);
+    acc += (1.0-alpha)*s.rgb*dt*1.5;
+    alpha += (1.0-alpha)*a;
+    if(alpha > 0.96) break;
+  }
+  return vec4(acc, alpha);
+}
+
+void main(){
+  vec2 uv = vUV; uv.x *= uRes.x/uRes.y;
+  vec3 ro = vec3(0.0, 0.12, 4.35);
+  vec3 rd = normalize(vec3(uv.x, uv.y - 0.03, -2.55));
+
+  // gem-local ray
+  vec3 roL = uRotT * ro;
+  vec3 rdL = uRotT * rd;
+  axisU = uRotT * vec3(0.0,1.0,0.0);
+  axisA = uRotT * vec3(1.0,0.0,0.0);
+  axisB = uRotT * vec3(0.0,0.0,1.0);
+
+  float tN, tF; vec3 nL, xnL;
+  vec3 col;
+  if(gemHit(roL, rdL, tN, tF, nL, xnL) && tN > 0.0){
+    vec3 nW = normalize(uRot * nL);
+    vec3 pW = ro + rd*tN;
+    float cosi = clamp(dot(-rd, nW), 0.0, 1.0);
+    float fres = 0.05 + 0.95*pow(1.0-cosi, 5.0);
+
+    // ---- into the gem ----
+    vec3 rrd = refract(rd, nW, 1.0/IOR);
+    if(length(rrd) < 0.5) rrd = rd;
+    vec3 rrdL = normalize(uRotT * rrd);
+    vec3 enterL = roL + rdL*tN;
+    float iN, iF; vec3 inrm, ixnrm;
+    vec4 inside = vec4(0.0);
+    vec3 exitNL = xnL; vec3 exitPL = enterL;
+    if(gemHit(enterL - rrdL*0.001, rrdL, iN, iF, inrm, ixnrm)){
+      inside = marchInside(enterL, rrdL, 0.0, max(iF,0.02), uSteps, rrd);
+      exitNL = ixnrm; exitPL = enterL + rrdL*iF;
+      // one internal bounce -> multiplied imagery (grows with facet count)
+      float bounceW = 0.28 + 0.5*clamp(float(uPlaneCount)/40.0, 0.0, 1.0);
+      vec3 brdL = reflect(rrdL, exitNL);
+      float bN, bF; vec3 bn, bxn;
+      if(gemHit(exitPL - brdL*0.001, brdL, bN, bF, bn, bxn)){
+        vec4 bounce = marchInside(exitPL, brdL, 0.0, max(bF,0.02), uSteps*0.5, uRot*brdL);
+        inside.rgb += (1.0-inside.a) * bounce.rgb * bounceW;
+        inside.a = min(1.0, inside.a + bounce.a*bounceW*0.6);
+      }
+    }
+
+    // ---- out the back: dispersed view of the background ----
+    vec3 exitNW = normalize(uRot * exitNL);
+    vec3 exitPW = uRot * exitPL;
+    float disp = 0.012 + 0.0011*float(uPlaneCount) + uTunnel*0.02;
+    vec3 bg;
+    {
+      vec3 dR = refract(rrd, -exitNW, IOR/(1.0+disp));
+      vec3 dG = refract(rrd, -exitNW, IOR);
+      vec3 dB = refract(rrd, -exitNW, IOR*(1.0+disp));
+      if(length(dG) < 0.5){ dR = rrd; dG = rrd; dB = rrd; }
+      else { if(length(dR)<0.5) dR = dG; if(length(dB)<0.5) dB = dG; }
+      bg = vec3(background(exitPW, normalize(dR), 0.0).r,
+                background(exitPW, normalize(dG), 0.0).g,
+                background(exitPW, normalize(dB), 0.0).b);
+    }
+    vec3 through = inside.rgb + (1.0-inside.a)*bg*0.9;
+    through *= 0.72 + 0.55*max(dot(nW, uLight), 0.0);   // per-facet shading
+
+    // ---- surface ----
+    vec3 refl = reflect(rd, nW);
+    vec3 env = envColor(refl);
+    float spec = pow(max(dot(refl, uLight), 0.0), 90.0)*3.0;
+    float glit = pow(max(dot(refl, uLight), 0.0), 8.0)*0.25;
+    col = mix(through, env, fres*0.75);
+    col += vec3(1.0,0.97,0.9)*spec + vec3(0.6,0.75,1.0)*glit;
+    col += vec3(0.35,0.55,1.0)*pow(1.0-cosi, 3.0)*0.14;   // rim
+    col += vec3(1.0)*uFlash*pow(1.0-cosi,1.5)*1.6;        // cut flash
+  } else {
+    col = background(ro, rd, 1.0);
+    // faint glow behind the gem
+    float b = max(dot(rd, normalize(vec3(0.0,0.0,-1.0)-ro*0.0)), 0.0);
+    col += vec3(0.05,0.08,0.16)*pow(max(1.0-length(uv-vec2(0.0,0.0))*0.9, 0.0), 2.0);
+  }
+
+  // vignette + tone
+  float vig = 1.0 - 0.35*dot(vUV,vUV);
+  col *= vig;
+  col = 1.0 - exp(-col*1.15);
+  col = pow(col, vec3(0.95));
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ============================================================
+//  boot webgl
+// ============================================================
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', {antialias:false, alpha:false, powerPreference:'high-performance'})
+        || canvas.getContext('experimental-webgl');
+const errBox = document.getElementById('err');
+function fatal(msg){ errBox.style.display='block'; errBox.textContent += msg + '\n'; }
+if(!gl){ fatal('WebGLがつかえないブラウザです'); }
+
+function makeShader(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){ fatal(gl.getShaderInfoLog(s)); return null; }
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, makeShader(gl.VERTEX_SHADER, VSH));
+gl.attachShader(prog, makeShader(gl.FRAGMENT_SHADER, FSH));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) fatal('link: '+gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const locPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(locPos);
+gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+['uRes','uTime','uRot','uRotT','uPlanes','uPlaneCount','uLight','uBlue','uPink','uGold','uBub','uStar','uJelly',
+ 'uMixAmt','uSlosh','uSpin','uHeart','uSix','uTunnel','uJShadow','uGalaxy','uFlash','uSteps']
+ .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+
+// ============================================================
+//  tiny quaternion / mat helpers
+// ============================================================
+function qMul(a,b){ return [
+  a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
+  a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+  a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
+  a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]]; }
+function qAxisAngle(ax, ang){ const s=Math.sin(ang/2), l=Math.hypot(ax[0],ax[1],ax[2])||1;
+  return [ax[0]/l*s, ax[1]/l*s, ax[2]/l*s, Math.cos(ang/2)]; }
+function qNorm(q){ const l=Math.hypot(q[0],q[1],q[2],q[3])||1; return q.map(v=>v/l); }
+function qToMat3(q){ const [x,y,z,w]=q;
+  return new Float32Array([   // column-major
+    1-2*(y*y+z*z), 2*(x*y+z*w),   2*(x*z-y*w),
+    2*(x*y-z*w),   1-2*(x*x+z*z), 2*(y*z+x*w),
+    2*(x*z+y*w),   2*(y*z-x*w),   1-2*(x*x+y*y)]); }
+function mat3T(m){ return new Float32Array([m[0],m[3],m[6], m[1],m[4],m[7], m[2],m[5],m[8]]); }
+function m3v(m,v){ return [ m[0]*v[0]+m[3]*v[1]+m[6]*v[2], m[1]*v[0]+m[4]*v[1]+m[7]*v[2], m[2]*v[0]+m[5]*v[1]+m[8]*v[2] ]; }
+
+// ============================================================
+//  game state
+// ============================================================
+const MAXP = 40;
+const state = {
+  quat: qNorm([0.1, 0.2, 0.05, 1]),
+  angVel: [0,0],           // screen-space drag velocity
+  planes: [],              // {n:[x,y,z], d}
+  ing: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },  // 0 | .5 | 1
+  slosh: [0,0,0],
+  spin: 0,                 // current spin energy 0..1
+  mixAmt: 0,
+  totalSpin: 0,
+  light: { az: 0.5, el: 0.55 },
+  lightMoved: false,
+  mode: 'spin',            // spin | cut | light
+  flash: 0,
+  galaxyLit: false,        // sticky per gem
+  started: false,
+  muted: false,
+  hintStep: 0,
+};
+
+function initPlanes(){
+  state.planes = [];
+  const rng = mulberry(20260725);
+  const s3 = 1/Math.sqrt(3);
+  for(const sx of [-1,1]) for(const sy of [-1,1]) for(const sz of [-1,1]){
+    const n = normJ([sx*s3, sy*s3, sz*s3], rng, 0.10);
+    state.planes.push({n, d: 0.74 + rng()*0.08});
+  }
+  state.planes.push({n: normJ([0,1,0], rng, 0.06), d: 0.86});
+  state.planes.push({n: normJ([0,-1,0], rng, 0.06), d: 0.86});
+  updateFacetCount();
+}
+function mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function normJ(v, rng, j){ const n=[v[0]+(rng()-0.5)*j, v[1]+(rng()-0.5)*j, v[2]+(rng()-0.5)*j];
+  const l=Math.hypot(...n); return [n[0]/l, n[1]/l, n[2]/l]; }
+
+const planeArr = new Float32Array(MAXP*4);
+function packPlanes(){
+  for(let i=0;i<state.planes.length;i++){
+    const p = state.planes[i];
+    planeArr[i*4]=p.n[0]; planeArr[i*4+1]=p.n[1]; planeArr[i*4+2]=p.n[2]; planeArr[i*4+3]=p.d;
+  }
+}
+function updateFacetCount(){ document.getElementById('fc').textContent = state.planes.length; }
+
+// ---- JS-side ray vs gem (for cutting) ----
+function pickGem(clientX, clientY){
+  const r = canvas.getBoundingClientRect();
+  const ndcX = (clientX - r.left)/r.width*2 - 1;
+  const ndcY = 1 - (clientY - r.top)/r.height*2;
+  const asp = r.width/r.height;
+  const ro = [0, 0.12, 4.35];
+  let rd = [ndcX*asp, ndcY - 0.03, -2.55];
+  const l = Math.hypot(...rd); rd = rd.map(v=>v/l);
+  const Rt = mat3T(qToMat3(state.quat));
+  const roL = m3v(Rt, ro), rdL = m3v(Rt, rd);
+  let tN=-1e9, tF=1e9;
+  for(const p of state.planes){
+    const dn = p.n[0]*rdL[0]+p.n[1]*rdL[1]+p.n[2]*rdL[2];
+    const dist = p.d - (p.n[0]*roL[0]+p.n[1]*roL[1]+p.n[2]*roL[2]);
+    if(Math.abs(dn) < 1e-8){ if(dist<0) return null; continue; }
+    const t = dist/dn;
+    if(dn<0){ if(t>tN) tN=t; } else { if(t<tF) tF=t; }
+    if(tN>tF) return null;
+  }
+  if(tF < Math.max(tN,0) || tN < 0) return null;
+  return [roL[0]+rdL[0]*tN, roL[1]+rdL[1]*tN, roL[2]+rdL[2]*tN];
+}
+
+function cutAt(clientX, clientY){
+  const hp = pickGem(clientX, clientY);
+  if(!hp) return false;
+  const len = Math.hypot(...hp);
+  if(len < 0.3) return false;
+  const n = hp.map(v=>v/len);
+  // deepen a near-identical facet instead of stacking a duplicate
+  for(const p of state.planes){
+    if(p.n[0]*n[0]+p.n[1]*n[1]+p.n[2]*n[2] > 0.995){
+      p.d = Math.max(0.4, p.d*0.94);
+      return true;
+    }
+  }
+  if(state.planes.length >= MAXP) return false;
+  const d = Math.max(0.42, len*0.90);
+  state.planes.push({n, d});
+  updateFacetCount();
+  return true;
+}
+
+// ============================================================
+//  audio (tiny webaudio synth)
+// ============================================================
+let AC = null, master = null;
+function audio(){
+  if(state.muted) return null;
+  if(!AC){
+    AC = new (window.AudioContext||window.webkitAudioContext)();
+    master = AC.createGain(); master.gain.value = 0.5; master.connect(AC.destination);
+    // ambient pad
+    const pad = AC.createGain(); pad.gain.value = 0.035; pad.connect(master);
+    const lp = AC.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=600; lp.connect(pad);
+    [110, 165.2, 220.5].forEach(f=>{
+      const o = AC.createOscillator(); o.type='sine'; o.frequency.value=f;
+      const lfo = AC.createOscillator(); lfo.frequency.value = 0.07+Math.random()*0.05;
+      const lg = AC.createGain(); lg.gain.value = 2.5;
+      lfo.connect(lg); lg.connect(o.frequency); lfo.start();
+      o.connect(lp); o.start();
+    });
+  }
+  if(AC.state === 'suspended') AC.resume();
+  return AC;
+}
+function ping(freq, dur=0.5, vol=0.25, type='sine'){
+  const ac = audio(); if(!ac) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator(); o.type=type; o.frequency.value=freq;
+  const o2 = ac.createOscillator(); o2.type='sine'; o2.frequency.value=freq*2.01;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  o.connect(g); o2.connect(g); g.connect(master);
+  o.start(t); o2.start(t); o.stop(t+dur); o2.stop(t+dur);
+}
+function chimeCut(){ ping(1180+Math.random()*300, 0.6, 0.22, 'triangle'); ping(2360, 0.3, 0.08); }
+function chimePour(){ ping(420, 0.25, 0.12, 'sine'); ping(630, 0.3, 0.1); }
+function chimeDiscovery(){
+  const ac = audio(); if(!ac) return;
+  [523.25, 659.26, 783.99, 1046.5, 1318.5].forEach((f,i)=>{
+    setTimeout(()=>ping(f, 0.8, 0.2, 'triangle'), i*110);
+  });
+}
+
+// ============================================================
+//  discoveries
+// ============================================================
+const DISCS = [
+  { id:'heart',  ic:'💗', name:'ハートのあわ',       desc:'あわが ぜんぶ ハートに みえる！',
+    cond:()=> state.ing.bub>0 && state.planes.length>=16 },
+  { id:'six',    ic:'🪼', name:'むっつの ぶんしん',   desc:'なかの クラゲが 6ぴきに ふえて みえる！',
+    cond:()=> state.ing.jelly>0 && state.planes.length>=22 },
+  { id:'tunnel', ic:'🌈', name:'にじいろトンネル',    desc:'ほうせきの おくに にじの トンネルが あらわれた！',
+    cond:()=> state.planes.length>=28 && (state.ing.blue>0 || state.ing.pink>0) },
+  { id:'jshadow',ic:'🌑', name:'きょだいクラゲのかげ', desc:'かべに おおきな クラゲの かげが うつった！',
+    cond:()=> state.ing.jelly>0 && state.lightMoved && Math.sin(state.light.el)<0.25 },
+  { id:'galaxy', ic:'🌌', name:'ちいさなぎんが',      desc:'ほうせきの ちゅうしんに ぎんがが うまれた！',
+    cond:()=> state.galaxyLit || (state.ing.star>0 && state.ing.gold>0 && state.totalSpin>28) },
+];
+let found = {};
+try { found = JSON.parse(localStorage.getItem('livingGem.found')||'{}'); } catch(e){ found = {}; }
+function saveFound(){ try{ localStorage.setItem('livingGem.found', JSON.stringify(found)); }catch(e){} }
+
+const banner = document.getElementById('disc-banner');
+let bannerT = null;
+function showDiscovery(d){
+  banner.querySelector('.ic').textContent = d.ic;
+  banner.querySelector('.n').textContent = d.name;
+  banner.querySelector('.d').textContent = d.desc;
+  banner.classList.add('show');
+  chimeDiscovery();
+  clearTimeout(bannerT);
+  bannerT = setTimeout(()=>banner.classList.remove('show'), 3800);
+}
+const active = {};
+function evalDiscoveries(){
+  for(const d of DISCS){
+    const on = d.cond();
+    active[d.id] = on;
+    if(on && !found[d.id]){
+      found[d.id] = true; saveFound(); showDiscovery(d); renderAlbum();
+    }
+  }
+  if(active.galaxy) state.galaxyLit = true;
+}
+function renderAlbum(){
+  const list = document.getElementById('disc-list');
+  list.innerHTML = '';
+  for(const d of DISCS){
+    const row = document.createElement('div');
+    row.className = 'disc-row' + (found[d.id] ? ' found' : '');
+    row.innerHTML = found[d.id]
+      ? `<div class="ic">${d.ic}</div><div class="tx"><div class="n">${d.name}</div><div class="d">${d.desc}</div></div>`
+      : `<div class="ic">${d.ic}</div><div class="tx"><div class="n">？？？</div><div class="d">まだ みつけていない…</div></div>`;
+    list.appendChild(row);
+  }
+}
+renderAlbum();
+
+// ============================================================
+//  hints
+// ============================================================
+const HINTS = [
+  'まずは 🫗そそぐ で ジュースを いれてみよう！',
+  'つぎは ⭐や🫧、🪼クラゲも いれてみよう！',
+  'ゆびで ドラッグして ほうせきを まわしてみよう！',
+  '⛏️けずる にして ほうせきを タップ！ あたらしい めんが できるよ',
+  '🔦ひかり で ドラッグすると ひかりが うごくよ。かべの もようを みてみよう',
+  'めんを ふやすほど なかの せかいが かわる。かくれた げんしょうを さがそう！',
+];
+const hintEl = document.getElementById('hint');
+function setHint(i){
+  if(i <= state.hintStep && state.hintStep>0) return;
+  state.hintStep = i;
+  if(i >= HINTS.length){ hintEl.classList.add('gone'); return; }
+  hintEl.classList.remove('gone');
+  hintEl.textContent = HINTS[i];
+  if(i === HINTS.length-1) setTimeout(()=>hintEl.classList.add('gone'), 9000);
+}
+setHint(0);
+
+// ============================================================
+//  UI wiring
+// ============================================================
+const modeBtns = { spin:document.getElementById('m-spin'), cut:document.getElementById('m-cut'), light:document.getElementById('m-light') };
+const pourBtn = document.getElementById('m-pour');
+const pourPanel = document.getElementById('pour-panel');
+
+function setMode(m){
+  state.mode = m;
+  for(const k in modeBtns) modeBtns[k].classList.toggle('active', k===m);
+  if(m !== 'pourOpenKeep') pourPanel.classList.remove('open');
+  pourBtn.classList.toggle('active', false);
+}
+modeBtns.spin.addEventListener('click', ()=>{ audio(); setMode('spin'); });
+modeBtns.cut.addEventListener('click', ()=>{ audio(); setMode('cut'); setHint(3); });
+modeBtns.light.addEventListener('click', ()=>{ audio(); setMode('light'); setHint(4); });
+pourBtn.addEventListener('click', ()=>{
+  audio();
+  const open = !pourPanel.classList.contains('open');
+  pourPanel.classList.toggle('open', open);
+  pourBtn.classList.toggle('active', open);
+});
+
+const LV = [0, 0.5, 1];
+document.querySelectorAll('.ing-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const ing = btn.dataset.ing;
+    let lv = (parseInt(btn.dataset.lv)+1)%3;
+    btn.dataset.lv = lv;
+    state.ing[ing] = LV[lv];
+    chimePour();
+    if(ing==='blue'||ing==='pink') setHint(1); else setHint(2);
+  });
+});
+
+document.getElementById('btn-album').addEventListener('click', ()=>{ audio(); document.getElementById('album').classList.add('open'); });
+document.getElementById('album-close').addEventListener('click', ()=>document.getElementById('album').classList.remove('open'));
+document.getElementById('album').addEventListener('click', (e)=>{ if(e.target.id==='album') document.getElementById('album').classList.remove('open'); });
+
+document.getElementById('btn-sound').addEventListener('click', function(){
+  state.muted = !state.muted;
+  this.textContent = state.muted ? '🔇' : '🔊';
+  if(master) master.gain.value = state.muted ? 0 : 0.5;
+});
+document.getElementById('btn-reset').addEventListener('click', ()=>{
+  audio(); ping(300,0.4,0.15);
+  initPlanes();
+  state.ing = {blue:0,pink:0,gold:0,bub:0,star:0,jelly:0};
+  state.totalSpin = 0; state.galaxyLit = false; state.mixAmt = 0;
+  document.querySelectorAll('.ing-btn').forEach(b=>b.dataset.lv=0);
+});
+
+document.getElementById('start-btn').addEventListener('click', ()=>{
+  audio(); ping(660,0.5,0.2,'triangle'); ping(990,0.6,0.12);
+  document.getElementById('title-screen').classList.add('hidden');
+  document.getElementById('hud').classList.add('visible');
+  state.started = true;
+});
+
+// title twinkles
+(function(){
+  const t = document.getElementById('title-screen');
+  for(let i=0;i<26;i++){
+    const s = document.createElement('span');
+    s.className='tw'; s.textContent = ['✦','✧','･','⋆'][i%4];
+    s.style.left = Math.random()*100+'%';
+    s.style.top = Math.random()*100+'%';
+    s.style.fontSize = (1+Math.random()*2.4)+'vmin';
+    s.style.animationDuration = (1.5+Math.random()*3)+'s';
+    s.style.animationDelay = (Math.random()*3)+'s';
+    t.appendChild(s);
+  }
+})();
+
+function sparkBurst(x, y, ch='✨', n=8){
+  for(let i=0;i<n;i++){
+    const s = document.createElement('span');
+    s.className = 'spark'; s.textContent = ch;
+    s.style.left = x+'px'; s.style.top = y+'px';
+    const a = Math.random()*Math.PI*2, r = 40+Math.random()*70;
+    s.style.setProperty('--dx', Math.cos(a)*r+'px');
+    s.style.setProperty('--dy', Math.sin(a)*r+'px');
+    document.body.appendChild(s);
+    setTimeout(()=>s.remove(), 850);
+  }
+}
+
+// ============================================================
+//  pointer interaction
+// ============================================================
+let dragging = false, lastX=0, lastY=0, downX=0, downY=0, moved=0, dragT=0;
+canvas.addEventListener('pointerdown', e=>{
+  if(!state.started) return;
+  dragging = true; moved = 0;
+  lastX = downX = e.clientX; lastY = downY = e.clientY;
+  dragT = performance.now();
+  canvas.setPointerCapture(e.pointerId);
+  pourPanel.classList.remove('open'); pourBtn.classList.remove('active');
+});
+canvas.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx = e.clientX-lastX, dy = e.clientY-lastY;
+  moved += Math.abs(dx)+Math.abs(dy);
+  lastX = e.clientX; lastY = e.clientY;
+  const sc = 1/Math.min(innerWidth, innerHeight);
+  if(state.mode === 'light'){
+    state.light.az += dx*sc*3.2;
+    state.light.el = Math.max(0.02, Math.min(1.5, state.light.el - dy*sc*3.2));
+    state.lightMoved = true;
+  } else {
+    state.angVel[0] = dx*sc*5.5;
+    state.angVel[1] = dy*sc*5.5;
+    applySpin(state.angVel[0], state.angVel[1]);
+    if(moved > 60) setHint(3);
+  }
+});
+canvas.addEventListener('pointerup', e=>{
+  if(!dragging) return;
+  dragging = false;
+  if(state.mode === 'cut' && moved < 12){
+    if(cutAt(e.clientX, e.clientY)){
+      state.flash = 1;
+      chimeCut();
+      sparkBurst(e.clientX, e.clientY, '💎', 6);
+      sparkBurst(e.clientX, e.clientY, '✨', 8);
+      setHint(4);
+    }
+  }
+});
+canvas.addEventListener('pointercancel', ()=>{ dragging=false; });
+
+function applySpin(rx, ry){
+  const q1 = qAxisAngle([0,1,0], rx);
+  const q2 = qAxisAngle([1,0,0], ry);
+  state.quat = qNorm(qMul(qMul(q1,q2), state.quat));
+  const sp = Math.abs(rx)+Math.abs(ry);
+  state.spin = Math.min(1, state.spin + sp*2.2);
+  state.totalSpin += sp*3.0;
+  state.slosh[0] += rx*2.4; state.slosh[1] += (rx-ry)*1.1; state.slosh[2] += ry*2.4;
+  state.mixAmt = Math.min(1, state.mixAmt + sp*0.5);
+}
+
+// ============================================================
+//  render loop
+// ============================================================
+initPlanes();
+let t0 = performance.now();
+const BASE_SCALE = Math.min(window.devicePixelRatio||1, 1.6) * 0.8;
+let resScale = BASE_SCALE;
+let marchSteps = 26.0;
+let fpsAcc = 0, fpsN = 0;
+function autoQuality(dt){
+  fpsAcc += dt; fpsN++;
+  if(fpsN >= 90){
+    const fps = fpsN/fpsAcc;
+    if(fps < 27 && resScale > 0.45){
+      resScale = Math.max(0.45, resScale - 0.15);
+      marchSteps = 18.0;
+    } else if(fps > 55 && resScale < BASE_SCALE){
+      resScale = Math.min(BASE_SCALE, resScale + 0.1);
+    }
+    fpsAcc = 0; fpsN = 0;
+  }
+}
+function resize(){
+  const w = Math.floor(innerWidth*resScale), h = Math.floor(innerHeight*resScale);
+  if(canvas.width!==w || canvas.height!==h){
+    canvas.width=w; canvas.height=h;
+    gl.viewport(0,0,w,h);
+  }
+}
+addEventListener('resize', resize);
+
+function frame(now){
+  requestAnimationFrame(frame);
+  resize();
+  const t = (now - t0)/1000;
+  const dt = Math.min(0.05, (now - (frame.pt||now))/1000); frame.pt = now;
+  if(state.started) autoQuality(Math.max(dt, 0.001));
+
+  // inertia when not dragging
+  if(!dragging && (Math.abs(state.angVel[0])>1e-4 || Math.abs(state.angVel[1])>1e-4)){
+    applySpin(state.angVel[0], state.angVel[1]);
+    state.angVel[0]*=0.965; state.angVel[1]*=0.965;
+  }
+  state.spin = Math.max(0, state.spin - dt*0.5);
+  state.mixAmt = Math.max(0, state.mixAmt - dt*0.02);   // liquids very slowly settle
+  state.flash = Math.max(0, state.flash - dt*3.0);
+
+  if(state.started) evalDiscoveries();
+
+  const R = qToMat3(state.quat);
+  const Rt = mat3T(R);
+  const el = state.light.el, az = state.light.az;
+  const L = [Math.sin(az)*Math.cos(el), Math.sin(el), Math.cos(az)*Math.cos(el)];
+
+  packPlanes();
+  gl.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl.uniform1f(U.uTime, t);
+  gl.uniformMatrix3fv(U.uRot, false, R);
+  gl.uniformMatrix3fv(U.uRotT, false, Rt);
+  gl.uniform4fv(U.uPlanes, planeArr);
+  gl.uniform1i(U.uPlaneCount, state.planes.length);
+  gl.uniform3f(U.uLight, L[0], L[1], L[2]);
+  gl.uniform1f(U.uBlue, state.ing.blue);
+  gl.uniform1f(U.uPink, state.ing.pink);
+  gl.uniform1f(U.uGold, state.ing.gold);
+  gl.uniform1f(U.uBub, state.ing.bub);
+  gl.uniform1f(U.uStar, state.ing.star);
+  gl.uniform1f(U.uJelly, state.ing.jelly);
+  gl.uniform1f(U.uMixAmt, state.mixAmt);
+  gl.uniform3f(U.uSlosh, state.slosh[0], state.slosh[1], state.slosh[2]);
+  gl.uniform1f(U.uSpin, state.spin);
+  gl.uniform1f(U.uHeart, active.heart?1:0);
+  gl.uniform1f(U.uSix, active.six?1:0);
+  gl.uniform1f(U.uTunnel, active.tunnel?1:0);
+  gl.uniform1f(U.uJShadow, active.jshadow?1:0);
+  gl.uniform1f(U.uGalaxy, active.galaxy?1:0);
+  gl.uniform1f(U.uFlash, state.flash);
+  gl.uniform1f(U.uSteps, marchSteps);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
