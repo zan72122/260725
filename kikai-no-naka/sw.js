@@ -7,7 +7,7 @@
  * 更新のしかた: CACHE の版番号を上げる。古いキャッシュは activate で消える。
  */
 
-const CACHE = 'kikai-no-naka-v2';
+const CACHE = 'kikai-no-naka-v3';
 
 const ASSETS = [
   './',
@@ -32,7 +32,11 @@ const ASSETS = [
   './js/lib/textures.js',
   './js/lib/xray.js',
   './js/machines/base.js',
+  './js/machines/beater.js',
+  './js/machines/bicycle.js',
+  './js/machines/camera.js',
   './js/machines/clock.js',
+  './js/machines/escalator.js',
   './js/machines/fan.js',
   './js/machines/flashlight.js',
   './js/machines/gacha.js',
@@ -40,11 +44,13 @@ const ASSETS = [
   './js/machines/lift.js',
   './js/machines/lock.js',
   './js/machines/musicbox.js',
+  './js/machines/piano.js',
   './js/machines/pump.js',
   './js/machines/scale.js',
   './js/machines/sewing.js',
   './js/machines/sharpener.js',
   './js/machines/toaster.js',
+  './js/machines/train.js',
 
   './vendor/three/three.module.js',
   './vendor/three/addons/geometries/RoundedBoxGeometry.js',

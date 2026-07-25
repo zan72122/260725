@@ -1069,3 +1069,231 @@ export function capsuleHalf(radius, half = 'top', segments = 24) {
   pts.push([0, 0]);
   return lathe(pts, { segments, center: false, creaseAngle: 1.1 });
 }
+
+/**
+ * かさ歯車（ベベルギヤ）。
+ *
+ * 平歯車の輪郭を、円すいに沿って だんだん小さくしながら 押し出す。
+ * 大端（back）から 小端（front）へ 縮む「輪切りの積み重ね」で作り、
+ * 前後にふたを付けるだけ。本物のように球面インボリュートにはしていないが、
+ * 噛み合う 2 枚を 同じ規則で作るかぎり、見た目は 正しく合う。
+ *
+ * 軸は +Y。大端が y=0、小端が y=faceWidth。
+ *
+ * @param {object} o
+ * @param {number} o.teeth 歯数
+ * @param {number} o.module 大端でのモジュール
+ * @param {number} o.faceWidth 歯すじの長さ
+ * @param {number} [o.taper] 小端の縮み率（0.62 なら 小端が 62%）
+ * @param {number} [o.bore] 軸穴の半径
+ * @param {number} [o.rim] 大端の裏に付ける つばの厚み
+ */
+export function bevelGearGeometry(o) {
+  const {
+    teeth,
+    module: m,
+    faceWidth,
+    taper = 0.66,
+    bore = 0,
+    rim = 0,
+    pressureAngle = 20 * (Math.PI / 180),
+    profileSteps = 5,
+  } = o;
+
+  const { points: raw, pitchR } = gearOutline({ teeth, module: m, pressureAngle, profileSteps });
+  const outline = roundCorners(raw, m * 0.22, 2, 0.28);
+  const n = outline.length;
+
+  // 大端 → 小端 の 2 段（間を割ってもいいが、直線テーパで足りる）
+  const rings = [
+    { y: 0, s: 1 },
+    { y: faceWidth, s: taper },
+  ];
+
+  const pos = [];
+  const idx = [];
+  const pushRing = (y, s) => {
+    const base = pos.length / 3;
+    for (const p of outline) pos.push(p.x * s, y, p.y * s);
+    return base;
+  };
+
+  const a = pushRing(rings[0].y, rings[0].s);
+  const b = pushRing(rings[1].y, rings[1].s);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    idx.push(a + i, b + i, b + j);
+    idx.push(a + i, b + j, a + j);
+  }
+
+  // ふた（大端・小端）。穴があるときは ドーナツ状に張る。
+  const capR = bore > 0 ? bore : 0;
+  const capRing = (y, s, r, flip) => {
+    const outer = pushRing(y, s);
+    const inner = pos.length / 3;
+    for (let i = 0; i < n; i++) {
+      const p = outline[i];
+      const len = Math.hypot(p.x, p.y) || 1;
+      pos.push((p.x / len) * r, y, (p.y / len) * r);
+    }
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      if (flip) {
+        idx.push(outer + i, inner + i, inner + j);
+        idx.push(outer + i, inner + j, outer + j);
+      } else {
+        idx.push(outer + i, inner + j, inner + i);
+        idx.push(outer + i, outer + j, inner + j);
+      }
+    }
+  };
+  capRing(0, 1, Math.max(capR, pitchR * 0.18), false);
+  capRing(faceWidth, taper, Math.max(capR, pitchR * 0.18 * taper), true);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+
+  if (rim > 0) {
+    const back = pipe(pitchR + m * 1.02, Math.max(bore, pitchR * 0.2), rim, { segments: 40, chamfer: m * 0.1 });
+    back.translate(0, -rim / 2, 0);
+    return mergeAll([geo, back]);
+  }
+  return geo;
+}
+
+/**
+ * スポークの入った車輪。自転車にも 汽車にも使う。
+ *
+ * 軸は +Z（板として立っている状態）。
+ *
+ * @param {object} o
+ * @param {number} o.rimR リムの外半径
+ * @param {number} [o.rimW] リムの幅（軸方向）
+ * @param {number} [o.rimT] リムの厚み（半径方向）
+ * @param {number} [o.hubR] ハブの半径
+ * @param {number} [o.spokes] スポーク本数
+ * @param {number} [o.spokeR] スポークの太さ
+ * @param {number} [o.lean] スポークを 軸方向へ 振る量（自転車のあやどり）
+ * @param {number} [o.flange] 車輪のつば（汽車のレール用）の張り出し
+ */
+export function spokedWheel(o) {
+  const {
+    rimR,
+    rimW = rimR * 0.12,
+    rimT = rimR * 0.10,
+    hubR = rimR * 0.16,
+    hubW = rimW * 1.6,
+    spokes = 12,
+    spokeR = rimR * 0.014,
+    lean = 0,
+    flange = 0,
+  } = o;
+
+  const parts = [];
+  const rim = pipe(rimR, rimR - rimT, rimW, { segments: 48, chamfer: Math.min(rimT, rimW) * 0.22 });
+  rim.rotateX(Math.PI / 2);
+  parts.push(rim);
+
+  if (flange > 0) {
+    const fl = pipe(rimR + flange, rimR - rimT * 0.5, rimW * 0.30, { segments: 48, chamfer: flange * 0.3 });
+    fl.rotateX(Math.PI / 2);
+    fl.translate(0, 0, -rimW / 2 - rimW * 0.15);
+    parts.push(fl);
+  }
+
+  const hub = chamferedCylinder(hubR, hubW, hubR * 0.14, 24);
+  hub.rotateX(Math.PI / 2);
+  parts.push(hub);
+
+  const len = rimR - rimT * 0.5 - hubR;
+  for (let i = 0; i < spokes; i++) {
+    const ang = (i / spokes) * TAU;
+    const s = chamferedCylinder(spokeR, len, spokeR * 0.4, 6);
+    s.translate(0, len / 2 + hubR, 0);
+    // 交互に 前後へ 振る（自転車らしい あやどり）
+    if (lean !== 0) s.rotateX((i % 2 === 0 ? 1 : -1) * lean);
+    s.rotateZ(ang);
+    parts.push(s);
+  }
+  return mergeAll(parts);
+}
+
+/**
+ * 閉じた折れ線を、弧長で引けるようにする。
+ *
+ * エスカレーターのレールや チェーンの経路のように、
+ * 「1 本の輪の上を 部品が 等間隔で ならんで まわる」ものに使う。
+ *
+ * @param {THREE.Vector3[]} points 折れ線の頂点（最後と最初はつながっているとみなす）
+ * @returns {{length:number, at:(s:number, out?:THREE.Vector3)=>THREE.Vector3, tangent:(s:number, out?:THREE.Vector3)=>THREE.Vector3}}
+ */
+export function closedPath(points) {
+  const n = points.length;
+  const cum = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    cum[i + 1] = cum[i] + points[i].distanceTo(points[(i + 1) % n]);
+  }
+  const length = cum[n];
+
+  const seek = (s) => {
+    let t = s % length;
+    if (t < 0) t += length;
+    // 線形探索で十分（頂点は多くて数十）
+    let i = 0;
+    while (i < n - 1 && cum[i + 1] <= t) i++;
+    const span = cum[i + 1] - cum[i] || 1;
+    return { i, f: (t - cum[i]) / span };
+  };
+
+  const at = (s, out = new THREE.Vector3()) => {
+    const { i, f } = seek(s);
+    return out.lerpVectors(points[i], points[(i + 1) % n], f);
+  };
+  const tangent = (s, out = new THREE.Vector3()) => {
+    const { i } = seek(s);
+    return out.subVectors(points[(i + 1) % n], points[i]).normalize();
+  };
+  return { length, at, tangent };
+}
+
+/**
+ * 絞り（アイリス）の羽根 1 枚。
+ *
+ * 羽根の 支点を 原点に置き、穴の 中心を C = (0, -pivotR) とする。
+ * 内がわの ふちは C を中心とする 半径 tipR の円弧。羽根を 支点まわりに
+ * まわすと C が 円を描いて ずれるので、円弧が 中心から 遠のき、
+ * 6枚の かさなりが つくる 穴が 小さくなる。
+ *
+ * 輪郭は「内の円弧 → 外の円弧を 逆向きに」の 1 周だけ。
+ * 途中で 戻ったり すると 自己交差して、押し出しが 破綻する。
+ *
+ * @param {object} o
+ * @param {number} o.pivotR 支点から 穴の中心までの 距離
+ * @param {number} o.tipR   開ききったときの 穴の 半径
+ * @param {number} o.width  羽根の はば
+ * @param {number} [o.sweep] 円弧の 開き（ラジアン）
+ */
+export function irisBlade({ pivotR = 0.015, tipR = 0.0128, width = 0.008, thickness = 0.0004, sweep = 1.80, steps = 16 }) {
+  const cy = -pivotR;
+  // 支点は C から見て 角度 +90°。そこから 時計まわりに sweep だけ のびる。
+  const a0 = Math.PI / 2 + 0.16;
+  const a1 = a0 - sweep;
+
+  const inner = [];
+  const outer = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const a = lerp(a0, a1, t);
+    inner.push(new THREE.Vector2(Math.cos(a) * tipR, cy + Math.sin(a) * tipR));
+    // 付け根は 支点を くるむ 太さ、先は 細く
+    const rOut = lerp(pivotR + width * 0.85, tipR + width * 0.30, t * t * 0.55 + t * 0.45);
+    outer.push(new THREE.Vector2(Math.cos(a) * rOut, cy + Math.sin(a) * rOut));
+  }
+  outer.reverse();
+
+  return extrudeOutline(inner.concat(outer), [], thickness, {
+    corner: width * 0.14, bevel: thickness * 0.25, curveSegments: 3,
+  });
+}
