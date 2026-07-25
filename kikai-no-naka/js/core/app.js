@@ -56,6 +56,7 @@ export class App {
       select: (id) => this.setMachine(id),
       xray: (v) => this.setXray(v),
       xrayEnd: () => this.savePrefs(),
+      spread: (v) => this.machine?.setSpread?.(v),
       reset: () => this.resetMachine(),
       sound: (on) => {
         this.audio.setEnabled(on);
@@ -209,6 +210,12 @@ export class App {
     machine.build();
     machine.adoptStrayShells();
     machine.setXray(this._xray);
+    // 「ばらす」に 対応している機械だけ、2本目の スライダーを 出す
+    this.ui.showTeardown(!!Cls.meta.teardown);
+    if (Cls.meta.teardown) {
+      this.ui.setSpread(0);
+      machine.setSpread?.(0);
+    }
     // 「ポンッ」と何かが飛び出したら、カメラを少し揺らす
     machine.onPop = () => this.rig.kick(0.9);
 

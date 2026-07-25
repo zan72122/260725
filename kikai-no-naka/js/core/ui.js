@@ -34,6 +34,10 @@ export const ICONS = {
   speak: `<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.4 3.6a.6.6 0 0 1-1-.5V16h-.1A2.5 2.5 0 0 1 4 13.5v-7Z" fill="currentColor"/>`,
   close: `<path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/>`,
   question: `<circle cx="12" cy="12" r="9.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.3 2.4c-.7.3-1 .9-1 1.6v.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/><circle cx="12" cy="17.2" r="1.3" fill="currentColor"/>`,
+  /** 組み上がった かたまり */
+  whole: `<rect x="4.6" y="4.6" width="14.8" height="14.8" rx="3.4" fill="none" stroke="currentColor" stroke-width="2.2"/><rect x="9.2" y="9.2" width="5.6" height="5.6" rx="1.6" fill="currentColor"/>`,
+  /** ばらばらの 部品 */
+  pieces: `<rect x="2.6" y="2.6" width="7.4" height="7.4" rx="2" fill="none" stroke="currentColor" stroke-width="2.1"/><rect x="14" y="3.4" width="6.6" height="6.6" rx="2" fill="currentColor"/><rect x="3.4" y="14" width="6.6" height="6.6" rx="2" fill="currentColor"/><rect x="13.4" y="13.4" width="7.6" height="7.6" rx="2" fill="none" stroke="currentColor" stroke-width="2.1"/>`,
 };
 
 function icon(name, size = 24) {
@@ -54,6 +58,7 @@ export class UI {
     this._meterEls = new Map();
     this._machines = [];
     this._xray = 0;
+    this._spread = 0;
     this._build();
   }
 
@@ -87,6 +92,18 @@ export class UI {
             </div>
             <div class="xray-cap xray-cap-b">${icon('ghost', 26)}</div>
             <div class="xray-label" id="xray-label">すけすけ</div>
+          </div>
+
+          <div class="xray is-mini" id="spread" hidden>
+            <div class="xray-cap xray-cap-a">${icon('whole', 22)}</div>
+            <div class="xray-track" id="spread-track">
+              <div class="xray-fill" id="spread-fill"></div>
+              <div class="xray-knob" id="spread-knob">
+                <div class="xray-knob-face">${icon('pieces', 24)}</div>
+              </div>
+            </div>
+            <div class="xray-cap xray-cap-b">${icon('pieces', 22)}</div>
+            <div class="xray-label" id="spread-label">ばらす</div>
           </div>
         </div>
 
@@ -132,6 +149,8 @@ export class UI {
             <li><span class="help-fig">${icon('gear', 30)}</span>ひかっている ぶひんを ゆびで さわってみよう</li>
             <li><span class="help-fig">${icon('reset', 30)}</span>ゆびで おさえると、とまるよ</li>
             <li><span class="help-fig">${icon('eye', 30)}</span>なにも ないところを なぞると、ぐるっと まわせるよ</li>
+            <li><span class="help-fig">${icon('pieces', 30)}</span><b>ばらす</b>が あるときは、ぶひんが ぜんぶ ならぶよ</li>
+            <li><span class="help-fig">${icon('gear', 30)}</span>ぶひんを ちょんと おすと、はずれる。もう いちど おすと もどる</li>
           </ul>
         </div>
       </div>
@@ -145,10 +164,19 @@ export class UI {
     this.xrayFill = this.root.querySelector('#xray-fill');
     this.xrayKnob = this.root.querySelector('#xray-knob');
     this.xrayLabel = this.root.querySelector('#xray-label');
+    this.spreadEl = this.root.querySelector('#spread');
+    this.spreadTrack = this.root.querySelector('#spread-track');
+    this.spreadFill = this.root.querySelector('#spread-fill');
+    this.spreadKnob = this.root.querySelector('#spread-knob');
+    this.spreadLabel = this.root.querySelector('#spread-label');
     this.sheet = this.root.querySelector('#sheet');
     this.helpSheet = this.root.querySelector('#help');
 
-    this._bindXray();
+    this._bindSlider(this.xrayTrack, this.xrayKnob, (v, done) => {
+      this.setXray(v, true);
+      if (done) this.on.xrayEnd?.(this._xray);
+    });
+    this._bindSlider(this.spreadTrack, this.spreadKnob, (v) => this.setSpread(v, true));
     this._bindButtons();
   }
 
@@ -156,9 +184,15 @@ export class UI {
   /* すけすけスライダー                                                */
   /* ---------------------------------------------------------------- */
 
-  _bindXray() {
-    const track = this.xrayTrack;
+  /**
+   * すけすけ と ばらす は 見た目も 操作も 同じなので、束ねかたを 共通にする。
+   * @param {HTMLElement} track
+   * @param {HTMLElement} knob
+   * @param {(v:number, done:boolean)=>void} onChange
+   */
+  _bindSlider(track, knob, onChange) {
     let dragging = false;
+    let last = 0;
 
     const valueFromEvent = (e) => {
       const r = track.getBoundingClientRect();
@@ -172,20 +206,22 @@ export class UI {
       e.preventDefault();
       dragging = true;
       track.setPointerCapture?.(e.pointerId);
-      this.xrayKnob.classList.add('is-grabbed');
-      this.setXray(valueFromEvent(e), true);
+      knob.classList.add('is-grabbed');
+      last = valueFromEvent(e);
+      onChange(last, false);
     };
     const onMove = (e) => {
       if (!dragging) return;
       e.preventDefault();
-      this.setXray(valueFromEvent(e), true);
+      last = valueFromEvent(e);
+      onChange(last, false);
     };
     const onUp = (e) => {
       if (!dragging) return;
       dragging = false;
       track.releasePointerCapture?.(e.pointerId);
-      this.xrayKnob.classList.remove('is-grabbed');
-      this.on.xrayEnd?.(this._xray);
+      knob.classList.remove('is-grabbed');
+      onChange(last, true);
     };
 
     track.addEventListener('pointerdown', onDown, { passive: false });
@@ -225,6 +261,47 @@ export class UI {
 
   get xray() {
     return this._xray;
+  }
+
+  /**
+   * 「ばらす」スライダー。0 = 組み上がり、1 = ランナーに ならんだ 状態。
+   * @param {number} v 0..1
+   * @param {boolean} fromUser
+   */
+  setSpread(v, fromUser = false) {
+    const value = Math.max(0, Math.min(1, v));
+    this._spread = value;
+    const pct = value * 100;
+    const knob = this.spreadKnob.style;
+    if (this.orientation === 'landscape') {
+      knob.left = '50%';
+      knob.top = '';
+      knob.bottom = `${pct}%`;
+      knob.transform = 'translate(-50%, 50%)';
+      this.spreadFill.style.height = `${pct}%`;
+      this.spreadFill.style.width = '';
+    } else {
+      knob.left = `${pct}%`;
+      knob.top = '50%';
+      knob.bottom = '';
+      knob.transform = 'translate(-50%, -50%)';
+      this.spreadFill.style.width = `${pct}%`;
+      this.spreadFill.style.height = '';
+    }
+    this.spreadEl.style.setProperty('--xray', value.toFixed(3));
+    this.spreadLabel.textContent = value < 0.04 ? 'くみたて' : value > 0.96 ? 'ぜんぶ ばらばら' : 'ばらす';
+    if (fromUser) this.on.spread?.(value);
+  }
+
+  get spread() {
+    return this._spread;
+  }
+
+  /** その機械が「ばらす」に 対応しているときだけ、2本目の スライダーを 出す */
+  showTeardown(on) {
+    this.spreadEl.hidden = !on;
+    this.hud.classList.toggle('has-teardown', !!on);
+    if (on) this.setSpread(this._spread);
   }
 
   /* ---------------------------------------------------------------- */
@@ -388,7 +465,10 @@ export class UI {
     // 幅も高さも狭い端末（iPhone など）は、部品をひとまわり小さくする
     this.hud.classList.toggle('is-compact', Math.min(width, height) < 400);
     // 縦横でスライダーの向きが変わるので、つまみの位置を計算し直す
-    if (changed) this.setXray(this._xray);
+    if (changed) {
+      this.setXray(this._xray);
+      this.setSpread(this._spread);
+    }
   }
 
   /**

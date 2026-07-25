@@ -29,6 +29,7 @@ const ASSETS = [
   './js/lib/materials.js',
   './js/lib/math.js',
   './js/lib/particles.js',
+  './js/lib/teardown.js',
   './js/lib/textures.js',
   './js/lib/xray.js',
   './js/machines/base.js',

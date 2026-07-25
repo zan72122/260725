@@ -759,3 +759,43 @@ button {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .06s !important; }
 }
+
+/* ------------------------------------------------------------------ */
+/* 「ばらす」スライダー（対応している機械だけ出る）                     */
+/* ------------------------------------------------------------------ */
+
+/* すけすけと ばらすは、たてに（横画面では よこに）ならべる */
+.hud.is-portrait .hud-side {
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+.hud.is-landscape .hud-side {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 2本目は ひとまわり 小さく。場所を 取りすぎないように。 */
+.xray.is-mini {
+  padding: 8px 14px;
+  gap: 9px;
+}
+.xray.is-mini .xray-cap { width: 26px; height: 26px; }
+.xray.is-mini .xray-track { height: 18px; min-width: 110px; }
+.xray.is-mini .xray-knob { width: 46px; height: 46px; }
+.xray.is-mini .xray-label { bottom: -19px; font-size: 11px; }
+
+.hud.is-portrait .xray.is-mini { width: min(340px, 86%); }
+.hud.is-landscape .xray.is-mini { padding: 14px 8px; }
+.hud.is-landscape .xray.is-mini .xray-track {
+  width: 18px;
+  height: min(30vh, 190px);
+}
+.hud.is-compact .xray.is-mini .xray-knob { width: 40px; height: 40px; }
+.hud.is-compact.is-landscape .xray.is-mini .xray-track { height: min(26vh, 110px); }
+
+/* 2本になったぶん、縦画面では 上へ 逃がす */
+.hud.has-teardown.is-portrait .hud-side { bottom: calc(var(--safe-b) + 258px); }
+.hud.has-teardown.is-compact.is-portrait .hud-side { bottom: calc(var(--safe-b) + 228px); }
