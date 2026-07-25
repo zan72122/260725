@@ -294,11 +294,19 @@ export class App {
     // マテリアルの作り直しが要るので、機械を組み直す
     const id = this.machine?.constructor.meta.id;
     if (id) {
+      // すけすけ量だけでなく、ばらし量も 引きつぐ。
+      // ここで 落とすと、スライダーは 動かないのに 機械だけが
+      // 勝手に 組み上がる（あるいは ばらけたまま 止まる）。
       const keepXray = this._xray;
+      const keepSpread = this.ui.spread;
       this._disposeCurrent();
       this.machine = null;
       this.setMachine(id, true);
       this.setXray(keepXray);
+      if (this.machine?.setSpread) {
+        this.ui.setSpread(keepSpread);
+        this.machine.setSpread(keepSpread);
+      }
     }
   }
 

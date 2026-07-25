@@ -717,30 +717,70 @@ export class Fan extends Machine {
     this.teardown = T;
 
     const P = [];
-    const add = (id, label, node, removable = true) => {
+    /**
+     * @param {string} id
+     * @param {string} label
+     * @param {THREE.Object3D} node
+     * @param {object} o
+     *   step  分解の 順番。0 が いちばん先に 外れる（= いちばん あとに 付けたもの）
+     *   axis  外れる 向き（ルート座標。前は -Z、後ろは +Z）
+     *   dist  どこまで 出ていくか
+     */
+    const add = (id, label, node, o = {}) => {
       if (!node) return;
-      P.push(T.add({ id, label, node, removable, order: P.length }));
+      P.push(T.add({
+        id, label, node,
+        removable: o.removable !== false,
+        order: P.length,
+        step: o.step ?? 0,
+        axis: o.axis ?? [0, 0, -1],
+        axisIsLocal: o.axisIsLocal === true,
+        dist: o.dist ?? 0.05,
+      }));
     };
 
-    // 外がわから 順に。ランナーも この順で ならぶ。
-    add('motorCan', 'モーターの ケース', this.canShell);
-    add('cageFront', 'まえの かご', this.cageFront);
-    add('cageBack', 'うしろの かご', this.cageBack);
-    for (let i = 0; i < 4; i++) add(BLADE_IDS[i], 'はね', this.bladeGroups[i]);
-    add('spinner', 'とめナット', this.spinnerGroup);
-    add('stator', 'てっしん', this.statorGroup);
-    for (let i = 0; i < 4; i++) add(COIL_IDS[i], 'まきせん', this.coilGroups[i]);
-    add('rotor', 'かいてんし', this.rotorCore);
-    add('commutator', 'せいりゅうし', this.commutatorGroup);
-    add('brush', 'ブラシ', this.brushGroup);
-    add('bearings', 'じくうけ', this.bearingGroup);
-    add('worm', 'ウォーム', this.wormGroup);
-    add('wormWheel', 'ウォームホイール', this.wormWheel);
-    add('link', 'リンクぼう', this.linkGroup);
-    add('cord', 'コード', this.cordGroup);
+    /*
+     * 分解の 順番は、本物の 手順を そのまま 逆に たどる。
+     *
+     *   前かご → とめナット → はね → うしろかご → モーターのケース
+     *   → 軸うけ → ブラシ → 整流子 → 回転子 → 巻線 → 鉄心
+     *   → ウォーム・ホイール・リンク棒 → コード → 柱 → 台
+     *
+     * スライダーを 組み立ての 向きへ 動かすと、この 逆に 進む。
+     * つまり 台に 柱を 立て、鉄心を 入れ、巻線を 巻き、回転子を 通し…
+     * と 積み上がっていく。
+     */
+    add('cageFront', 'まえの かご', this.cageFront, { step: 0, axis: [0, 0, -1], dist: 0.070 });
+    add('spinner', 'とめナット', this.spinnerGroup, { step: 1, axis: [0, 0, -1], dist: 0.050 });
+    for (let i = 0; i < 4; i++) {
+      // はねは 軸から 放射に 抜く。親（回転する ハブ）の 座標で 指定するので、
+      // まわっている 途中でも まっすぐ 外へ 出ていく。
+      const a = (i / 4) * TAU;
+      add(BLADE_IDS[i], 'はね', this.bladeGroups[i], {
+        step: 2, axisIsLocal: true, axis: [Math.cos(a), Math.sin(a), -0.45], dist: 0.048,
+      });
+    }
+    add('cageBack', 'うしろの かご', this.cageBack, { step: 3, axis: [0, 0, -1], dist: 0.044 });
+    add('motorCan', 'モーターの ケース', this.canShell, { step: 4, axis: [0, 0, 1], dist: 0.062 });
+    add('bearings', 'じくうけ', this.bearingGroup, { step: 5, axis: [0, 1, 0], dist: 0.048 });
+    add('brush', 'ブラシ', this.brushGroup, { step: 6, axis: [0, 1, 0], dist: 0.040 });
+    add('commutator', 'せいりゅうし', this.commutatorGroup, { step: 7, axis: [0, 0, 1], dist: 0.052 });
+    add('rotor', 'かいてんし', this.rotorCore, { step: 8, axis: [0, 0, 1], dist: 0.078 });
+    for (let i = 0; i < 4; i++) {
+      // 巻線は 突極から よこへ 抜く
+      const a = (i / 4) * TAU + Math.PI / 4;
+      add(COIL_IDS[i], 'まきせん', this.coilGroups[i], {
+        step: 9, axis: [Math.cos(a), Math.sin(a), 0], dist: 0.046,
+      });
+    }
+    add('stator', 'てっしん', this.statorGroup, { step: 10, axis: [0, 0, 1], dist: 0.056 });
+    add('worm', 'ウォーム', this.wormGroup, { step: 11, axis: [0, 0, 1], dist: 0.060 });
+    add('wormWheel', 'ウォームホイール', this.wormWheel, { step: 12, axis: [0, -1, 0], dist: 0.046 });
+    add('link', 'リンクぼう', this.linkGroup, { step: 12, axis: [0, -1, 0], dist: 0.058 });
+    add('cord', 'コード', this.cordGroup, { step: 13, axis: [-1, 0, 0.3], dist: 0.052 });
     // 抜けないもの。ランナーには 出るが、さわっても 外れない。
-    add('base', 'だい', this.baseGroup, false);
-    add('column', 'はしら', this.columnGroup, false);
+    add('column', 'はしら', this.columnGroup, { step: 14, axis: [0, 1, 0], dist: 0.034, removable: false });
+    add('base', 'だい', this.baseGroup, { step: 15, axis: [0, -1, 0], dist: 0.0, removable: false });
 
     T.layout();
     this._addPartHandles(P);

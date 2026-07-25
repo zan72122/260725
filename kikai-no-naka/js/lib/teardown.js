@@ -21,7 +21,7 @@
  */
 
 import * as THREE from 'three';
-import { clamp, clamp01, damp, ease } from './math.js';
+import { clamp, clamp01, damp, smoothstep } from './math.js';
 
 const _pos = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
@@ -32,8 +32,13 @@ const _ps = new THREE.Vector3();
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
 const _center = new THREE.Vector3();
-const _ppW = new THREE.Vector3();
-const _psW = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+const _rootPos = new THREE.Vector3();
+const _pq2 = new THREE.Quaternion();
+const _rq = new THREE.Quaternion();
+const _m4 = new THREE.Matrix4();
+const _tmpP = new THREE.Vector3();
+const _tmpS = new THREE.Vector3();
 
 export class Teardown {
   /**
@@ -52,7 +57,10 @@ export class Teardown {
     this.byId = new Map();
     /** ぜんたいの ばらし量 0..1 */
     this.spread = 0;
-    this._spreadShown = 0;
+    /** 画面に 出ている ばらし量（なめらかに 追う。これ 1 つだけが 状態） */
+    this._shown = 0;
+    /** ここまでが 分解図、ここから先が 図鑑 */
+    this.EXPLODE_END = 0.58;
     this._built = false;
 
     this.group = new THREE.Group();
@@ -79,8 +87,16 @@ export class Teardown {
       removable: spec.removable !== false,
       order: spec.order ?? this.parts.length,
       removed: false,
-      /** 見た目の 進みぐあい（なめらかに 追う） */
-      t: 0,
+      /** 抜かれた部品だけの 引き出し量（0..1） */
+      pull: 0,
+      /** 外れる 向き（ルート座標。axisIsLocal なら 親の座標） */
+      axis: new THREE.Vector3(...(spec.axis ?? [0, 0, 1])).normalize(),
+      axisIsLocal: spec.axisIsLocal === true,
+      /** どこまで 出ていくか */
+      dist: spec.dist ?? 0.05,
+      /** 分解の 順番（小さいほど 先に 外れる = あとから 付けたもの） */
+      step: spec.step ?? 0,
+      expA: 0, expB: 1, runA: 0, runB: 1,
       restPos: node.position.clone(),
       restQuat: node.quaternion.clone(),
       restScale: node.scale.clone(),
@@ -149,8 +165,34 @@ export class Teardown {
       p.slotScale = clamp(fit / p.radius, 0.16, 3.4);
     }
 
+    this._assignPhases(list);
     this._buildFrame();
     this._built = true;
+  }
+
+  /**
+   * 部品ごとの 出番を 決める。
+   *
+   * step が 小さい部品ほど 先に 外れる。分解の 山を すこしずつ ずらして
+   * 重ねると、「外がわから 順に ほどけていく」ように 見える。
+   * スライダーを 戻せば、そのまま 組み立ての 順番になる。
+   */
+  _assignPhases(list) {
+    const steps = [...new Set(list.map((p) => p.step))].sort((a, b) => a - b);
+    const n = Math.max(1, steps.length - 1);
+    const E = this.EXPLODE_END;
+    // 1 つぶんの 動く 時間。長めに 取って となりと 重ねる。
+    const w = E * 0.52;
+    for (const p of list) {
+      const k = steps.indexOf(p.step) / n;
+      p.expA = k * (E - w);
+      p.expB = p.expA + w;
+      // 図鑑へ 移るのは 逆順（先に 外れたものが あとから ならぶ）にすると
+      // 見ていて 落ちつく
+      const rw = (1 - E) * 0.55;
+      p.runA = (1 - k) * ((1 - E) - rw);
+      p.runB = p.runA + rw;
+    }
   }
 
   /** ランナーの わく（ます目の 枠と、部品への 短い つなぎ） */
@@ -230,57 +272,96 @@ export class Teardown {
   /**
    * 毎フレーム、機械の lateUpdate の いちばん最後に 呼ぶ。
    * （機械の アニメーションが 書いた あとに 上から かぶせる）
+   *
+   * 進みぐあいは 部品ごとに 貯めない。ぜんたいの 1 つの 値だけを なめらかにし、
+   * そこから 毎フレーム 全部を 計算しなおす。
+   * 部品ごとに 状態を 持つと、どこかで ずれたとき 戻らなくなる。
+   * 0 のときは 必ず 元の 姿勢を そのまま 書くので、構造として 戻りきる。
    */
   apply(dt) {
     if (!this._built) return;
+    this._shown = damp(this._shown, this.spread, 11, dt);
+    if (Math.abs(this._shown - this.spread) < 0.0005) this._shown = this.spread;
 
-    let maxT = 0;
     for (const p of this.parts) {
-      const target = Math.max(this.spread, p.removed ? 1 : 0);
-      p.t = damp(p.t, target, 9, dt);
-      if (p.t < 0.0015) {
-        p.t = 0;
-        continue;
-      }
-      maxT = Math.max(maxT, p.t);
-      this._place(p, ease.inOutCubic(p.t));
+      // 抜かれた部品は、ぜんたいの ばらし量に かかわらず ランナーの 席まで 行く
+      p.pull = damp(p.pull, p.removed ? 1 : 0, 11, dt);
+      if (Math.abs(p.pull - (p.removed ? 1 : 0)) < 0.0005) p.pull = p.removed ? 1 : 0;
+      this._place(p, this._shown);
     }
 
-    this._spreadShown = damp(this._spreadShown, this.spread, 9, dt);
     if (this.frameMesh) {
-      const a = clamp01((this._spreadShown - 0.12) / 0.5);
+      const a = clamp01((this._shown - this.EXPLODE_END) / (1 - this.EXPLODE_END));
       this.frameMesh.visible = a > 0.01;
       this.frameMesh.material.opacity = a * 0.85;
     }
   }
 
-  /** 部品 1 つを、いまの場所と ランナーの席の あいだに 置く */
-  _place(p, t) {
+  /**
+   * 部品 1 つを 置く。
+   *
+   * ばらし量 s は 2 段に 分かれている。
+   *
+   *   s = 0 .. EXPLODE_END   分解図。それぞれが「本当に 外れる 向き」へ
+   *                          まっすぐ 出ていく。順番も 本物どおりで、
+   *                          外がわ・あとから 付けたものから 先に 外れる。
+   *   s = EXPLODE_END .. 1   図鑑。分解図の 位置から ランナーの ます目へ 移り、
+   *                          大きさも そろえる。
+   *
+   * 逆に 戻すと、そのまま 組み立ての 順番になる。
+   * 台 → 柱 → 鉄心 → 巻線 → 回転子 → … → はね → ナット → 前かご。
+   */
+  _place(p, s) {
     const node = p.node;
     const parent = node.parent;
     if (!parent) return;
 
-    parent.updateWorldMatrix(true, false);
-    parent.matrixWorld.decompose(_pp, _pq, _ps);
-    _pq.invert();
+    // --- 分解の 進みぐあい（部品ごとに 出番が ずれている） ---
+    const e = Math.max(smoothstep(p.expA, p.expB, s), p.pull);
+    // --- 図鑑へ 移る 進みぐあい ---
+    // 抜かれた部品は、ぜんたいの ばらし量に かかわらず 席まで 行く（= 置き場）
+    const r = Math.max(smoothstep(this.EXPLODE_END + p.runA, this.EXPLODE_END + p.runB, s), p.pull);
 
-    // ランナーでは 部品を 機械と 同じ 向きに そろえるので、
-    // 「部品の まん中を 席に 置く」ための ずらしも root 空間で 計算できる。
-    const s = p.restScale.x * p.slotScale;
-    _pos.copy(p.slot).addScaledVector(p.localCenter, -s);
-    _pos.applyMatrix4(this.machine.root.matrixWorld);   // → ワールド
-    _pos.sub(_pp).applyQuaternion(_pq).divide(_ps);     // → 親の ローカル
+    if (e <= 0.0004 && r <= 0.0004) {
+      // 組み上がった状態。元の 姿勢を そのまま 書く（浮動小数の ずれも 残さない）
+      node.position.copy(p.restPos);
+      node.quaternion.copy(p.restQuat);
+      node.scale.copy(p.restScale);
+      return;
+    }
 
-    // 向きは 機械の 向きに そろえる（ランナーは カメラに 正対する 板）
-    this.machine.root.matrixWorld.decompose(_ppW, _quat, _psW);
-    _quat.premultiply(_pq);
+    /* --- 1. 分解: 親の 座標系で、外れる 向きへ ずらす --------------- */
+    // 親の 向きで 押しのけるので、まわっている 部品も まわったまま 出ていく
+    _axis.copy(p.axis);
+    if (!p.axisIsLocal) {
+      parent.getWorldQuaternion(_pq2);
+      this.machine.root.getWorldQuaternion(_rq);
+      _axis.applyQuaternion(_rq).applyQuaternion(_pq2.invert());
+    }
+    _pos.copy(p.restPos).addScaledVector(_axis, p.dist * e);
+    _quat.copy(p.restQuat);
+    _scale.copy(p.restScale);
 
-    node.position.lerpVectors(p.restPos, _pos, t);
-    node.quaternion.copy(p.restQuat).slerp(_quat, t);
-    _scale.copy(p.restScale).lerp(
-      _scale.set(p.restScale.x * p.slotScale, p.restScale.y * p.slotScale, p.restScale.z * p.slotScale),
-      t,
-    );
+    if (r > 0.0004) {
+      /* --- 2. 図鑑: ランナーの ます目へ ------------------------------ */
+      const sc = p.restScale.x * p.slotScale;
+      _rootPos.copy(p.slot).addScaledVector(p.localCenter, -sc);
+
+      // ルート座標 → 親のローカル座標
+      parent.updateWorldMatrix(true, false);
+      _m4.copy(parent.matrixWorld).invert().multiply(this.machine.root.matrixWorld);
+      _rootPos.applyMatrix4(_m4);
+
+      // 向きは 機械に そろえる（ランナーは カメラに 正対する 板）
+      _m4.decompose(_tmpP, _rq, _tmpS);
+
+      _pos.lerp(_rootPos, r);
+      _quat.slerp(_rq, r);
+      _scale.lerp(_tmpS.set(sc, sc, sc), r);
+    }
+
+    node.position.copy(_pos);
+    node.quaternion.copy(_quat);
     node.scale.copy(_scale);
   }
 }
