@@ -32,12 +32,13 @@ export const FACE = {
   lidR: 0.0193,
   brow: [0.0300, 0.5495, 0.0655],
   browHalf: 0.0215,
-  mouth: [0, 0.4862, 0.0655],
-  mouthHalf: 0.0245,
+  // the lip line, now that the lips are real volumes rather than a groove
+  mouth: [0, 0.4858, 0.0740],
+  mouthHalf: 0.0240,
   jawPivot: [0, 0.5150, -0.0080],
   cheek: [0.0430, 0.5080, 0.0570],
-  nose: [0, 0.5075, 0.0770],
-  chin: [0, 0.4680, 0.0570]
+  nose: [0, 0.5052, 0.0822],
+  chin: [0, 0.4665, 0.0672]
 };
 
 const g1 = (d, r) => Math.exp(-(d * d) / (r * r));
@@ -46,6 +47,12 @@ const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t 
 const DEG = Math.PI / 180;
 const LID_HALF = Math.PI * 0.52;              // lid cap half-angle
 const LID_HALF_DEG = 0.52 * 180;
+
+/* scratch — the face updates every frame and must not allocate */
+const _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3(), _t3 = new THREE.Vector3();
+const _t4 = new THREE.Vector3(), _t5 = new THREE.Vector3(), _t6 = new THREE.Vector3();
+const _tm = new THREE.Matrix4();
+const _FWD = new THREE.Vector3(0, 0, 1);
 
 /* --------------------------------------------------------- morph targets -- */
 
@@ -392,19 +399,25 @@ const C0 = () => ({
 });
 
 /** Mood → control weights. Anything unlisted relaxes to zero. */
+/**
+ * Twelve moods that have to be told apart from a single still with the UI
+ * hidden and the sound off. Infant faces are *loud*: the amplitudes here are
+ * deliberately near the top of their range, and every entry moves the brows,
+ * the lids and the cheeks, not just the mouth.
+ */
 export const MOODS = {
-  neutral:   { smileSmall: 0.22 },
-  happy:     { smileBig: 0.72, smileSmall: 0.5, eyeSquint: 0.34, browRaise: 0.20, blush: 0.28, jawOpen: 0.10 },
-  giggle:    { smileBig: 1.0, eyeSquint: 0.78, browRaise: 0.30, jawOpen: 0.30, blush: 0.45, noseWrinkle: 0.25 },
-  sad:       { browSad: 0.85, mouthFrown: 0.70, lidLower: 0.30, chinRaise: 0.25, headTilt: -0.4 },
-  cry:       { browSad: 1.0, mouthCry: 1.0, jawOpen: 0.62, lidClose: 0.80, tears: 1.0, noseWrinkle: 0.40, blush: 0.55, cheekPuff: 0.10 },
-  sleepy:    { sleepSoft: 0.75, lidLower: 0.72, browRaise: 0.12, jawOpen: 0.08, headTilt: 0.25 },
-  asleep:    { sleepSoft: 1.0, lidClose: 1.0, jawOpen: 0.14, smileSmall: 0.18, blush: 0.22 },
-  surprised: { eyeWide: 1.0, browRaise: 0.95, jawOpen: 0.45, lipsPurse: 0.30 },
-  sulk:      { sulk: 1.0, browFurrow: 0.45, mouthPout: 0.45, lidLower: 0.22, headTilt: 0.3 },
-  shy:       { smileSmall: 0.55, eyeSquint: 0.30, lidLower: 0.38, blush: 1.0, chinRaise: 0.30, headTilt: 0.35 },
-  excited:   { smileBig: 0.85, eyeWide: 0.70, browRaise: 0.75, jawOpen: 0.42, blush: 0.35 },
-  yum:       { smileSmall: 0.60, eyeSquint: 0.55, lipsPurse: 0.45, cheekPuff: 0.30, blush: 0.20, noseWrinkle: 0.15 }
+  neutral:   { smileSmall: 0.30, browRaise: 0.06, lidLower: 0.04, blush: 0.18 },
+  happy:     { smileBig: 0.86, smileSmall: 0.55, eyeSquint: 0.58, browRaise: 0.44, blush: 0.64, jawOpen: 0.16, cheekPuff: 0.14 },
+  giggle:    { smileBig: 1.0, smileSmall: 0.4, eyeSquint: 0.95, browRaise: 0.55, jawOpen: 0.44, blush: 0.88, noseWrinkle: 0.45, cheekPuff: 0.26, headTilt: -0.20 },
+  sad:       { browSad: 1.0, mouthFrown: 0.94, lidLower: 0.54, chinRaise: 0.48, headTilt: -0.40, blush: 0.34, tears: 0.22, browLift: 0.18 },
+  cry:       { browSad: 1.0, mouthCry: 1.0, jawOpen: 0.88, lidClose: 0.90, tears: 1.0, noseWrinkle: 0.78, blush: 1.0, cheekPuff: 0.30, chinRaise: 0.30 },
+  sleepy:    { sleepSoft: 0.88, lidLower: 0.92, browRaise: 0.26, jawOpen: 0.10, headTilt: 0.28, blush: 0.32, smileSmall: 0.18 },
+  asleep:    { sleepSoft: 1.0, lidClose: 1.0, jawOpen: 0.20, smileSmall: 0.32, blush: 0.40, browRaise: 0.10 },
+  surprised: { eyeWide: 1.0, browRaise: 1.0, jawOpen: 0.66, lipsPurse: 0.38, blush: 0.22 },
+  sulk:      { sulk: 1.0, browFurrow: 0.74, mouthPout: 0.72, lidLower: 0.44, headTilt: 0.30, blush: 0.32, cheekPuff: 0.18 },
+  shy:       { smileSmall: 0.68, eyeSquint: 0.44, lidLower: 0.56, blush: 1.0, chinRaise: 0.42, headTilt: 0.36, browSad: 0.26 },
+  excited:   { smileBig: 0.96, eyeWide: 0.88, browRaise: 0.98, jawOpen: 0.58, blush: 0.72, cheekPuff: 0.10 },
+  yum:       { smileSmall: 0.72, eyeSquint: 0.82, lipsPurse: 0.58, cheekPuff: 0.46, blush: 0.46, noseWrinkle: 0.30, browRaise: 0.26 }
 };
 
 /* ------------------------------------------------------------------ Face -- */
@@ -572,7 +585,7 @@ export class Face {
    */
   _buildMouth() {
     const grp = new THREE.Group();
-    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0165);
+    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0195);
     this.group.add(grp);
     this.mouthGroup = grp;
 
@@ -783,6 +796,48 @@ export class Face {
     this.gazeYaw = this.eyes[0].yaw ?? 0;
   }
 
+  /* ------------------------------------------------------- catchlights --- */
+
+  /**
+   * Put each catchlight where the key light actually reflects.
+   *
+   * The specular point on a sphere is the one whose normal is the half-vector
+   * between the view and light directions, so that is what the billboard rig
+   * is aimed along — clamped to the front cap so it can never slide off behind
+   * a lid, and nudged by a different amount in each eye, which is what two
+   * differently-angled corneas sharing one light really do.
+   */
+  _aimCatch(ctx) {
+    const key = ctx?.lighting?.key;
+    const cam = ctx?.camera;
+    if (!key || !cam || !this.eyes.length) return;
+    const L = _t1.setFromMatrixPosition(key.matrixWorld);
+    if (key.target) L.sub(_t2.setFromMatrixPosition(key.target.matrixWorld));
+    L.normalize();
+    const camPos = _t3.setFromMatrixPosition(cam.matrixWorld);
+    for (const e of this.eyes) {
+      e.pivot.updateWorldMatrix(true, false);
+      const V = _t4.setFromMatrixPosition(e.pivot.matrixWorld).negate().add(camPos).normalize();
+      const H = _t5.copy(L).add(V).normalize();
+      H.transformDirection(_tm.copy(e.pivot.matrixWorld).invert());
+      this._clampToCap(H, 0.86);
+      e.catchRig.quaternion.setFromUnitVectors(_FWD, H);
+      // the secondary glint is a bounce off the fill side, low and outboard
+      const H2 = _t6.copy(H);
+      H2.x -= 0.62 * e.s; H2.y -= 0.55; H2.normalize();
+      this._clampToCap(H2, 0.95);
+      e.catchRig2.quaternion.setFromUnitVectors(_FWD, H2);
+    }
+  }
+
+  _clampToCap(v, maxAngle) {
+    const a = Math.acos(THREE.MathUtils.clamp(v.z, -1, 1));
+    if (a <= maxAngle) return v;
+    const s = Math.sin(maxAngle) / Math.max(1e-5, Math.sin(a));
+    v.set(v.x * s, v.y * s, Math.cos(maxAngle));
+    return v.normalize();
+  }
+
   /* ------------------------------------------------------------ update --- */
 
   update(dt, ctx) {
@@ -866,7 +921,7 @@ export class Face {
       0.34 + open * 1.55,
       0.55 + open * 0.60);
     g.position.y = FACE.mouth[1] - open * 0.0150;
-    g.position.z = FACE.mouth[2] - 0.0140 - open * 0.0058;
+    g.position.z = FACE.mouth[2] - 0.0195 - open * 0.0058;
     this.tongue.position.y = -0.0072 - open * 0.0030 + (ov.tongue || 0) * 0.004;
     this.tongue.position.z = 0.0055 + (ov.tongue || 0) * 0.020;
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';

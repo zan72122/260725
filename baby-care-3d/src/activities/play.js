@@ -125,14 +125,19 @@ export class PlayActivity {
 
     /* --- つみき ---------------------------------------------------------- */
     const set = makeBlockSet(res, { count: BLOCK_COUNT, size: BLOCK_SIZE, seed: 5 });
-    this.towerBase = home.clone().add(new THREE.Vector3(0.28, 0, 0.09));
+    // D19 — the tower used to stand 0.34 m from the baby, which put it right
+    // through the forearm from the `floor` camera and buried its bottom two
+    // courses under the prompt bubble. Pushed out to the baby's left and back
+    // to the same depth, it now reads as a separate object with clear air
+    // around it, and a five-high stack sits entirely above the HUD band.
+    this.towerBase = home.clone().add(new THREE.Vector3(0.44, 0, -0.07));
     for (let i = 0; i < BLOCK_COUNT; i++) {
       const mesh = set.blocks[i];
       const a = (i / BLOCK_COUNT) * Math.PI * 2 + 0.7;
       const p = home.clone().add(new THREE.Vector3(
-        0.44 + Math.cos(a) * 0.085,
+        0.50 + Math.cos(a) * 0.085,
         BLOCK_SIZE / 2,
-        0.26 + Math.sin(a) * 0.075
+        0.30 + Math.sin(a) * 0.075
       ));
       mesh.position.copy(p);
       mesh.rotation.y = a;
@@ -180,7 +185,11 @@ export class PlayActivity {
 
     /* --- ふうせん + ひも -------------------------------------------------- */
     this.balloon = makeBalloon(res, { radius: 0.112, color: 0xff8fae });
-    this.balloonPos = home.clone().add(new THREE.Vector3(-0.04, 0.66, 0.24));
+    // Kept off the baby's face: parked in front of the chest it filled the
+    // left third of every `face` and `closeup` portrait with a pink blob. It
+    // now floats up and behind the near shoulder, where it reads as a balloon
+    // in the room rather than an obstruction.
+    this.balloonPos = home.clone().add(new THREE.Vector3(-0.34, 0.72, -0.30));
     this.balloonVel = new THREE.Vector3();
     this.balloon.group.position.copy(this.balloonPos);
     this.group.add(this.balloon.group);

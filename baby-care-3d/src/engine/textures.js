@@ -208,11 +208,47 @@ function mixHex(a, b, t) {
  * Reads as "expensive nursery" rather than "flat colour".
  */
 export function wallpaper({
-  base = 0xf3e7f2, tint = 0xe6d3ec, seed = 11, size = 512, tooth = 0.05
+  base = 0xf3e7f2, tint = 0xe6d3ec, seed = 11, size = 512, tooth = 0.05,
+  roller = 1.0
 } = {}) {
-  return cached(`wall:${base}:${tint}:${seed}:${tooth}`, () => {
+  return cached(`wall:${base}:${tint}:${seed}:${tooth}:${roller}`, () => {
+    /* The wall is the largest surface in every frame and it carried the least
+     * information in the build (defect D33): a flat matte lilac against a
+     * high-frequency floor, which is an inconsistent detail density the eye
+     * reads instantly.
+     *
+     * What was missing is specifically *roller* texture. A wall painted with a
+     * roller is not smooth — it has a fine, slightly directional orange-peel
+     * stipple left by the nap, and it has faint lap lines every roller-width
+     * where two passes overlapped and the second went on over tack. Neither is
+     * strong enough to see as "texture" from across the room; both are enough
+     * to stop the surface reading as a flat fill, which is the whole job.
+     *
+     *   stipple  — cellular, at nap scale, pushed mostly into the normal map
+     *              (a roller leaves relief, not pigment variation)
+     *   lap      — 6 soft vertical bands per tile with a seeded phase, ±1.5%
+     *              in value only, so they read as sheen rather than as stripes
+     *
+     * The floor-level scuff lives in `makeWall()` rather than here, because it
+     * has to know where the skirting is and this texture tiles.
+     */
+    const stipple = (u, v) => {
+      // nap stipple: cellular, gently stretched vertically by the roll
+      const w = worley(u, v * 0.82, 88, seed + 3);
+      return Math.pow(1 - w.f1, 1.6);
+    };
     const height = (u, v) =>
-      fbm(u, v, 64, 4, seed) * 0.6 + worley(u, v, 96, seed + 3).f1 * 0.4;
+      fbm(u, v, 64, 4, seed) * 0.42
+      + worley(u, v, 96, seed + 3).f1 * 0.26
+      + stipple(u, v) * 0.32 * roller;
+
+    // Lap lines: 6 per tile keeps them tileable and roughly roller-width at the
+    // repeats the room actually uses.
+    const lap = (u) => {
+      const x = u * 6 + hash2(0, 0, seed + 55);
+      const f = Math.abs((x - Math.floor(x)) * 2 - 1);
+      return Math.pow(f, 2.2);
+    };
 
     const map = generate(size, (u, v, out) => {
       const grain = fbm(u, v, 48, 5, seed);
@@ -220,14 +256,19 @@ export function wallpaper({
       const t = grain * 0.7 + fibre * 0.3;
       const c = mixHex(base, tint, t * tooth * 6);
       // very slight vertical shading so large flat walls never band
-      const sheen = 1 + (fbm(u, v, 6, 2, seed + 21) - 0.5) * 0.035;
+      const sheen = 1
+        + (fbm(u, v, 6, 2, seed + 21) - 0.5) * 0.035
+        + (lap(u) - 0.5) * 0.015 * roller
+        + (stipple(u, v) - 0.5) * 0.022 * roller;
       out[0] = c[0] * sheen; out[1] = c[1] * sheen; out[2] = c[2] * sheen;
     });
 
-    const normal = normalFromHeight(size, 0.35, height);
+    const normal = normalFromHeight(size, 0.55, height);
     const rough = generate(size, (u, v, out) => {
-      const r = 0.86 + fbm(u, v, 32, 3, seed + 9) * 0.1;
-      out[0] = out[1] = out[2] = r;
+      // emulsion is matte, but the raised nap stipple takes a hair more sheen
+      const r = 0.86 + fbm(u, v, 32, 3, seed + 9) * 0.1
+              - stipple(u, v) * 0.05 * roller;
+      out[0] = out[1] = out[2] = Math.min(1, Math.max(0.3, r));
     });
 
     return {
@@ -409,20 +450,59 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
      * cut pile read is the way raking light catches the tops of the tufts, not
      * per-tuft albedo speckle.
      */
+    /* Second pass, because it still read as "uniform salt-and-pepper stipple
+     * at close range: noise, not fibre" (defect D25).
+     *
+     * The reason a field of Worley tufts reads as *noise* rather than as
+     * *pile* is that every tuft drew its shade from an independent hash, so
+     * adjacent tufts were uncorrelated — which is the literal definition of
+     * white noise, and the eye is extremely good at spotting it. Real pile is
+     * the opposite: fibres lie in clumps, clumps lie in drifts, and the drifts
+     * run with the lay. Value at a point is strongly correlated with the value
+     * 5 mm away and only weakly correlated 50 mm away.
+     *
+     * So the tuft field is now *modulated by two lower-frequency fields*
+     * instead of standing on its own:
+     *
+     *   drift  (period 3)  — broad tonal patches. The only octave that
+     *                        survives to the establishing shot, and what stops
+     *                        the rug reading as a flat disc from across the room.
+     *   clump  (period 13) — groups adjacent tufts into tufts-of-tufts and,
+     *                        crucially, *scales the per-tuft variance*, so the
+     *                        pile is busy in some places and calm in others
+     *                        instead of uniformly speckled everywhere.
+     *
+     * The per-tuft albedo term is roughly halved and its remaining swing is
+     * gated by `clump`; a second, finer Worley octave carries sub-tuft fibre
+     * that only resolves in the closeups. Same texel budget, three scales of
+     * structure instead of one.
+     */
     const cells = Math.max(8, Math.min(Math.round(density * 0.28), Math.floor(size / 10)));
+    const fineCells = Math.min(Math.round(cells * 2.4), Math.floor(size / 4));
     // The pile lies in a direction: long, soft bands (the "vacuum stripe")
     // stretched across the rug, which is most of what sells a cut pile.
     const lay = (u, v) => fbm2(u, v, 5, 14, 3, seed + 5);
+    const drift = (u, v) => fbm(u, v, 3, 3, seed + 41);
+    const clump = (u, v) => fbm(u, v, 13, 3, seed + 67);
     const height = (u, v) => {
       const w = worley(u, v, cells, seed);
       const tuft = Math.pow(1 - w.f1, 1.35);
-      return tuft * 0.62 + lay(u, v) * 0.38;
+      const f = Math.pow(1 - worley(u, v, fineCells, seed + 23).f1, 2.0);
+      return tuft * 0.50 + f * 0.16 + lay(u, v) * 0.34;
     };
     const map = generate(size, (u, v, out) => {
       const w = worley(u, v, cells, seed);
       const h = Math.pow(1 - w.f1, 1.35);
+      const cl = clump(u, v);
+      const dr = drift(u, v);
       const sweep = lay(u, v);
-      const shade = 0.78 + h * 0.18 + (sweep - 0.5) * 0.28 + (w.id - 0.5) * 0.05;
+      const shade =
+          0.80                        // base
+        + (dr - 0.5) * 0.20           // drifts        — reads across the room
+        + (cl - 0.5) * 0.13           // clumping      — reads at a metre
+        + (sweep - 0.5) * 0.20        // directional lay
+        + h * 0.11                    // tuft tops     — reads at 30 cm
+        + (w.id - 0.5) * (0.25 + cl * 0.75) * 0.085;   // per tuft, variance-gated
       const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });
@@ -430,8 +510,11 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
     // map that strong aliases into glitter. 3.4 still rakes properly.
     const normal = normalFromHeight(size, 3.4, height);
     const rough = generate(size, (u, v, out) => {
-      // tuft tops catch a faint sheen; the roots are pure scatter
-      out[0] = out[1] = out[2] = 0.98 - height(u, v) * 0.16;
+      // tuft tops catch a faint sheen; the roots are pure scatter. The drift
+      // field rides along, because an evenly-sheened rug is as much of a tell
+      // as an evenly-coloured one.
+      out[0] = out[1] = out[2] = Math.min(1, Math.max(0.2,
+        0.98 - height(u, v) * 0.16 - (drift(u, v) - 0.5) * 0.06));
     });
     return {
       map: toTexture(map, { srgb: true }),

@@ -175,7 +175,7 @@ const GradeShader = {
       // A dead zone around the focal plane keeps the subject perfectly crisp;
       // without it, tiny depth jitter makes the whole frame feel soft.
       // The dead zone has to be wide enough to hold the *whole subject*, not
-      // just the plane the focus point sits on: `focusOn()` aims at the chest
+      // just the plane the focus point sits on: focusOn() aims at the chest
       // socket, and in a portrait the eyes are 4–5 cm nearer than that. At
       // 0.5 × the face preset's 5 cm range the eyes sat on the ramp and the
       // sharpest thing in frame was the floor. A full range either side means
@@ -193,7 +193,7 @@ const GradeShader = {
 
       // lateral chromatic aberration — a *field* aberration, so it is exactly
       // zero on axis and only appears in the last fifth of the image circle.
-      // r2 runs 0 at centre → 0.5 at the corner, so `r2 * 2` normalises the
+      // r2 runs 0 at centre → 0.5 at the corner, so (r2 * 2) normalises the
       // corner to 1 and the cube keeps the middle 60% of the frame clean:
       // halfway to the corner this is 1.6% of the corner value.
       float caField = clamp(r2 * 2.0, 0.0, 1.0);

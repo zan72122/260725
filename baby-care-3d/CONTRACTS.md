@@ -37,11 +37,35 @@ export class CameraRig {
   shake(strength, seconds)
   get focusRange()                           // DOF range for the active preset
   update(dt)
-  addPreset(name, { pos:[x,y,z], target:[x,y,z], fov, focusRange })
+  addPreset(name, { space, pos:[x,y,z], target:[x,y,z], fov, focusRange })
+
+  // --- subject-relative framing ---
+  setDefaultSubject(object3D)   // app.js: the baby root, at boot
+  setSubject(object3D, { yaw })  // an activity claims the rig; null = default
+  overridePreset(name, def)      // scoped: dropped by restorePresets()
+  restorePresets()               // app.js calls this between activities
+  resolved()                     // { pos, target } in world space, right now
 }
 ```
-Built-in presets: `wide`, `closeup`, `face`, `crib`, `tub`, `table`, `floor`,
-`overhead`, `title`.
+Built-in presets: `wide`, `closeup`, `face`, `crib`, `crib-face`, `tub`,
+`table`, `floor`, `overhead`, `title`.
+
+**Presets are offsets, not world positions.** A preset with `space: 'subject'`
+(every character framing) stores `pos`/`target` as offsets in the subject's
+own frame — position plus *yaw only*, so a subject that pitches or rolls can
+never tip the horizon — and they are re-resolved every frame. `+X` is the
+subject's left, `+Y` is up from its origin (a baby root sits on the floor),
+`+Z` is the direction it faces. `space: 'world'` presets stay absolute and are
+used for framings that compose the *set* rather than the character (`wide`,
+`title`). `addPreset` defaults to `'world'`, so handing over an anchor's world
+position still does what it always did.
+
+An activity that lives away from the origin does not need to re-author
+anything: `setSubject()` is enough. It should only `overridePreset()` when the
+*composition* genuinely differs — a standing baby instead of a seated one
+(`dress`), or a baby lying inside a cot whose rails would occlude the default
+angle (`sleep`). `app.setActivity` calls `restorePresets()` + `setSubject(null)`
+between scenes, so overrides never leak into the next activity.
 
 ## `src/engine/physics.js`
 

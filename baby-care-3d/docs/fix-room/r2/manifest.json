@@ -1,0 +1,26 @@
+[
+  {
+    "id": "01-room-wide",
+    "file": "01-room-wide.png",
+    "scene": "play",
+    "note": "Establishing shot of the nursery. Judge: lighting, materials, composition, light shaft."
+  },
+  {
+    "id": "02-room-wide-hud",
+    "file": "02-room-wide-hud.png",
+    "scene": "play",
+    "note": "Same frame with HUD. Judge: UI craft against the 3D."
+  },
+  {
+    "id": "40-play-blocks",
+    "file": "40-play-blocks.png",
+    "scene": "play",
+    "note": "Block tower. Judge: physics settle, wood material, AO."
+  },
+  {
+    "id": "62-clutter",
+    "file": "62-clutter.png",
+    "scene": "play",
+    "note": "Lived-in room with scattered toys."
+  }
+]

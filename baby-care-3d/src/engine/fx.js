@@ -86,7 +86,9 @@ const KINDS = {
     speed: [0.05, 0.18], spread: 0.65, dir: [0, 1, 0],
     gravity: 0, rise: 0.24, drag: 0.9, curl: 0.28, grow: 3.4,
     spin: [-0.5, 0.5], sprite: () => TEX.radialSprite({ size: 128, power: 1.5 }),
-    fadeIn: 0.22, fadeOut: 0.62, alpha: 0.20, palette: PAL.steam, soft: 0.28
+    // `soft` is a *world* distance. A bath tub is 0.6 m across, so a 0.28 m
+    // fade band dissolved every puff into the water it was rising off.
+    fadeIn: 0.22, fadeOut: 0.62, alpha: 0.30, palette: PAL.steam, soft: 0.07
   },
   splash: {
     mode: 'stretch', shape: 'SOFT', blending: 'normal', lit: false,
@@ -123,11 +125,11 @@ const KINDS = {
     // The motes drifting in the window shaft. Long-lived, nearly still, and
     // the single cheapest thing that makes a room read as photographed.
     mode: 'billboard', shape: 'SOFT', blending: 'additive', lit: false,
-    capacity: 420, life: [7, 15], size: [0.0035, 0.0085],
+    capacity: 420, life: [7, 15], size: [0.0055, 0.0135],
     speed: [0.004, 0.020], spread: Math.PI, dir: [0, 1, 0],
     gravity: -0.004, drag: 0.25, curl: 0.010, twinkle: 1.1,
     sprite: () => TEX.radialSprite({ size: 64, power: 2.6 }),
-    fadeIn: 0.16, fadeOut: 0.40, alpha: 0.55, palette: PAL.dust, soft: 0.35
+    fadeIn: 0.16, fadeOut: 0.40, alpha: 0.62, palette: PAL.dust, soft: 0.16
   },
   star: {
     mode: 'billboard', shape: 'STAR5', blending: 'additive', lit: false,
@@ -285,13 +287,22 @@ const PARTICLE_FRAG = /* glsl */`
     if (a < 0.004) discard;
 
     // --- soft particles ----------------------------------------------------
+    //
+    // tDepth is the pipeline's *resolved* depth target (render.js
+    // DepthResolvePass), which stores LINEAR 0..1 orthographic depth, not raw
+    // non-linear device depth. Running it back through
+    // perspectiveDepthToViewZ() -- which is what this shader used to do --
+    // collapses every occluder onto the near plane, so (vViewZ - sceneZ) is
+    // negative for every particle in front of any geometry and the whole
+    // system fades to alpha 0. That single line is why nothing was visible.
     if (uUseDepth > 0.5) {
       vec2 suv = (vScreen.xy / vScreen.w) * 0.5 + 0.5;
-      float raw = texture2D(tDepth, suv).x;
-      // A cleared / far-plane texel means "no occluder here"; treating it as
-      // geometry would make particles vanish against the sky.
-      if (raw < 0.999995) {
-        float sceneZ = perspectiveDepthToViewZ(raw, uNear, uFar);
+      float lin = texture2D(tDepth, suv).x;
+      // 1.0 is the far plane and 0.0 is an untouched / not-yet-rendered texel;
+      // both mean "no occluder here". Treating either as geometry would make
+      // particles vanish against the sky or on the first frame of a shot.
+      if (lin > 0.0005 && lin < 0.9995) {
+        float sceneZ = orthographicDepthToViewZ(lin, uNear, uFar);
         a *= clamp((vViewZ - sceneZ) / uSoft, 0.0, 1.0);
       }
     }
@@ -458,10 +469,14 @@ class Layer {
 
       // --- position ------------------------------------------------------
       let px = pos.x, py = pos.y, pz = pos.z;
-      if (o.box) {
-        px += rng.range(-o.box[0], o.box[0]) * 0.5;
-        py += rng.range(-o.box[1], o.box[1]) * 0.5;
-        pz += rng.range(-o.box[2], o.box[2]) * 0.5;
+      // `area` is the spelling ambient sources use ("fill this volume");
+      // `box` is the spelling bursts use. They mean the same thing, and
+      // silently ignoring one of them collapses a whole emitter to a point.
+      const boxSize = o.box || o.area;
+      if (boxSize) {
+        px += rng.range(-boxSize[0], boxSize[0]) * 0.5;
+        py += rng.range(-boxSize[1], boxSize[1]) * 0.5;
+        pz += rng.range(-boxSize[2], boxSize[2]) * 0.5;
       } else if (o.radius) {
         rng.unit(_v).multiplyScalar(o.radius * Math.cbrt(rng.float()));
         px += _v.x; py += _v.y; pz += _v.z;
@@ -486,9 +501,13 @@ class Layer {
       this.aVel[i3] = _v.x; this.aVel[i3 + 1] = _v.y; this.aVel[i3 + 2] = _v.z;
 
       // --- size / life / colour -------------------------------------------
-      const s = o.size !== undefined
+      let s = o.size !== undefined
         ? (Array.isArray(o.size) ? rng.range(o.size[0], o.size[1]) : o.size)
         : rng.range(d.size[0], d.size[1]);
+      // `scale` is a relative multiplier on whatever the kind's own size is —
+      // callers all over the activities pass it and it used to be dropped on
+      // the floor, so a "small" burst came out full size.
+      if (o.scale !== undefined) s *= o.scale;
       const aspect = o.aspect ?? d.aspect ?? 1;
       this.size0[i2] = s * aspect;
       this.size0[i2 + 1] = s;
@@ -1146,6 +1165,12 @@ export class FX {
   /**
    * Hand in the pipeline's depth texture to enable soft particles.
    * Optional by design: FX never imports the render pipeline.
+   *
+   * **`tex` must hold linear 0..1 depth** — i.e. `pipeline.depthResolve.texture`,
+   * which is what `viewZToOrthographicDepth()` writes, *not* a raw
+   * `THREE.DepthTexture`. The fragment shader inverts it with
+   * `orthographicDepthToViewZ`; handing it device depth silently fades every
+   * particle in the build to zero alpha.
    */
   setDepthTexture(tex, near, far) {
     this._depth = tex || null;
@@ -1190,6 +1215,7 @@ export class FX {
     const layer = this.layers[kind];
     if (!layer) { console.warn('FX: unknown kind "' + kind + '"'); return null; }
     const self = this;
+    const def = layer.def;
     const handle = {
       kind,
       position: (opts.position ? new THREE.Vector3().copy(opts.position) : new THREE.Vector3()),
@@ -1197,6 +1223,7 @@ export class FX {
       opts,
       active: opts.active !== false,
       follow: opts.follow || null,   // optional Object3D to track
+      transient: !!opts.transient,   // see clear()
       _acc: 0,
       _layer: layer,
       stop() { this.active = false; return this; },
@@ -1204,25 +1231,50 @@ export class FX {
       setRate(r) { this.rate = r * self.density; return this; },
       dispose() { self._removeEmitter(this); }
     };
+    // A volume source with no explicit origin is floor-anchored: an `area` of
+    // [w, h, d] means "a box of that size standing on the given point", not one
+    // centred on it, which would bury half the motes under the floor.
+    const area = opts.area || opts.box;
+    if (area && !opts.position && !opts.follow) handle.position.y += area[1] * 0.5;
+
     // Pre-roll: dust motes and steam should already be in the air on frame one,
-    // not fade in from nothing while the player watches.
-    if (opts.prime) {
-      const n = Math.round(handle.rate * opts.prime);
-      for (let i = 0; i < n; i++) {
-        layer.emit(handle.position, 1, opts);
-        const j = layer.count - 1;
-        if (j < 0) break;
-        // Backdate it *and* fast-forward its flight, so a primed shaft of dust
-        // is already spread through the light rather than bunched at the vent.
-        const age = rng.range(0, layer.life[j] * 0.9);
-        layer.age[j] = age;
-        layer.aPos[j * 3] += layer.vel[j * 3] * age;
-        layer.aPos[j * 3 + 1] += layer.vel[j * 3 + 1] * age;
-        layer.aPos[j * 3 + 2] += layer.vel[j * 3 + 2] * age;
-      }
-    }
+    // not fade in from nothing while the player watches. An emitter of a
+    // long-lived kind primes itself by default — a still is almost always
+    // taken seconds after the scene opens, and an ambient source that has to
+    // spend fifteen seconds filling up is an ambient source nobody ever sees.
+    this._prime(handle, opts.prime ?? this._autoPrime(def));
     this.emitters.push(handle);
     return handle;
+  }
+
+  /** Mean life, for kinds slow enough that filling the volume takes real time. */
+  _autoPrime(def) {
+    return def.life[0] >= 1.5 ? (def.life[0] + def.life[1]) * 0.5 : 0;
+  }
+
+  /** Back-fill an emitter's volume with particles of assorted ages. */
+  _prime(handle, seconds) {
+    if (!(seconds > 0)) return;
+    const layer = handle._layer;
+    const opts = handle.opts || {};
+    const n = Math.round(handle.rate * seconds);
+    for (let i = 0; i < n; i++) {
+      layer.emit(handle.position, 1, opts);
+      const j = layer.count - 1;
+      if (j < 0) break;
+      // Backdate it *and* fast-forward its flight, so a primed shaft of dust
+      // is already spread through the light rather than bunched at the vent.
+      const age = rng.range(0, layer.life[j] * 0.9);
+      layer.age[j] = age;
+      layer.aPos[j * 3] += layer.vel[j * 3] * age;
+      layer.aPos[j * 3 + 1] += layer.vel[j * 3 + 1] * age;
+      layer.aPos[j * 3 + 2] += layer.vel[j * 3 + 2] * age;
+      layer.aLife[j * 2] = age / layer.life[j];
+      // Fade-in is over long before this point for a primed mote; without
+      // seeding the colour alpha the particle stays invisible until the next
+      // integration step, which for a one-frame screenshot is forever.
+      layer.aColor[j * 4 + 3] = layer.alpha0[j];
+    }
   }
 
   _removeEmitter(h) {
@@ -1335,12 +1387,29 @@ export class FX {
 
   /* ------------------------------------------------------------ lifecycle */
 
-  /** Kill every live particle, ribbon and emitter, and wipe every decal. */
+  /**
+   * Kill every live particle and ribbon, and wipe every decal.
+   *
+   * Emitters *survive* on purpose. `clear()` is what the harness and the
+   * "start a new scene" path call, and the room's ambient sources (the dust in
+   * the window shaft) are created once at build time and never re-created —
+   * dropping them here meant every screenshot after the first reset had an
+   * empty air. Sources that genuinely belong to one moment opt out with
+   * `{ transient: true }`; everything else is owned by whoever made it and is
+   * released through `handle.dispose()`.
+   */
   clear() {
     for (const k in this.layers) this.layers[k].clear();
     for (const r of this.ribbons) { this.group.remove(r.mesh); r.dispose(); }
     this.ribbons.length = 0;
-    this.emitters.length = 0;
+    this.emitters = this.emitters.filter(e => !e.transient);
+    // Re-seed before the re-prime, so a cleared scene replays byte-identically.
+    this.time = 0;
+    rng.seed(0x5EED1234);   // deterministic replays for the screenshot harness
+    for (const e of this.emitters) {
+      e._acc = 0;
+      this._prime(e, e.opts?.prime ?? this._autoPrime(e._layer.def));
+    }
     for (const g of this.grimes) {
       g.ctx.clearRect(0, 0, g.res, g.res);
       g.texture.needsUpdate = true;
@@ -1348,8 +1417,6 @@ export class FX {
       g.fade = null;
       g.uniforms.uGrimeStrength.value = 1;
     }
-    this.time = 0;
-    rng.seed(0x5EED1234);   // deterministic replays for the screenshot harness
     return this;
   }
 

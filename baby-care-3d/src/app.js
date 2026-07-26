@@ -142,6 +142,7 @@ class App {
       await this.activity.exit?.();
       this.activity.dispose?.();
       this.activity = null;
+      this._auditDispose();
     }
 
     // Hand the camera back before the next scene claims it: any preset the
@@ -151,6 +152,7 @@ class App {
     this.cameraRig.setSubject(null);
 
     this.activityName = name;
+    this._preBuild = this._resourceSnapshot();
     const inst = new def.Class(this.ctx);
     await inst.build?.();
     await inst.enter?.();
@@ -159,6 +161,53 @@ class App {
     this.lighting.transitionTo(def.mood || 'day', HARNESS ? 0.001 : 1.4);
     this.cameraRig.goTo(def.camera || 'wide', HARNESS ? 0 : 1.2);
     this.ui.setActivity(name);
+  }
+
+  /* ---------------------------------------------- build/dispose auditing - */
+
+  /**
+   * Cheap census of everything an activity can leak: GPU objects the renderer
+   * is holding and nodes still hanging off the scene graph. `dispose()` is
+   * only correct if every one of these returns to what it was before
+   * `build()` ran, so `setActivity` samples them either side of the teardown
+   * and files the delta on `app.leakLog` (and warns in the console).
+   *
+   * `renderer.info.render.*` is deliberately *not* used here: it is per-frame
+   * and depends on which camera is live, so it says nothing about ownership.
+   */
+  _resourceSnapshot() {
+    let nodes = 0;
+    this.scene.traverse(() => nodes++);
+    const m = this.renderer.info.memory;
+    return {
+      name: this.activityName,
+      nodes,
+      geometries: m.geometries,
+      textures: m.textures,
+      programs: this.renderer.info.programs?.length ?? 0
+    };
+  }
+
+  /** Compare the post-dispose census against the one taken before build(). */
+  _auditDispose() {
+    const before = this._preBuild;
+    if (!before) return;
+    this._preBuild = null;
+    const after = this._resourceSnapshot();
+    const delta = {
+      activity: before.name,
+      nodes: after.nodes - before.nodes,
+      geometries: after.geometries - before.geometries,
+      textures: after.textures - before.textures
+    };
+    (this.leakLog ||= []).push(delta);
+    // Geometry/texture counts may legitimately settle a little higher the
+    // first time a scene runs — materials.js and textures.js memoise shared
+    // surfaces on demand — but the scene graph must come back to exactly the
+    // size it was, every time. Anything left hanging off it is a hard leak.
+    if (delta.nodes !== 0) {
+      console.warn(`activity "${before.name}" left ${delta.nodes} scene nodes behind on dispose`);
+    }
   }
 
   /* ------------------------------------------------------------- frame -- */
@@ -204,6 +253,22 @@ function installHarness(app) {
     app,
 
     async reset() {
+      // Tear the live activity down *first*, and force the rebuild below.
+      // `baby.reset()` puts the character back at the world origin, but only
+      // an activity's `enter()` knows where that activity wants it — so
+      // resetting while `setActivity('play')` was a no-op used to leave the
+      // baby at the origin with the play props still out on the rug, and every
+      // shot that followed inherited that mismatch.
+      if (app.activity) {
+        await app.activity.exit?.();
+        app.activity.dispose?.();
+        app.activity = null;
+        app._auditDispose();
+      }
+      app.activityName = '';
+      app.cameraRig.restorePresets();
+      app.cameraRig.setSubject(null);
+
       app.state.reset();
       app.time = 0;
       app.baby.reset?.();
@@ -258,10 +323,16 @@ function installHarness(app) {
       }
     },
 
+    /** Everything `app.setActivity` recorded about build/dispose symmetry. */
+    leaks() { return (app.leakLog || []).slice(); },
+
     stats() {
       const info = app.renderer.info;
+      let nodes = 0;
+      app.scene.traverse(() => nodes++);
       return {
         tier: app.tier,
+        nodes,
         calls: info.render.calls,
         triangles: info.render.triangles,
         textures: info.memory.textures,

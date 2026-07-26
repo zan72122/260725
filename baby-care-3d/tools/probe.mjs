@@ -60,7 +60,9 @@ try {
       visibleMeshes += o.isInstancedMesh ? 1 : 1;
       if (o.castShadow) casters++;
       const k = label(o) + (o.isInstancedMesh ? ' [inst]' : '');
-      census[k] = (census[k] || 0) + 1;
+      census[k] = census[k] || { visible: 0, casters: 0 };
+      census[k].visible++;
+      if (o.castShadow) census[k].casters++;
     });
     const lights = [];
     app.scene.traverse(o => { if (o.isLight) lights.push({ type: o.type, shadow: !!o.castShadow, name: o.name }); });

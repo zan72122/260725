@@ -129,12 +129,16 @@ export function makeSkin({
     roughnessMap: maps.roughnessMap,
     roughness,
     metalness: 0.0,
-    clearcoat: 0.12,          // the faint wet sheen of very young skin
-    clearcoatRoughness: 0.55,
+    // 0.12 clearcoat over an already-glossy roughness map was the "oiled vinyl"
+    // read: a broad, low-frequency sheen sitting on top of the forehead, cheek
+    // and chest at once. Baby skin is matte with a *localised* highlight, so
+    // the coat is nearly off and the variation is carried by the roughness map.
+    clearcoat: 0.045,
+    clearcoatRoughness: 0.62,
     sheen: sheen,             // vellus "peach fuzz" rim
     sheenColor: new THREE.Color(0xffd0c0),
     sheenRoughness: 0.85,
-    envMapIntensity: 1.0
+    envMapIntensity: 0.85
   });
   mat.normalScale.set(0.35, 0.35);
   unshare(mat, { repeat: poreScale });
@@ -163,6 +167,45 @@ export function makeSkin({
       // Note the extra braces inside each loop: three's `unroll_loop_start`
       // pragma textually expands the body once per light *without* adding a
       // scope, so any local declaration would collide on the second copy.
+      //
+      // ── Why this term used to bloom ──────────────────────────────────────
+      //
+      // The old formulation added `wrap * 0.28 + backscatter * 0.55` scaled by
+      // the raw light colour, then multiplied the lot by `0.45 + fresnel * 0.9`
+      // — a factor that *peaks at 1.35 on the silhouette*. Three things went
+      // wrong at once and they compounded:
+      //
+      //   1. `wrap` was added on top of a Lambert term the renderer had already
+      //      paid in full, so the *lit* side of the baby got scatter it should
+      //      not have had. Subsurface transport moves light sideways under the
+      //      surface; it does not manufacture new light where the surface is
+      //      already facing the source.
+      //   2. `pow(dot(V,-L) * 0.5 + 0.5, 3.0)` is 0.125 at dot = 0 and never
+      //      reaches zero at all, so every fragment on the model — including
+      //      ones with the key square in front of them — carried backscatter.
+      //   3. The fresnel factor then multiplied *up* precisely on the rim,
+      //      where all three lights already graze.
+      //
+      // With a 2.98-intensity key the red channel came out near 2.9 on a
+      // backlit edge against a bloom gate of 0.86: a saturated orange corona
+      // around the whole silhouette, brighter than the window.
+      //
+      // The rewrite keeps the same two physical effects and makes each one
+      // fire only where it is physically available:
+      //
+      //   • `wrapGain = wrap − NdotL` is the light the wrap term adds *beyond*
+      //     Lambert. It is identically zero on the fully lit side, peaks at the
+      //     terminator, and returns to zero in full shadow. That is the shape
+      //     of real terminator bleed, and it means the term cannot brighten an
+      //     already-bright fragment.
+      //   • `pow(clamp(dot(V, −L)), 4.0)` is hard-clamped, so backscatter only
+      //     exists when the light is genuinely behind the subject relative to
+      //     camera — an ear against a window, not a cheek in front of one.
+      //
+      // The fresnel weight now only ever *attenuates* (`mix(0.55, 1.0, f)`),
+      // and the whole result passes through a soft ceiling so no combination of
+      // mood, exposure and light count can put the silhouette over the gate.
+      // Result: a rim, not a halo.
       .replace('#include <lights_fragment_end>', /* glsl */`
         #include <lights_fragment_end>
         {
@@ -175,11 +218,16 @@ export function makeSkin({
           for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
             {
               vec3 sssL = directionalLights[ i ].direction;
-              // wrapped diffuse: light bleeds around the terminator
-              float sssWrap = max(0.0, (dot(sssN, sssL) + uWrap) / (1.0 + uWrap));
-              // back scatter: light travelling *through* thin parts (ears, cheeks)
-              float sssBack = pow(clamp(dot(sssV, -sssL) * 0.5 + 0.5, 0.0, 1.0), 3.0);
-              sssAccum += directionalLights[ i ].color * (sssWrap * 0.28 + sssBack * 0.55);
+              float sssNdL = dot(sssN, sssL);
+              // wrapped diffuse, minus the Lambert the renderer already added:
+              // what is left is the bleed *around* the terminator and nothing else
+              float sssWrap = max(0.0, (sssNdL + uWrap) / (1.0 + uWrap));
+              float sssBleed = max(0.0, sssWrap - max(0.0, sssNdL));
+              // back scatter: light travelling *through* thin parts (ears,
+              // fingers, the rim of a cheek) — only when the light really is
+              // on the far side, hence the clamp before the power
+              float sssBack = pow(clamp(dot(sssV, -sssL), 0.0, 1.0), 4.0);
+              sssAccum += directionalLights[ i ].color * (sssBleed * 0.52 + sssBack * 0.17);
             }
           }
           #pragma unroll_loop_end
@@ -189,17 +237,22 @@ export function makeSkin({
           #pragma unroll_loop_start
           for ( int i = 0; i < NUM_HEMI_LIGHTS; i ++ ) {
             {
-              sssAccum += hemisphereLights[ i ].skyColor * 0.10;
+              sssAccum += hemisphereLights[ i ].skyColor * 0.05;
             }
           }
           #pragma unroll_loop_end
           #endif
 
           // Fresnel weighting keeps the scatter on grazing angles where real
-          // subsurface transport is most visible.
+          // subsurface transport is most visible — but it can only take away.
           float sssFres = pow(1.0 - clamp(dot(sssN, sssV), 0.0, 1.0), 1.6);
-          reflectedLight.directDiffuse += sssAccum * uSubsurface * diffuseColor.rgb
-                         * uTranslucency * (0.45 + sssFres * 0.9);
+          vec3 sss = sssAccum * uSubsurface * diffuseColor.rgb
+                   * uTranslucency * mix(0.55, 1.0, sssFres);
+          // Soft ceiling: a Reinhard knee that is linear for small values and
+          // asymptotes at 0.62, so the scatter can never be the brightest thing
+          // in the frame no matter how the moods are retuned later.
+          sss = sss / (1.0 + sss * 1.6);
+          reflectedLight.directDiffuse += sss;
         }
       `);
   };
@@ -250,7 +303,11 @@ export function makeTerry({ color = 0xfff4f8, repeat = 4, seed = 71 } = {}) {
 
 export function makeWood({
   light = 0xdcae78, dark = 0x9c6a38, planks = 0, repeat = 1,
-  seed = 3, ringScale = 26, clearcoat = 0.35, satin = 0.42
+  seed = 3, ringScale = 26, clearcoat = 0.35, satin = 0.42,
+  // De-tiling. Defaults on for plank floors, where the repeat is what the eye
+  // catches; off for furniture, where each part is smaller than one tile.
+  deTile = planks > 0,
+  jointEvery = 1.35              // butt joints per map-space unit
 } = {}) {
   const maps = TEX.wood({ light: 0xffffff, dark: 0x8a8a8a, planks, seed, ringScale, satin });
   const mat = new THREE.MeshPhysicalMaterial({
@@ -269,13 +326,110 @@ export function makeWood({
   // Multiply the grain darks in via the base colour so we keep one texture set
   // for every wood tone in the game.
   mat.color.lerp(new THREE.Color(dark), 0.25);
+
+  if (deTile && planks > 0) {
+    /* Why the floor had a countable repeat (defect D22).
+     *
+     * The tile itself is fine — seven seeded planks, each with its own phase,
+     * warp seed and tone. The problem is that the floor lays it down 2.4 times
+     * in *each* axis, so plank row 0 and plank row 7 are byte-identical, and
+     * because a plank is a long horizontal band the eye gets to compare them
+     * directly, side by side, across the whole frame. That is what produced
+     * "identical curved arcs recur across planks".
+     *
+     * Making the tile bigger only moves the problem. The fix is to stop the
+     * geometry and the texture sharing a lattice at all: for each plank on the
+     * actual floor, slide the sample window along the grain by a hash of that
+     * plank's *global* index. Grain runs along u and every plank feature —
+     * the joint, the tone step — is a function of v alone, so an offset in u
+     * changes which stretch of board you are looking at without disturbing a
+     * single plank boundary.
+     *
+     * On top of that the boards are cut into butt-jointed lengths, staggered
+     * per row, each length taking its own offset. A real floor is laid from
+     * 1–2 m boards; a continuous 5 m plank is itself a giveaway. The joint
+     * lands exactly where the sampling derivative is discontinuous, so the one
+     * artefact this technique can produce is hidden inside the one feature it
+     * adds.
+     *
+     * Two texture fetches, no extra memory, and no repeat period the eye can
+     * lock onto at any distance.
+     */
+    const uniforms = {
+      uPlankRows: { value: planks },
+      uJoint: { value: jointEvery }
+    };
+    mat.userData.uniforms = uniforms;
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', /* glsl */`
+          #include <common>
+          uniform float uPlankRows, uJoint;
+          float wdHash(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
+          // Per-plank, per-board sample offset. Returns the shifted uv; the
+          // out param is 1 at a butt joint and falls off over ~2 mm.
+          vec2 wdDetile(vec2 uv, out float joint) {
+            float row = floor(uv.y * uPlankRows);
+            float rh = wdHash(row * 7.31 + 3.7);
+            // stagger the joints per row so they never line up between courses
+            float bx = uv.x / uJoint + rh * 4.17;
+            float board = floor(bx);
+            float bh = wdHash(board * 19.13 + row * 5.77);
+            joint = 1.0 - smoothstep(0.0, 0.012, min(fract(bx), 1.0 - fract(bx)));
+            return vec2(uv.x + bh * 6.31 + rh * 2.19, uv.y);
+          }
+        `)
+        .replace('#include <map_fragment>', /* glsl */`
+          float wdJoint;
+          vec2 wdUv = wdDetile(vMapUv, wdJoint);
+          diffuseColor *= texture2D( map, wdUv );
+          // the dark line of the butt joint itself
+          diffuseColor.rgb *= 1.0 - wdJoint * 0.55;
+        `)
+        .replace('#include <roughnessmap_fragment>', /* glsl */`
+          float roughnessFactor = roughness;
+          #ifdef USE_ROUGHNESSMAP
+            vec4 texelRoughness = texture2D( roughnessMap, wdUv );
+            roughnessFactor *= texelRoughness.g;
+          #endif
+          roughnessFactor = clamp(roughnessFactor + wdJoint * 0.25, 0.04, 1.0);
+        `);
+    };
+    mat.customProgramCacheKey = () => 'wood-detile';
+  }
   return mat;
 }
 
 /* ------------------------------------------------------------ surfaces --- */
 
-export function makeWall({ base = 0xf3e7f2, tint = 0xe6d3ec, repeat = 4, seed = 11 } = {}) {
-  return memo(`wall${base}${tint}${repeat}${seed}`, () => {
+/**
+ * Painted wall.
+ *
+ * `wallpaper()` supplies the roller texture; this adds the one thing a tiling
+ * texture structurally cannot — *position-dependent* wear. The scuff has to
+ * know where the floor is, and the map repeats several times up the wall, so
+ * it is driven from world Y instead.
+ *
+ * Two bands, both from the same world-space height:
+ *
+ *   • a grubby zone in the ~28 cm directly above the skirting, where a
+ *     nursery wall gets kicked, scraped by furniture and wiped. It is
+ *     *desaturated and rougher*, not just darker — that is the difference
+ *     between "in shadow" and "dirty".
+ *   • an ambient dust gradient in the last 6 cm, the dark line every wall has
+ *     where it meets the trim and the vacuum never reaches.
+ *
+ * A noise field breaks both edges so neither reads as a band, and the scuff is
+ * modulated so it clusters rather than sitting at constant strength along the
+ * whole run.
+ */
+export function makeWall({
+  base = 0xf3e7f2, tint = 0xe6d3ec, repeat = 4, seed = 11,
+  skirtY = 0.115,        // world height of the top of the skirting, metres
+  scuff = 1.0
+} = {}) {
+  return memo(`wall${base}${tint}${repeat}${seed}${skirtY}${scuff}`, () => {
     const maps = TEX.wallpaper({ base: 0xffffff, tint: 0xdcdcdc, seed });
     const mat = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(base),
@@ -286,8 +440,62 @@ export function makeWall({ base = 0xf3e7f2, tint = 0xe6d3ec, repeat = 4, seed = 
       metalness: 0,
       envMapIntensity: 0.85
     });
-    mat.normalScale.set(0.45, 0.45);
+    mat.normalScale.set(0.5, 0.5);
     unshare(mat, { repeat });
+
+    if (scuff > 0) {
+      const uniforms = {
+        uSkirtY: { value: skirtY },
+        uScuff: { value: scuff }
+      };
+      mat.userData.uniforms = uniforms;
+      mat.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, uniforms);
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', /* glsl */`
+            #include <common>
+            varying vec3 vWallWorld;
+          `)
+          .replace('#include <begin_vertex>', /* glsl */`
+            #include <begin_vertex>
+            vWallWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          `);
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', /* glsl */`
+            #include <common>
+            varying vec3 vWallWorld;
+            uniform float uSkirtY, uScuff;
+            ${_NOISE_GLSL}
+          `)
+          .replace('#include <color_fragment>', /* glsl */`
+            #include <color_fragment>
+            // Horizontal coordinate along whichever wall this is, so the scuff
+            // clusters in the same places on a north wall and an east wall
+            // without either of them knowing its own orientation.
+            vec2 wallP = vec2(vWallWorld.x + vWallWorld.z, vWallWorld.y);
+            float wallN = bcFbm(wallP * vec2(1.7, 3.1));
+            float wallBig = bcFbm(wallP * vec2(0.42, 0.9));
+            float h = vWallWorld.y - uSkirtY;
+            // scuff zone, edge broken by noise so it is never a band
+            float scuffBand = 1.0 - smoothstep(0.0, 0.28 + wallN * 0.16, max(0.0, h));
+            float scuffAmt = scuffBand * smoothstep(0.35, 0.85, wallBig) * uScuff;
+            // dust/AO line right in the corner
+            float dust = (1.0 - smoothstep(0.0, 0.055, max(0.0, h))) * uScuff;
+            // dirty = darker AND less saturated, otherwise it reads as shadow
+            vec3 grubby = mix(diffuseColor.rgb,
+                              vec3(dot(diffuseColor.rgb, vec3(0.33))) * 0.86,
+                              0.55);
+            diffuseColor.rgb = mix(diffuseColor.rgb, grubby, clamp(scuffAmt * 0.75, 0.0, 1.0));
+            diffuseColor.rgb *= 1.0 - dust * 0.16;
+            float wallWear = scuffAmt;
+          `)
+          .replace('#include <roughnessmap_fragment>', /* glsl */`
+            #include <roughnessmap_fragment>
+            roughnessFactor = clamp(roughnessFactor + wallWear * 0.12, 0.04, 1.0);
+          `);
+      };
+      mat.customProgramCacheKey = () => 'wall-scuff';
+    }
     return mat;
   });
 }
@@ -465,22 +673,118 @@ export function makeEye({ iris = 0x4a3728, sclera = 0xfffaf6 } = {}) {
   });
 }
 
-/** The clear cornea dome that sits over the eye. */
-export function makeCornea() {
-  return memo('cornea', () => new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.22,
-    roughness: 0.02,
-    metalness: 0,
-    transmission: 0.6,
-    thickness: 0.01,
-    ior: 1.38,
-    clearcoat: 1,
-    clearcoatRoughness: 0.0,
-    envMapIntensity: 2.4,
-    depthWrite: false
-  }));
+/**
+ * The clear cornea dome that sits over the eye — and, since it is the only
+ * surface in the character that is actually shaped like a cornea, the thing
+ * that carries the catchlight.
+ *
+ * The old dome was `opacity 0.22 / transmission 0.6 / envMapIntensity 2.4`.
+ * Every one of those three fought the iris:
+ *
+ *   • `opacity 0.22` is a 22% white veil over the entire pupil. On a dark navy
+ *     iris under a bright key that is enough to lift it most of the way to mid
+ *     grey — the "milky grey lens" — and it does it uniformly, so the iris
+ *     loses contrast without gaining anything.
+ *   • `transmission 0.6` sends a 2 mm dome through three's transmission
+ *     resolve, which samples a half-resolution blurred copy of the frame
+ *     behind it. At eye scale that is a blurred *screen* sample, not the iris
+ *     3 mm behind: it washes the pupil out and costs a render target.
+ *   • `envMapIntensity 2.4` then adds a broad ambient sheen across the whole
+ *     dome rather than a point.
+ *
+ * A real cornea is invisible. You do not see it; you see the single hard
+ * specular it puts on the eye and the fact that the iris sits behind glass.
+ * So the dome is now essentially clear, and its *alpha* is driven by its own
+ * specular: transparent everywhere, briefly opaque and bright exactly where a
+ * light reflects. That is the catchlight, and because it is computed from
+ * `directionalLights[i].direction` it lands where the key actually is, moves
+ * when the key moves, and falls in a slightly different place in each eye
+ * (the two domes have different world normals and different view vectors) —
+ * which is what a fixed pivot-local billboard could never do.
+ */
+export function makeCornea({
+  primary = 0.17,       // catchlight half-angle in radians (~10°)
+  secondary = 0.75,     // the broad "wet" sheen around it
+  gain = 1.35
+} = {}) {
+  return memo(`cornea${primary}${secondary}${gain}`, () => {
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      transparent: true,
+      // Just enough veil to read as a wet surface over the sclera, far below
+      // the level at which it starts greying the iris.
+      opacity: 0.045,
+      roughness: 0.04,
+      metalness: 0,
+      transmission: 0,
+      ior: 1.376,
+      clearcoat: 0,
+      envMapIntensity: 0.55,
+      depthWrite: false,
+      side: THREE.FrontSide
+    });
+
+    const uniforms = {
+      uCatchTight: { value: primary },
+      uCatchBroad: { value: secondary },
+      uCatchGain:  { value: gain }
+    };
+    mat.userData.uniforms = uniforms;
+
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', /* glsl */`
+          #include <common>
+          uniform float uCatchTight, uCatchBroad, uCatchGain;
+          // Set in main(), read again a few chunks later by the alpha override.
+          float gCatch;
+        `)
+        .replace('#include <lights_fragment_end>', /* glsl */`
+          #include <lights_fragment_end>
+          {
+            vec3 cN = normal;
+            vec3 cV = normalize(vViewPosition);
+            vec3 acc = vec3(0.0);
+            float peak = 0.0;
+            #if ( NUM_DIR_LIGHTS > 0 )
+            #pragma unroll_loop_start
+            for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
+              {
+                vec3 cH = normalize(directionalLights[ i ].direction + cV);
+                // Angle between the surface normal and the half vector, in
+                // radians. Working in angle rather than pow(NdotH, n) is what
+                // makes the size of the catchlight an authorable number
+                // (0.17 rad ≈ 10° ≈ a 2 mm spot on a 13 mm dome) instead of an
+                // exponent in the thousands that aliases at any screen size.
+                float cA = acos(clamp(dot(cN, cH), -1.0, 1.0));
+                // Two lobes: a tight one that *is* the catchlight, and a wide
+                // low one that keeps the eye looking wet off-axis.
+                float tight = 1.0 - smoothstep(uCatchTight * 0.5, uCatchTight, cA);
+                float broad = 1.0 - smoothstep(uCatchBroad * 0.35, uCatchBroad, cA);
+                float w = tight + broad * 0.06;
+                acc += directionalLights[ i ].color * w;
+                peak = max(peak, w);
+              }
+            }
+            #pragma unroll_loop_end
+            #endif
+            reflectedLight.directSpecular += acc * uCatchGain;
+            gCatch = clamp(peak * 1.5, 0.0, 1.0);
+          }
+        `)
+        // A transparent surface's outgoing light is scaled by its alpha at
+        // blend time, so a bright specular on a 4.5%-opaque dome would be
+        // invisible. Letting the specular drive the alpha is what turns the
+        // dome into "clear glass with one hard highlight on it".
+        .replace('#include <opaque_fragment>', /* glsl */`
+          diffuseColor.a = clamp(diffuseColor.a + gCatch, 0.0, 1.0);
+          #include <opaque_fragment>
+        `);
+    };
+    mat.customProgramCacheKey = () => 'cornea-catchlight';
+    return mat;
+  });
 }
 
 /* --------------------------------------------------------------- hair --- */
@@ -859,20 +1163,75 @@ export function makeLash({ color = 0x4b3428, opacity = 1 } = {}) {
   });
 }
 
-/** Cheek blush decal — a soft radial wash that hugs the cheek. */
-export function makeBlush({ color = 0xff7d96 } = {}) {
-  return new THREE.MeshBasicMaterial({
-    map: view(TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 })),
-    color: new THREE.Color(color),
-    transparent: true, opacity: 0, depthWrite: false
+/**
+ * Cheek blush — a soft radial wash that hugs the cheek.
+ *
+ * It was a `MeshBasicMaterial`, i.e. unlit, which is wrong in two directions at
+ * once: it stayed at full brightness when the cheek was in shadow (so the blush
+ * detached from the head and floated), and it could not pick up the key's
+ * colour, so it read as a pink sticker rather than as blood under skin.
+ *
+ * It is now the *skin shader* with a redder subsurface tint and a redder
+ * albedo. That is more than a "make it lit" fix: because it runs the same
+ * wrapped-diffuse and back-scatter maths as the surface it sits on, it shades
+ * identically to the cheek under it and simply becomes a warmer patch of the
+ * same material. Blush that is actually reddened skin is the whole point.
+ */
+export function makeBlush({ color = 0xff6e88, subsurface = 0xff4a3c } = {}) {
+  const mat = makeSkin({
+    color,
+    subsurface,
+    // A cheek is one of the thinnest, best-vascularised parts of a baby's face,
+    // so it should scatter harder than the rest of the body, not less.
+    translucency: 1.0,
+    wrap: 0.62,
+    sheen: 0.25,
+    poreScale: 6.0
   });
+  // The radial sprite carries the shape in its *alpha*; the RGB is white, so it
+  // does not fight the base colour.
+  mat.alphaMap = view(TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 }));
+  mat.transparent = true;
+  mat.opacity = 0;
+  mat.depthWrite = false;
+  // The caps sit a fraction of a millimetre off the cheek. Without an offset
+  // the two surfaces z-fight at closeup range.
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -2;
+  mat.polygonOffsetUnits = -2;
+  mat.customProgramCacheKey = () => 'blush-sss';
+  return mat;
 }
 
-/** The specular catchlight disc that sits on the cornea. */
-export function makeCatchlight({ opacity = 0.85 } = {}) {
+/**
+ * The catchlight billboard that used to sit on the cornea.
+ *
+ * It was an additive `MeshBasicMaterial` disc with `toneMapped: false` pinned
+ * to a fixed pivot-local offset. That guarantees a specular hit, but it is a
+ * *painted* one: it rotated with the gaze and never once looked at where the
+ * light was, so as the key swung across the room from `day` to `golden` to the
+ * night lamp the highlight in the baby's eye stayed exactly where it was, in
+ * both eyes, identically. `toneMapped: false` also meant it bypassed AgX and
+ * went straight to display white regardless of exposure.
+ *
+ * `face.js` now hangs the disc on a rig it re-aims down the real key's half
+ * vector every frame, which fixes the *placement* half of the defect. This
+ * fixes the other half: the disc is no longer a display-white decal.
+ *
+ *   • `toneMapped: false` meant it skipped AgX entirely and hit 1.0 on screen
+ *     whatever the exposure — so the "specular" in the baby's eye was the one
+ *     element of the frame that did not respond to the lighting mood at all.
+ *     It is now graded with everything else.
+ *   • 0.85 additive over an already-lit cornea is a blown white speck. At 0.36
+ *     it is a soft core, and the *hard* centre of the highlight is supplied by
+ *     the cornea's own analytic specular (see `makeCornea`), which carries the
+ *     key's actual colour and size. Core plus soft halo, both from the same
+ *     direction, is what a real catchlight looks like.
+ */
+export function makeCatchlight({ opacity = 0.36 } = {}) {
   return new THREE.MeshBasicMaterial({
-    map: view(TEX.radialSprite({ size: 64, power: 1.5 })),
+    map: view(TEX.radialSprite({ size: 64, power: 2.2 })),
     transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, opacity, toneMapped: false
+    blending: THREE.AdditiveBlending, opacity, toneMapped: true
   });
 }

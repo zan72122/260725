@@ -327,17 +327,24 @@ export class FoamSystem {
   spawnBubbles(worldPos, count = 3, spread = 0.05) {
     const r = this.rand;
     for (let i = 0; i < count && this.bubbles.length < this.bubbleCap; i++) {
+      const y0 = worldPos.y + r() * 0.02;
       this.bubbles.push({
         p: new THREE.Vector3(
           worldPos.x + (r() * 2 - 1) * spread,
-          worldPos.y + r() * 0.02,
+          y0,
           worldPos.z + (r() * 2 - 1) * spread * 0.8),
         v: new THREE.Vector3((r() * 2 - 1) * 0.03, 0.055 + r() * 0.075, (r() * 2 - 1) * 0.03),
         r: 0.007 + r() * 0.014,
         life: 0,
         maxLife: 2.4 + r() * 2.8,
         phase: r() * 6.28,
-        wob: 0.6 + r() * 0.8
+        wob: 0.6 + r() * 0.8,
+        // A soap bubble off a bath does not climb to the ceiling: it drifts a
+        // hand's width and bursts. Without a ceiling the long-lived ones ended
+        // up floating half a metre above the tub with nothing under them,
+        // reading as a stray white sphere pasted into the frame.
+        y0,
+        rise: 0.055 + r() * 0.11
       });
     }
   }
@@ -410,7 +417,8 @@ export class FoamSystem {
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       const b = this.bubbles[i];
       b.life += dt;
-      if (b.life >= b.maxLife) {
+      // Burst on age *or* on height, whichever comes first.
+      if (b.life >= b.maxLife || (b.rise !== undefined && b.p.y - b.y0 > b.rise)) {
         this.bubbles.splice(i, 1);
         ctx?.fx?.burst?.('sparkle', b.p, 1, { scale: 0.4 });
         continue;

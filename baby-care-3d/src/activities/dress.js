@@ -262,6 +262,44 @@ export class DressActivity {
     S.shade(this.root, true, true);
     this.targets = [this.root];
     if (ctx.baby?.group) this.targets.push(ctx.baby.group);
+
+    this._registerCameras();
+  }
+
+  /**
+   * D1 — this scene lives at the `wardrobe` anchor, metres from the origin the
+   * default presets were composed around, which is why `30-dress-outfit` used
+   * to frame an empty rug. The rig now resolves offsets against a subject, so
+   * all this has to do is name one and re-compose `closeup` for a baby who is
+   * *standing* (0.62 m) rather than sitting (0.40 m) — the built-in framing is
+   * a third too tight and clips the head.
+   *
+   * The subject is the podium root, not the baby: the shot has to hold the
+   * garment rail behind the baby steady while the baby hops about on it.
+   */
+  _registerCameras() {
+    const rig = this.ctx.cameraRig;
+    if (!rig?.overridePreset) return;
+    rig.setSubject?.(this.root);
+    // Offsets in podium-local metres. +Z is out into the room (the baby faces
+    // that way), so the camera sits in front of the child with the open
+    // wardrobe and the hanging outfits reading behind.
+    rig.overridePreset('closeup', {
+      space: 'subject',
+      pos: [0.62, 0.74, 1.44], target: [0.02, 0.36, 0.34],
+      fov: 34, focusRange: 0.22, dof: 1.10, handheld: 0.80, roll: 0.7
+    });
+    rig.overridePreset('face', {
+      space: 'subject',
+      pos: [0.315, 0.707, 0.967], target: [0.00, 0.539, 0.38],
+      fov: 30, focusRange: 0.12, dof: 1.30, handheld: 0.55, roll: 0.5
+    });
+    // Wide enough to read the whole wardrobe wall — washer, line and basket.
+    rig.overridePreset('overhead', {
+      space: 'subject',
+      pos: [0.20, 1.70, 1.20], target: [0.00, 0.20, 0.20],
+      fov: 42, focusRange: 0.40, dof: 0.80, handheld: 0.60, roll: 0.4
+    });
   }
 
   _makeMaterials() {

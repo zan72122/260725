@@ -352,6 +352,24 @@ export class Room {
     return obj;
   }
 
+  /**
+   * Tight dark cores under the feet of a piece of furniture. Offsets are in
+   * the object's *local* frame and are rotated by whatever yaw it ended up
+   * with, jitter included — otherwise the cores slide out from under the legs
+   * as soon as anything is turned off-axis.
+   */
+  _feet(obj, offsets, r = 0.045, opts = { opacity: 0.78, softness: 3.0 }) {
+    const ry = obj.rotation.y;
+    const c = Math.cos(ry), sn = Math.sin(ry);
+    for (const [lx, lz] of offsets) {
+      this._shadowField.add(
+        obj.position.x + lx * c + lz * sn,
+        obj.position.z + -lx * sn + lz * c,
+        r, r, opts);
+    }
+    return obj;
+  }
+
   _place(obj, x, y, z, ry = 0, jitter = {}) {
     obj.position.set(x, y, z);
     obj.rotation.y = ry;
@@ -369,9 +387,8 @@ export class Room {
     this.crib = this._place(P.buildCrib(M), -1.45, 0, -2.28, 0, { pos: 0.016, yaw: 0.026 });
     S.pair(-1.45, -2.28, 0.70, 0.40, { opacity: 0.60, softness: 0.75, core: 0.5 });
     // four feet: the dark cores that say the cot is standing, not floating
-    for (const sx of [-0.59, 0.59]) {
-      for (const sz of [-0.30, 0.30]) S.add(-1.45 + sx, -2.28 + sz, 0.055, 0.055, { opacity: 0.8, softness: 2.6 });
-    }
+    this._feet(this.crib, [[-0.596, -0.316], [0.596, -0.316], [-0.596, 0.316], [0.596, 0.316]],
+      0.055, { opacity: 0.8, softness: 2.6 });
     this.mobile = this._place(P.buildMobile(M), -2.02, 0.78, -2.56, 0.35, { pos: 0.006, yaw: 0.05, lean: 0 });
 
     /* --- changing dresser ------------------------------------------------ */
@@ -406,18 +423,23 @@ export class Room {
     /* --- high chair and play table --------------------------------------- */
     this.highchair = this._place(P.buildHighchair(M), 1.72, 0, -0.35, 2.35, { pos: 0.018, yaw: 0.045 });
     S.add(1.72, -0.35, 0.26, 0.26, { opacity: 0.34, softness: 0.55 });
-    for (const [dx, dz] of [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]) {
-      S.add(1.72 + dx, -0.35 + dz, 0.045, 0.045, { opacity: 0.78, softness: 3.0 });
-    }
+    this._feet(this.highchair, [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]);
 
     this.table = this._place(P.buildPlayTable(M), 1.45, 0, 0.78, 0.4, { pos: 0.02, yaw: 0.05 });
     S.add(1.45, 0.78, 0.33, 0.33, { opacity: 0.34, softness: 0.6 });
+    const legs = [];
     for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4 + 0.4;
-      S.add(1.45 + Math.cos(a) * 0.21, 0.78 + Math.sin(a) * 0.21, 0.04, 0.04, { opacity: 0.75, softness: 3.2 });
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      legs.push([Math.cos(a) * 0.21, Math.sin(a) * 0.21]);
     }
-    S.pair(1.02, 0.95, 0.16, 0.16, { opacity: 0.42, softness: 0.5, core: 0.55 });
-    S.pair(1.86, 0.60, 0.16, 0.16, { opacity: 0.42, softness: 0.5, core: 0.55 });
+    this._feet(this.table, legs, 0.04, { opacity: 0.75, softness: 3.2 });
+    // the two stools, in the table's own local frame
+    for (const [lx, lz] of [[-0.46, 0.12], [0.42, -0.20]]) {
+      const c = Math.cos(this.table.rotation.y), sn = Math.sin(this.table.rotation.y);
+      const wx = this.table.position.x + lx * c + lz * sn;
+      const wz = this.table.position.z + -lx * sn + lz * c;
+      S.pair(wx, wz, 0.15, 0.15, { opacity: 0.46, softness: 0.5, core: 0.55 });
+    }
 
     /* --- laundry basket, plant, pouffe ----------------------------------- */
     this.basket = this._place(P.buildBasket(M), 1.02, 0, -2.36, 0.5, { pos: 0.02, yaw: 0.12 });
@@ -497,7 +519,7 @@ export class Room {
     const spots = [
       [-0.72, 0.95, { n: 3, spread: 0.16 }],       // where somebody was playing
       [-0.50, 1.12, { n: 3, pile: true }],         // an abandoned stack of three
-      [1.00, 1.13, { n: 2, spread: 0.13 }],        // half on, half off the rug rim
+      [0.86, 1.28, { n: 2, spread: 0.13 }],        // half on, half off the rug rim
       [-1.06, -0.05, { n: 1 }],                    // one that rolled to the edge
       [0.34, -0.62, { n: 2, spread: 0.12 }],
       [1.06, 0.10, { n: 1 }],

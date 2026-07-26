@@ -498,9 +498,8 @@ button {
   box-shadow: var(--sh-2), var(--panel-inner);
   backdrop-filter: blur(var(--blur)) saturate(var(--sat));
   -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--sat));
-  max-width: min(66vw, 640px);
+  max-width: min(70vw, 720px);
   animation: hudDrop .6s var(--spring) both;
-  overflow: hidden;
 }
 
 @keyframes hudDrop { from { transform: translateY(-30%); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -532,7 +531,7 @@ button {
 }
 /* min-width keeps the capsule readable when the label is hidden — without it
    the track (which only contains absolutely-positioned children) collapses. */
-.meter__body { flex: 1 1 auto; min-width: clamp(46px, 9.5vmin, 130px); }
+.meter__body { flex: 1 1 auto; min-width: clamp(40px, 8vmin, 112px); }
 .meter__label {
   display: block;
   font-size: clamp(13px, 2.2vmin, 20px);

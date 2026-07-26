@@ -23,6 +23,7 @@ import * as THREE from 'three';
 import * as MAT from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { contactShadow } from '../engine/lighting.js';
 import { WaterSurface, WaterlineRing, TapStream, SteamVeil, DynamicTube, rng } from '../fx/water.js';
 import { FoamSystem } from '../fx/foam.js';
 
@@ -424,6 +425,9 @@ export class BathActivity {
     /* --- floating toys ------------------------------------------------- */
     this._buildToys();
 
+    /* --- continuous particle sources ----------------------------------- */
+    this._buildEmitters();
+
     /* --- camera -------------------------------------------------------- */
     this.root.updateMatrixWorld(true);
     this.towelHome = this.towel.getWorldPosition(new THREE.Vector3());
@@ -434,26 +438,74 @@ export class BathActivity {
 
   /* ---------------------------------------------------------- set build -- */
 
+  /**
+   * The stand.
+   *
+   * The original version ran four legs straight up to `STAND_H` and stopped
+   * there. The bowl's base disc is only 0.246 m across while the legs stand at
+   * a radius of 0.36, so the leg tops ended in mid-air *under* the bowl's
+   * flare, touching nothing — two of them poking out below the front of the
+   * tub as unexplained nubs. A tub stand is a cradle: the shell has to land on
+   * something. So the legs now stop short and carry a top frame of two cradle
+   * rails whose upper surface meets the underside of the bowl, and the tub is
+   * seated into them.
+   */
   _buildStand() {
     const wood = MAT.makeWood({ light: 0xe6c79a, dark: 0x9a6a42, seed: 12, repeat: 2, clearcoat: 0.4 });
     this._materials(wood);
-    const legGeo = new THREE.CylinderGeometry(0.019, 0.024, STAND_H, 12);
+    const spanX = 0.30, cradleZ = 0.175;   // inside the bowl's base disc (r 0.246)
+    const railH = 0.020;
+    const railTop = STAND_H + this._bowlUnderside(cradleZ);
+    const legH = railTop - railH * 0.5;    // legs tenon into the frame
+
+    const legGeo = new THREE.CylinderGeometry(0.019, 0.024, legH, 12);
+    const cradleGeo = roundedBox(0.70, railH, 0.040, 0.010, 3);
     const railGeo = roundedBox(0.66, 0.018, 0.026, 0.008, 3);
     const shelfGeo = roundedBox(0.60, 0.014, 0.30, 0.007, 3);
-    const spanX = 0.30, spanZ = 0.20;
+
     const parts = [];
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      parts.push({ geo: legGeo, pos: [sx * spanX, STAND_H / 2, sz * spanZ],
+      parts.push({ geo: legGeo, pos: [sx * spanX, legH / 2, sz * cradleZ],
                    rot: [sz * 0.05, 0, -sx * 0.06] });
     }
-    // cross rails + a slatted shelf for the bottles
-    for (const sz of [-1, 1]) parts.push({ geo: railGeo, pos: [0, 0.10, sz * spanZ] });
+    // top frame: the two rails the bowl actually rests on
+    for (const sz of [-1, 1]) {
+      parts.push({ geo: cradleGeo, pos: [0, railTop - railH / 2, sz * cradleZ] });
+    }
+    // lower cross rails + a slatted shelf for the bottles
+    for (const sz of [-1, 1]) parts.push({ geo: railGeo, pos: [0, 0.10, sz * cradleZ] });
     parts.push({ geo: shelfGeo, pos: [0, 0.093, 0] });
     const geo = mergeParts(parts);
     this._disposables.push(geo);
     const stand = new THREE.Mesh(geo, wood);
     stand.castShadow = stand.receiveShadow = true;
     this.tub.add(stand);
+
+    // Seat the bowl on the frame: a fraction of a millimetre of bite, so the
+    // two surfaces read as in contact rather than as one passing through the
+    // other or hovering above it.
+    this.bowl.position.y = railTop - 0.0008;
+    this._standTop = railTop;
+
+    // ground the whole stand
+    const floorShadow = contactShadow(0.52, 0.34, 2.2);
+    floorShadow.position.set(0, 0.0022, 0);
+    floorShadow.scale.set(1.25, 1, 0.98);
+    this.tub.add(floorShadow);
+    this._disposables.push(floorShadow.geometry);
+    this._materials(floorShadow.material);
+  }
+
+  /** Height of the bowl's outer underside at lathe radius `r` (tub-local 0). */
+  _bowlUnderside(r) {
+    for (let i = PROFILE.length - 1; i > INNER_COUNT; i--) {
+      const a = PROFILE[i], b = PROFILE[i - 1];
+      if (r >= a[0] && r <= b[0]) {
+        const t = (r - a[0]) / Math.max(1e-6, b[0] - a[0]);
+        return a[1] + (b[1] - a[1]) * t;
+      }
+    }
+    return 0;
   }
 
   _buildBowl() {
@@ -549,37 +601,95 @@ export class BathActivity {
     this.knobCold.castShadow = true;
     g.add(this.knobCold);
 
-    /* --- temperature gauge on the front of the tub --------------------- */
-    const gaugeBody = roundedBox(0.14, 0.036, 0.014, 0.014, 4);
-    this._disposables.push(gaugeBody);
-    const gauge = new THREE.Mesh(gaugeBody,
-      this._materials(MAT.makePlastic({ color: 0xf7f2ea, seed: 73, matte: 0.5 })));
-    gauge.position.set(0.09, 0.16, 0.284);
-    gauge.rotation.x = 0.16;
-    gauge.castShadow = true;
-    this.bowl.add(gauge);
+    this._buildTempPatch();
+  }
 
-    // vertical gradient rotated a quarter turn so cold reads left, hot right
-    const scaleGeo = new THREE.PlaneGeometry(0.020, 0.118);
-    scaleGeo.rotateZ(-Math.PI / 2);
-    this._disposables.push(scaleGeo);
-    const scaleTex = TEX.gradient([
-      [0.0, '#e8503f'], [0.34, '#ffc46a'], [0.5, '#7be09a'],
-      [0.66, '#63d3f0'], [1.0, '#2f7fe0']
-    ], { size: 128 });
-    const scaleMat = this._materials(new THREE.MeshBasicMaterial({ map: scaleTex }));
-    const scale = new THREE.Mesh(scaleGeo, scaleMat);
-    scale.position.set(0.09, 0.16, 0.2925);
-    scale.rotation.x = 0.16;
-    this.bowl.add(scale);
-    this.gaugeScale = scale;
+  /**
+   * Temperature indicator, moulded into the tub wall.
+   *
+   * The first version of this was a full-spectrum gradient strip on an unlit
+   * `MeshBasicMaterial`, floating 11 mm proud of the enamel with a white
+   * sphere riding on it. Rendered, it read as a debug colour ramp taped to the
+   * bath — no material, no lighting, no reason to exist. Real baby baths carry
+   * a thermochromic patch: a small moulded pad, flush with the shell, with a
+   * window that changes colour. That is what this is now — one lozenge of
+   * lit plastic seated in a shallow bezel, no rainbow anywhere, plus three
+   * embossed dots so it still reads as a *scale* rather than a sticker.
+   */
+  _buildTempPatch() {
+    // Sit the pad on the bowl's outer wall, following its curvature, so it is
+    // part of the moulding rather than parked in front of it.
+    const localX = 0.085;
+    const wallZ = (y) => {
+      // outer radius of the lathe at this height, as an ellipse in x/z
+      let r = 0.288;
+      for (let i = INNER_COUNT; i < PROFILE.length - 1; i++) {
+        const a = PROFILE[i], b = PROFILE[i + 1];
+        if (y <= a[1] && y >= b[1]) {
+          const t = (a[1] - y) / Math.max(1e-6, a[1] - b[1]);
+          r = a[0] + (b[0] - a[0]) * t;
+          break;
+        }
+      }
+      const k = 1 - Math.min(1, (localX / (r * SX)) ** 2);
+      return r * Math.sqrt(Math.max(0, k));
+    };
+    const y0 = 0.150;
+    const z0 = wallZ(y0);
+    // The wall leans out as it rises; match that tilt so the pad lies on it.
+    const tilt = Math.atan2(wallZ(y0 + 0.03) - wallZ(y0 - 0.03), 0.06);
 
-    const beadGeo = new THREE.SphereGeometry(0.009, 14, 10);
-    this._disposables.push(beadGeo);
-    this.gaugeBead = new THREE.Mesh(beadGeo,
-      this._materials(MAT.makePlastic({ color: 0xfffdf6, seed: 74, matte: 0.2, clearcoat: 1 })));
-    this.gaugeBead.castShadow = false;
-    this.bowl.add(this.gaugeBead);
+    const g = new THREE.Group();
+    g.position.set(localX, y0, z0 - 0.004);
+    g.rotation.set(tilt, 0, 0);
+    this.bowl.add(g);
+    this.tempPatch = g;
+
+    // bezel — same family as the mint rim band, slightly proud, fully bevelled
+    const bezelGeo = roundedBox(0.098, 0.034, 0.012, 0.013, 5);
+    this._disposables.push(bezelGeo);
+    const bezel = new THREE.Mesh(bezelGeo, this._materials(
+      MAT.makePlastic({ color: 0x9fe0d6, seed: 73, matte: 0.34, clearcoat: 0.9 })));
+    bezel.castShadow = true;
+    bezel.receiveShadow = true;
+    g.add(bezel);
+
+    // recessed window: a shallow pocket, so the pad has depth in raking light
+    const wellGeo = roundedBox(0.074, 0.019, 0.010, 0.007, 4);
+    this._disposables.push(wellGeo);
+    const well = new THREE.Mesh(wellGeo, this._materials(
+      MAT.makePlastic({ color: 0x5f6b74, seed: 91, matte: 0.62 })));
+    well.position.z = 0.0035;
+    well.receiveShadow = true;
+    g.add(well);
+
+    // the thermochromic pane itself — lit plastic, one colour at a time
+    const paneGeo = roundedBox(0.062, 0.013, 0.006, 0.004, 3);
+    this._disposables.push(paneGeo);
+    this.tempPaneMat = this._materials(MAT.makePlastic({
+      color: 0x7be09a, seed: 74, matte: 0.18, clearcoat: 1
+    }));
+    const pane = new THREE.Mesh(paneGeo, this.tempPaneMat);
+    pane.position.z = 0.0055;
+    pane.castShadow = false;
+    g.add(pane);
+    this.tempPane = pane;
+
+    // three embossed dots: cold · just-right · hot. Marks, not a spectrum.
+    const dotGeo = new THREE.SphereGeometry(0.0028, 10, 8);
+    dotGeo.scale(1, 1, 0.55);
+    const dots = mergeParts([          // mergeParts consumes its sources
+      { geo: dotGeo, pos: [-0.026, -0.0125, 0.006] },
+      { geo: dotGeo, pos: [0.000, -0.0125, 0.006] },
+      { geo: dotGeo, pos: [0.026, -0.0125, 0.006] }
+    ]);
+    this._disposables.push(dots);
+    g.add(new THREE.Mesh(dots, this._materials(
+      MAT.makePlastic({ color: 0xfffaf2, seed: 92, matte: 0.4 }))));
+
+    this._tempCold = new THREE.Color(0x5aa9e6);
+    this._tempOk = new THREE.Color(0x74d69a);
+    this._tempHot = new THREE.Color(0xe8705a);
   }
 
   _buildShower() {
@@ -818,17 +928,106 @@ export class BathActivity {
     g.add(rim);
   }
 
+  /**
+   * The bath mat.
+   *
+   * It used to be a 20 mm rounded slab with `castShadow` off, and it rendered
+   * as exactly what it was: a flat pink card lying on the floor with no edge,
+   * no pile and nothing under it. A towelling mat is a *thick* object — you
+   * see the cut edge, the pile catches raking light, the corner nearest the
+   * tub gets kicked up by wet feet, and there is a fringe at each end. All
+   * four of those are built here, and the whole thing is displaced by one
+   * shared function so the fringe folds with the ruck instead of floating off
+   * the corner it belongs to.
+   */
   _buildMat() {
-    const geo = roundedBox(0.46, 0.020, 0.34, 0.055, 6);
-    this._disposables.push(geo);
-    const m = new THREE.Mesh(geo,
-      this._materials(MAT.makeTerry({ color: 0xffdcea, repeat: 3, seed: 84 })));
-    m.position.set(0.02, 0.010, 0.50);
-    m.rotation.y = 0.12;
-    m.receiveShadow = true;
-    m.castShadow = false;
-    this.tub.add(m);
-    this.bathMat = m;
+    const W = 0.48, D = 0.35, H = 0.030;
+    const noise = rng(3311);
+    const pile = [];
+    for (let i = 0; i < 12; i++) pile.push(noise() * 6.283, 1.6 + noise() * 5.4);
+
+    // One rucked corner (+x, +z — the one a wet foot would drag toward the tub)
+    // plus a gentle overall dish, applied to every vertex of every part.
+    const _d = new THREE.Vector3();
+    const displace = (geo) => {
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        _d.fromBufferAttribute(p, i);
+        // Clamped, so the fringe hanging past the edge inherits the fold of
+        // the slab corner it is sewn to instead of staying flat behind it.
+        const u = THREE.MathUtils.clamp(_d.x / W + 0.5, 0, 1);
+        const t = THREE.MathUtils.clamp(_d.z / D + 0.5, 0, 1);
+        // corner ruck
+        const cd = Math.hypot(Math.max(0, u - 0.52) / 0.48, Math.max(0, t - 0.55) / 0.45);
+        const k = Math.max(0, 1 - Math.min(1, cd));
+        const lift = k * k * (3 - 2 * k) * 0.052;
+        _d.y += lift;
+        // the fold pulls the corner back toward the middle as it curls up
+        _d.x -= k * k * 0.030;
+        _d.z -= k * k * 0.024;
+        // a lazy wave across the rest of it, so nothing is dead flat
+        _d.y += Math.sin(u * 4.1 + 0.7) * Math.sin(t * 3.3) * 0.0035 * (1 - k);
+        // pile: only the upper shell, and only where the mat is not folded
+        if (_d.y > lift + H * 0.2) {
+          let n = 0;
+          for (let o = 0; o < pile.length; o += 2) {
+            n += Math.sin(u * pile[o + 1] * 9.0 + pile[o]) * Math.cos(t * pile[o + 1] * 7.0 - pile[o]);
+          }
+          _d.y += n * 0.00035;
+        }
+        p.setXYZ(i, _d.x, _d.y, _d.z);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    const g = new THREE.Group();
+    g.position.set(0.02, 0.0, 0.52);
+    g.rotation.y = 0.14;
+    this.tub.add(g);
+    this.bathMat = g;
+
+    // --- the body: a real slab, small radius so the cut edge reads --------
+    const body = roundedBox(W, H, D, 0.010, 10);
+    body.translate(0, H * 0.5, 0);
+    displace(body);
+    this._disposables.push(body);
+    const terry = this._materials(MAT.makeTerry({ color: 0xffdcea, repeat: 4, seed: 84 }));
+    const slab = new THREE.Mesh(body, terry);
+    slab.castShadow = true;          // it is 30 mm thick; it must cast
+    slab.receiveShadow = true;
+    g.add(slab);
+
+    // --- fringe along both short ends -------------------------------------
+    const tuftGeo = roundedBox(0.0055, 0.0075, 0.034, 0.0022, 2);
+    const tufts = [];
+    const n = 26;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1) - 0.5) * (W - 0.030);
+      for (const sz of [-1, 1]) {
+        const wob = (noise() - 0.5);
+        tufts.push({
+          geo: tuftGeo,
+          pos: [x + wob * 0.004, H * 0.42, sz * (D * 0.5 + 0.014) + wob * 0.003],
+          rot: [sz * (0.10 + wob * 0.18), wob * 0.30, 0]
+        });
+      }
+    }
+    const fringe = displace(mergeParts(tufts));
+    this._disposables.push(fringe);
+    const fringeMesh = new THREE.Mesh(fringe, this._materials(
+      MAT.makeTerry({ color: 0xfff2f7, repeat: 2, seed: 85 })));
+    fringeMesh.castShadow = true;
+    fringeMesh.receiveShadow = true;
+    g.add(fringeMesh);
+
+    // --- the shadow it sits in --------------------------------------------
+    const sh = contactShadow(0.30, 0.40, 2.6);
+    sh.position.y = 0.0018;
+    sh.scale.set(0.92, 1, 0.70);
+    g.add(sh);
+    this._disposables.push(sh.geometry);
+    this._materials(sh.material);
   }
 
   _buildToys() {
@@ -974,6 +1173,60 @@ export class BathActivity {
     g.add(strands);
   }
 
+  /**
+   * Two standing sources over the water.
+   *
+   * Everything this activity did with `fx.burst()` was hung off a pointer
+   * event, so a still — which never touches the screen — had no particles in
+   * it at all. Warm water steams and soapy water fizzes whether or not anyone
+   * is poking it, so both are emitters driven by state, not by input. Both are
+   * `transient`: they belong to this activity and go with it.
+   */
+  _buildEmitters() {
+    const fx = this.ctx?.fx;
+    this._emitters = [];
+    if (!fx?.emitter) return;
+    const mk = (kind, opts) => {
+      const e = fx.emitter(kind, opts);
+      if (e) this._emitters.push(e);
+      return e;
+    };
+    // Steam off the surface: a wide, slow, low-alpha veil that the FX layer's
+    // soft-depth fade now feathers into the water instead of slicing it.
+    this.steamJet = mk('steam', {
+      rate: 0, prime: 0, transient: true,
+      box: [HALF_X * 1.5, 0.012, HALF_Z * 1.5],
+      size: [0.045, 0.098], speed: [0.03, 0.13], spread: 0.55,
+      life: [1.8, 3.4], alpha: 0.26
+    });
+    // Soap bubbles: the FX `bubble` shape is the one with the thin-film rim, so
+    // these are what actually deliver the iridescence the shot list asks for.
+    // Short lives keep them over the tub rather than climbing out of frame.
+    this.bubbleJet = mk('bubble', {
+      rate: 0, prime: 0, transient: true,
+      box: [HALF_X * 1.5, 0.010, HALF_Z * 1.5],
+      size: [0.007, 0.024], speed: [0.02, 0.10], spread: 0.8,
+      life: [1.1, 2.5]
+    });
+  }
+
+  /** Point the standing sources at the current water surface and set rates. */
+  _updateEmitters(steamAmount) {
+    if (!this._emitters?.length) return;
+    const level = this.water.level;
+    const surface = this._world(this.bowl, 0, this.water.surfaceY + 0.018, 0);
+    if (this.steamJet) {
+      this.steamJet.position.copy(surface);
+      this.steamJet.setRate(level > 0.05 && steamAmount > 0.02 ? steamAmount * 8 : 0);
+    }
+    if (this.bubbleJet) {
+      this.bubbleJet.position.copy(surface);
+      // fizz scales with how much lather is actually floating on the water
+      const soapy = Math.min(1, this.foam.total() * 1.6 + this.foam.bubbleRate * 0.10);
+      this.bubbleJet.setRate(level > 0.08 ? soapy * 9 : 0);
+    }
+  }
+
   /** A wordless "look here" marker — a 4-year-old reads this, not text. */
   _buildCue() {
     const g = new THREE.Group();
@@ -1027,11 +1280,11 @@ export class BathActivity {
     // for a fully sculpted foam horn on a seated baby. Pulled in hard from the
     // original framing, which left the tub at a third of the frame height and
     // the bottom third empty floor.
-    add('tub', [0.36, 0.94, 1.16], [0.00, 0.50, 0.06], 34, 0.22);
+    add('tub', [0.30, 0.94, 0.99], [0.00, 0.55, 0.06], 34, 0.22);
     // over the rim, tight on a baby sitting in the water
-    add('bath-face', [0.30, 0.84, 0.82], [0.02, 0.60, 0.02], 34, 0.14, 1.25);
+    add('bath-face', [0.19, 0.87, 0.50], [0.02, 0.64, 0.02], 34, 0.14, 1.25);
     // the towel-and-dryer stage on the mat
-    add('bath-dry', [0.34, 0.72, 1.34], [0.02, 0.28, 0.46], 33, 0.20);
+    add('bath-dry', [0.39, 0.72, 1.83], [0.02, 0.32, 0.50], 33, 0.22);
   }
 
   _goTo(preset, seconds = 1.1) {
@@ -1109,9 +1362,14 @@ export class BathActivity {
   }
 
   dispose() {
+    // The rig resolves subject-space presets against this.tub — release it
+    // before the tub leaves the graph.
+    try { this.ctx.cameraRig?.setSubject?.(null); } catch (e) { /* never fatal */ }
     this._timers.length = 0;
     this._stopLoops();
     this._restoreMaterials();
+    for (const e of this._emitters || []) e.dispose?.();
+    this._emitters = [];
     this.water.dispose();
     this.stream.dispose();
     this.steam.dispose();
@@ -1961,7 +2219,16 @@ export class BathActivity {
     if (!this.root) return;
     const ctx = this.ctx;
     this.time += dt;
-    if (this._openingShot) { this._openingShot = false; this._goTo('bath-dry', 0.9); }
+    // The app snaps to the activity's default preset *after* enter(), so the
+    // undressing shot has to be claimed on the first frame. It must not fire
+    // when something else has already staged the scene past that beat — the
+    // screenshot harness patches state (and re-aims the camera) between
+    // enter() and the first update, and this used to yank `21-bath-foam` off
+    // the tub and onto the empty changing mat.
+    if (this._openingShot) {
+      this._openingShot = false;
+      if (this.phase === 'undress' && this.water.level < 0.05) this._goTo('bath-dry', 0.9);
+    }
     this._tickTimers(dt);
     ctx.baby?.group?.updateMatrixWorld?.();
 
@@ -2000,6 +2267,7 @@ export class BathActivity {
     this.steam.setBase(this.water.surfaceY);
     this.steam.setAmount(this._steamOverride ?? steamAmt);
     this.steam.update(dt);
+    this._updateEmitters(this._steamOverride ?? steamAmt);
     if ((this._steamOverride ?? steamAmt) > 0.55 && this.rand() < dt * 2.2) {
       ctx.fx?.burst?.('steam', this._world(
         this.bowl, (this.rand() - 0.5) * HALF_X, this.water.surfaceY + 0.03, (this.rand() - 0.5) * HALF_Z), 2);
@@ -2008,12 +2276,7 @@ export class BathActivity {
     /* --- gauge --------------------------------------------------------- */
     this.knobHot.scale.lerp(_v.set(1, 1, 1), Math.min(1, dt * 7));
     this.knobCold.scale.lerp(_v.set(1, 1, 1), Math.min(1, dt * 7));
-    if (this.gaugeBead) {
-      const gx = 0.09 + (this.temp - 0.5) * 0.104;
-      this.gaugeBead.position.set(gx, 0.1605, 0.2985);
-      const good = this.temp >= TEMP_OK_MIN && this.temp <= TEMP_OK_MAX;
-      this.gaugeBead.scale.setScalar(good ? 1.0 + Math.sin(this.time * 6) * 0.08 : 1.0);
-    }
+    this._updateTempPatch();
     if (this._pumpPress > 0) {
       this._pumpPress = Math.max(0, this._pumpPress - dt * 5);
       this.pump.position.y = 0.186 - this._pumpPress * 0.014;
@@ -2182,6 +2445,30 @@ export class BathActivity {
     }
   }
 
+  /**
+   * The pane holds one colour: cool blue below the band, green inside it, coral
+   * above. It also slides a hair in and out of its bezel as it warms, so the
+   * part reads as mechanical rather than as a light.
+   */
+  _updateTempPatch() {
+    const pane = this.tempPane;
+    if (!pane) return;
+    const t = this.temp;
+    if (t < TEMP_OK_MIN) {
+      const k = THREE.MathUtils.clamp(t / TEMP_OK_MIN, 0, 1);
+      this.tempPaneMat.color.copy(this._tempCold).lerp(this._tempOk, k * 0.8);
+    } else if (t > TEMP_OK_MAX) {
+      const k = THREE.MathUtils.clamp((t - TEMP_OK_MAX) / (1 - TEMP_OK_MAX), 0, 1);
+      this.tempPaneMat.color.copy(this._tempOk).lerp(this._tempHot, 0.2 + k * 0.8);
+    } else {
+      this.tempPaneMat.color.copy(this._tempOk);
+    }
+    // A 0.6 mm breathe on the "just right" reading: enough to catch the eye at
+    // closeup, invisible as motion in a still.
+    const good = t >= TEMP_OK_MIN && t <= TEMP_OK_MAX;
+    pane.position.z = 0.0055 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
+  }
+
   _syncAnchors() {
     const b = this.ctx.baby;
     const q = b?.group?.quaternion;
@@ -2267,6 +2554,14 @@ export class BathActivity {
       this.filling = v > 0.04 && v < 0.96;
       this.stream.setFlow(this.filling ? 1 : 0);
       if (v >= 0.5) {
+        // A tub that is already full is a tub somebody has already mixed.
+        // `enter()` starts the temperature deliberately wrong (that is the
+        // mechanic), but leaving it there for a harness shot gave a cold bath:
+        // no steam, and a blue reading on the temperature patch.
+        if (this.temp < TEMP_OK_MIN) {
+          this.temp = 0.58;
+          this.water.setTemperature(this.temp);
+        }
         this._placeBabyInTub();
         for (const f of this.floaters) { f.obj.visible = true; f.obj.position.y = this.water.heightAt(f.x, f.z) - f.buoy; }
         if (this.phase === 'undress' || this.phase === 'fill' || this.phase === 'temper' || this.phase === 'test') {
@@ -2302,8 +2597,20 @@ export class BathActivity {
         for (let i = 0; i < (this.tier >= 1 ? 20 : 8); i++) {
           this.foam.spawnBubbles(c, 1, 0.16);
           const b = this.foam.bubbles[this.foam.bubbles.length - 1];
-          if (b) { b.life = this.rand() * b.maxLife * 0.7; b.p.y += this.rand() * 0.22; }
+          if (b) {
+            b.life = this.rand() * b.maxLife * 0.7;
+            // Lift the baseline with the bubble so the pop ceiling stays a
+            // ceiling; without this a pre-seeded bubble kept climbing and
+            // ended up floating on its own well above the tub.
+            const lift = this.rand() * b.rise * 0.8;
+            b.p.y += lift;
+            b.y0 += lift;
+          }
         }
+        // and a matching set of the iridescent FX bubbles
+        ctx.fx?.burst?.('bubble', c, this.tier >= 1 ? 16 : 7, {
+          box: [HALF_X * 1.4, 0.06, HALF_Z * 1.4], life: [1.1, 2.5]
+        });
       }
     }
 

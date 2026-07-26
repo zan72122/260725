@@ -368,7 +368,7 @@ export class UI {
    */
   _buildStarSlots() {
     const box = this.els.starBox;
-    if (!box) return;
+    if (!box || box.querySelector('.star-slots')) return;
     box.querySelector('.star-box__icon')?.remove();
     const row = document.createElement('div');
     row.className = 'star-slots';
@@ -663,19 +663,25 @@ export class UI {
     el.classList.toggle('prompt--right', side === 'right');
     el.classList.toggle('prompt--top', vert === 'top');
 
-    if (!p || !this._promptArrow) {
+    if (!p || !this._promptArrow || !arrowEl) {
       el.style.removeProperty('--arrow-rot');
       return;
     }
-    /* Aim from the bubble's own centre, measured after the placement classes
-       have been applied. `immediate` skips a frame of transition lag. */
-    const box = el.getBoundingClientRect();
+    /* The arrow sits on whichever end of the bubble faces the target, so it
+       never has to point back across its own text. */
+    const wantFirst = side === 'right';
+    if (wantFirst && el.firstElementChild !== arrowEl) el.insertBefore(arrowEl, el.firstElementChild);
+    else if (!wantFirst && el.lastElementChild !== arrowEl) el.appendChild(arrowEl);
+
+    /* Aim from the arrow's own centre, measured after the placement classes
+       have been applied. `immediate` flushes layout first. */
+    if (immediate) void el.offsetWidth;
+    const box = arrowEl.getBoundingClientRect();
     if (!box.width) return;
-    const cx = box.left + box.width * (side === 'left' ? 0.86 : 0.14);
+    const cx = box.left + box.width / 2;
     const cy = box.top + box.height / 2;
     const deg = Math.atan2(-(p.x - cx), p.y - cy) * 180 / Math.PI;
     el.style.setProperty('--arrow-rot', deg.toFixed(1) + 'deg');
-    if (immediate) void el.offsetWidth;
   }
 
   hidePrompt() {

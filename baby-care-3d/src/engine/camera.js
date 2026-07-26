@@ -71,7 +71,7 @@ const BUILTIN = {
   // edge, and there is lateral room for a raised arm on either side.
   face: {
     space: 'subject',
-    pos: [0.285, 0.465, 0.565], target: [-0.020, 0.315, 0.00],
+    pos: [0.312, 0.375, 0.641], target: [-0.020, 0.285, 0.00],
     fov: 30, focusRange: 0.12, dof: 1.35, handheld: 0.55, roll: 0.5
   },
 

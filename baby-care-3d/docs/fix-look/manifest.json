@@ -1,0 +1,26 @@
+[
+  {
+    "id": "01-room-wide",
+    "file": "01-room-wide.png",
+    "scene": "play",
+    "note": "Establishing shot of the nursery. Judge: lighting, materials, composition, light shaft."
+  },
+  {
+    "id": "03-baby-face",
+    "file": "03-baby-face.png",
+    "scene": "play",
+    "note": "Hero face closeup. Judge: skin SSS, eyes, catchlights, hair."
+  },
+  {
+    "id": "51-sleep-asleep",
+    "file": "51-sleep-asleep.png",
+    "scene": "sleep",
+    "note": "Asleep closeup — the money shot for lighting."
+  },
+  {
+    "id": "61-golden-hour",
+    "file": "61-golden-hour.png",
+    "scene": "feed",
+    "note": "Golden hour light shaft + dust motes."
+  }
+]

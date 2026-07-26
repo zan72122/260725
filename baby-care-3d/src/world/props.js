@@ -841,7 +841,7 @@ export function buildBooks(M, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 1
     const d = 0.115 + R() * 0.05;
     const leaning = leanSet.has(i);
     // the further into the leaning group, the further it has slumped
-    const tilt = leaning ? 0.22 + R() * 0.16 : (R() - 0.5) * 0.035;
+    const tilt = leaning ? 0.30 + R() * 0.20 : (R() - 0.5) * 0.045;
     const proud = i === proudAt ? 0.030 + R() * 0.012 : 0;
     const px = x + t / 2 + (leaning ? hh * Math.sin(tilt) * 0.5 : 0);
     const cy = y + hh / 2 * Math.cos(tilt);
@@ -996,8 +996,8 @@ export function buildToyBox(M) {
   const W = 0.74, D = 0.46, H = 0.42;
   const body = [];
   body.push(rbox(W, 0.022, D, [0, 0.028, 0], [0, 0, 0], 0.006, 1.6));
-  for (const sz of [-1, 1]) body.push(rbox(W, H - 0.02, 0.020, [0, H / 2 + 0.02, sz * (D / 2 - 0.01)], [0, 0, 0], 0.008, 1.6));
-  for (const sx of [-1, 1]) body.push(rbox(0.020, H - 0.02, D - 0.04, [sx * (W / 2 - 0.01), H / 2 + 0.02, 0], [0, 0, 0], 0.008, 1.6));
+  for (const sz of [-1, 1]) body.push(rbox(W, H - 0.02, 0.020, [0, H / 2 + 0.02, sz * (D / 2 - 0.01)], [0, 0, 0], 0.0094, 1.6));
+  for (const sx of [-1, 1]) body.push(rbox(0.020, H - 0.02, D - 0.04, [sx * (W / 2 - 0.01), H / 2 + 0.02, 0], [0, 0, 0], 0.0094, 1.6));
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       body.push(rbox(0.05, 0.045, 0.05, [sx * (W / 2 - 0.03), 0.022, sz * (D / 2 - 0.03)], [0, 0, 0], 0.012, 1.6));
@@ -1009,7 +1009,7 @@ export function buildToyBox(M) {
   const lidPivot = new THREE.Group();
   lidPivot.position.set(0, H + 0.03, -D / 2 + 0.01);
   lidPivot.rotation.x = -0.16;
-  const lid = rbox(W + 0.03, 0.028, D + 0.02, [0, 0, D / 2 - 0.01], [0, 0, 0], 0.01, 1.6);
+  const lid = rbox(W + 0.03, 0.028, D + 0.02, [0, 0, D / 2 - 0.01], [0, 0, 0], 0.0132, 1.6);
   const lidMesh = mesh(lid, M.paintedMint, 'toyboxLid');
   lidPivot.add(lidMesh);
   // finger pull, worn back to bare wood
@@ -1062,7 +1062,7 @@ export function buildWardrobe(M) {
     hinge.rotation.y = sx < 0 ? 0.12 : 0;
     // the leaf hangs from its hinge *towards the middle* of the carcass
     const cx = -sx * doorW / 2;
-    const panelParts = [rbox(doorW, doorH, 0.024, [cx, 0, 0], [0, 0, 0], 0.008, 1.2)];
+    const panelParts = [rbox(doorW, doorH, 0.024, [cx, 0, 0], [0, 0, 0], 0.0113, 1.2)];
     for (const py of [doorH * 0.24, -doorH * 0.24]) {
       panelParts.push(rbox(doorW - 0.13, doorH * 0.40, 0.008, [cx, py, 0.014], [0, 0, 0], 0.01, 1.4));
     }
@@ -1104,9 +1104,9 @@ export function buildWardrobe(M) {
  */
 export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
-  const base = new THREE.Color(0xe9b9c4);
-  const band = new THREE.Color(0xfbf1e4);
-  const edge = new THREE.Color(0xcf8d9f);
+  const base = new THREE.Color(0xe6adba);
+  const band = new THREE.Color(0xfdf4e7);
+  const edge = new THREE.Color(0xc57e92);
   const bind = new THREE.Color(0xb87286);          // the woven binding tape
   const under = new THREE.Color(0x7d4a58);         // hessian backing, in shade
   const c = new THREE.Color();
@@ -1126,8 +1126,9 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
      side, is trodden flat. Everything under the play table keeps its pile. */
   const traffic = (x, z) => {
     const t = (x * 0.82 + z * -0.57);                  // distance along the path
-    const perp = (x * 0.57 + z * 0.82) - 0.16;         // distance across it
-    return Math.exp(-(perp * perp) / 0.085) * (0.55 + 0.45 * Math.cos(Math.min(1, Math.abs(t) / 1.4) * Math.PI));
+    const perp = (x * 0.57 + z * 0.82) - 0.34;         // distance across it
+    return Math.exp(-(perp * perp) / 0.026)
+      * (0.55 + 0.45 * Math.cos(Math.min(1, Math.abs(t) / 1.5) * Math.PI));
   };
 
   const put = (x, z, y, u, v, colr) => {
@@ -1152,7 +1153,7 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
       // pile thickness, dished centre, trodden path, tuft breakup, and the
       // one corner someone has caught with a foot
       let y = PILE - rr * rr * 0.004;
-      y -= traffic(x, z) * 0.0072;
+      y -= traffic(x, z) * 0.0078;
       y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
       y += Math.sin(a * 3 + rr * 6) * 0.0016 + Math.sin(a * 11 - rr * 17) * 0.0008;
       // a soft ruck: the rug has been shoved and never quite pulled straight
@@ -1166,10 +1167,12 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
       else if (pd > 0.60 + wob && pd < 0.725 + wob) c.copy(band);
       else if (pd < 0.235 + wob * 0.35) c.copy(band);
       else c.copy(base);
-      // wear: the trodden line and the outer third are faded and greyed
-      const worn = Math.min(1, traffic(x, z) * 0.9 + Math.max(0, rr - 0.72) * 1.1);
-      c.lerp(new THREE.Color(0xe8dcd4), worn * 0.28);
-      c.multiplyScalar(1 - worn * 0.05);
+      // wear: the trodden line and the very outer edge are faded and greyed.
+      // Kept deliberately narrow — a wash over the whole rug just kills the
+      // pattern, which is the opposite of the point.
+      const worn = Math.min(1, traffic(x, z) * 0.85 + Math.max(0, rr - 0.86) * 1.6);
+      c.lerp(new THREE.Color(0xe6d8cf), worn * 0.30);
+      c.multiplyScalar(1 - worn * 0.06);
 
       put(x, z, y, Math.cos(a) * rr * 0.5 + 0.5, Math.sin(a) * rr * 0.5 + 0.5, c);
     }
@@ -1364,23 +1367,26 @@ export function buildBasket(M) {
   lump(0.09, H - 0.028, -0.04, 1.15, 0.55, 1.05, -0.4, 0xf7dfe4);
   lump(0.02, H + 0.012, 0.07, 0.86, 0.48, 0.78, 0.3, 0xfaf3e6);
   // a towel spilling over the near rim, and two socks on the way out
-  const spill = new THREE.PlaneGeometry(0.20, 0.34, 8, 16);
+  const spill = new THREE.PlaneGeometry(0.165, 0.20, 8, 14);
   {
     const p = spill.attributes.position;
     for (let i = 0; i < p.count; i++) {
-      const u = p.getX(i), t = (p.getY(i) + 0.17) / 0.34;    // 0 at the loose end
-      const drop = Math.max(0, 0.62 - t) / 0.62;
+      const u = p.getX(i), t = (p.getY(i) + 0.10) / 0.20;    // 0 at the loose end
+      const drop = Math.max(0, 0.70 - t) / 0.70;
+      // it folds over the rim and curls, rather than hanging as a flat card:
+      // the free corner rolls inwards and the sides cup
+      const a = drop * Math.PI * 0.58;
       p.setXYZ(i,
-        u * (1 - drop * 0.18) + Math.sin(t * 9) * 0.006,
-        H + 0.02 - drop * drop * 0.30,
-        rTop - 0.02 + drop * 0.075 + Math.cos(u * 16) * 0.006);
+        u * (1 - drop * 0.22) + Math.sin(t * 9) * 0.005,
+        H + 0.028 - (1 - Math.cos(a)) * 0.115 + Math.abs(u) * drop * 0.10,
+        rTop - 0.035 + Math.sin(a) * 0.052 + Math.cos(u * 18) * 0.005);
     }
     spill.computeVertexNormals();
   }
   // cloth needs two sides, and M.cloth is front-facing: give the towel a
   // reversed underside 4 mm behind, which also reads as real thickness
   const spillBack = spill.clone();
-  spillBack.translate(0, -0.005, 0.005);
+  spillBack.translate(0, -0.0045, 0.0045);
   {
     const ix = spillBack.getIndex().array;
     for (let i = 0; i < ix.length; i += 3) { const t = ix[i]; ix[i] = ix[i + 2]; ix[i + 2] = t; }
@@ -1509,10 +1515,10 @@ export function buildPictures(M, list) {
     const cos = Math.cos(t), sin = Math.sin(t);
     const push = (geo) => frames.push(xf(geo, [p.x, p.y, 0], [0, 0, t]));
     const w = p.w, h = p.h, b = 0.028;
-    push(rbox(w + b * 2, b, 0.032, [0, h / 2 + b / 2, 0], [0, 0, 0], 0.006, 2));
-    push(rbox(w + b * 2, b, 0.032, [0, -h / 2 - b / 2, 0], [0, 0, 0], 0.006, 2));
-    push(rbox(b, h, 0.032, [-w / 2 - b / 2, 0, 0], [0, 0, 0], 0.006, 2));
-    push(rbox(b, h, 0.032, [w / 2 + b / 2, 0, 0], [0, 0, 0], 0.006, 2));
+    push(rbox(w + b * 2, b, 0.032, [0, h / 2 + b / 2, 0], [0, 0, 0], 0.0088, 2));
+    push(rbox(w + b * 2, b, 0.032, [0, -h / 2 - b / 2, 0], [0, 0, 0], 0.0088, 2));
+    push(rbox(b, h, 0.032, [-w / 2 - b / 2, 0, 0], [0, 0, 0], 0.0088, 2));
+    push(rbox(b, h, 0.032, [w / 2 + b / 2, 0, 0], [0, 0, 0], 0.0088, 2));
     push(rbox(w + b, h + b, 0.010, [0, 0, -0.012], [0, 0, 0], 0.004, 2));
 
     const plane = new THREE.PlaneGeometry(w, h);
@@ -1808,7 +1814,16 @@ export function buildPlayTable(M) {
     parts.push(xf(lathe(legProfile, 10), [Math.cos(a) * 0.21, 0, Math.sin(a) * 0.21], [0.05 * Math.sin(a), 0, -0.05 * Math.cos(a)]));
   }
   parts.push(xf(new THREE.TorusGeometry(0.205, 0.012, 6, 24), [0, 0.11, 0], [Math.PI / 2, 0, 0]));
-  g.add(mesh(mergeAll(parts), M.beech, 'playTableTop'));
+  // `lathe()` hands back LatheGeometry's own UVs, where u is the angle around
+  // the axis and v runs along the profile. The wood generator draws its growth
+  // rings as a function of v — so on a lathed disc every ring becomes a perfect
+  // circle centred on the axis, and the table top rendered as a rotationally
+  // symmetric starburst bullseye (defect D23). No sawn timber can do that; it
+  // is a polar UV giving itself away. `boxUV` reprojects the top face onto the
+  // world XZ plane, which is how a real top is cut from a flat-sawn board:
+  // parallel grain running one way across the whole disc. The stools next to it
+  // already did this, which is why only the table read as wrong.
+  g.add(mesh(boxUV(mergeAll(parts), 1.4), M.beech, 'playTableTop'));
 
   const stools = [];
   for (const [sx, sz, ry] of [[-0.46, 0.12, 0.4], [0.42, -0.20, -0.9]]) {
@@ -1832,7 +1847,7 @@ export function buildPlayTable(M) {
 export function buildDoorLeaf(M, { w = 0.86, h = 2.03 } = {}) {
   const g = new THREE.Group();
   g.name = 'door';
-  const parts = [rbox(w, h, 0.042, [w / 2, h / 2, 0], [0, 0, 0], 0.008, 1.2)];
+  const parts = [rbox(w, h, 0.042, [w / 2, h / 2, 0], [0, 0, 0], 0.0136, 1.2)];
   for (const [py, ph] of [[h * 0.30, h * 0.34], [h * 0.70, h * 0.30]]) {
     parts.push(rbox(w - 0.20, ph, 0.012, [w / 2, py, 0.022], [0, 0, 0], 0.012, 1.4));
   }
