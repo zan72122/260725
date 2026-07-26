@@ -1,0 +1,22 @@
+import { chromium } from 'playwright';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+const ROOT='/home/user/260725/baby-care-3d';
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
+const {port}=await new Promise(r=>{const s=createServer(async(q,p)=>{try{let u=decodeURIComponent(q.url.split('?')[0]);if(u.endsWith('/'))u+='index.html';const f=join(ROOT,u);const b=await readFile(f);p.writeHead(200,{'Content-Type':MIME[extname(f)]||'application/octet-stream'});p.end(b);}catch{p.writeHead(404).end('404 '+q.url);}});s.listen(0,'127.0.0.1',()=>r({port:s.address().port}));});
+const br=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const page=await br.newPage({viewport:{width:1024,height:768}});
+const msgs=[];
+page.on('pageerror',e=>msgs.push('pageerror: '+e.message));
+page.on('console',m=>{if(m.type()==='error')msgs.push('console: '+m.text());});
+page.on('requestfailed',r=>msgs.push('reqfail: '+r.url()));
+await page.goto(`http://127.0.0.1:${port}/index.html?harness=1`,{waitUntil:'load'});
+await page.waitForTimeout(2500);
+console.log('--- real index.html boot ---');
+console.log(msgs.join('\n'));
+console.log('importmap ok?', await page.evaluate(()=>!!document.querySelector('script[type=importmap]')));
+// verify three resolves through the import map independently of app.js
+console.log('three via importmap:', await page.evaluate(async()=>{try{const m=await import('three');return 'ok r'+m.REVISION;}catch(e){return 'FAIL '+e.message;}}));
+console.log('ui module:', await page.evaluate(async()=>{try{const m=await import('./src/ui/ui.js');return 'ok '+typeof m.UI;}catch(e){return 'FAIL '+e.message;}}));
+await br.close();process.exit(0);

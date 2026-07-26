@@ -608,3 +608,995 @@ export function dropGeo(r) {
     [r * 0.44, r * 2.0], [0, r * 2.15]
   ], 12);
 }
+
+/* ------------------------------------------------------------- dresser --- */
+
+/**
+ * Changing table / dresser. The middle drawer is left 3 cm proud — one of the
+ * cheapest, most effective "someone lives here" signals in the room.
+ */
+export function buildDresser(M) {
+  const g = new THREE.Group();
+  g.name = 'dresser';
+  const W = 1.06, D = 0.52, H = 0.86;
+  const carcass = [];
+
+  carcass.push(rbox(W - 0.10, 0.085, D - 0.08, [0, 0.043, 0], [0, 0, 0], 0.012, 1.4));
+  for (const sx of [-1, 1]) {
+    carcass.push(rbox(0.028, 0.70, D - 0.03, [sx * (W / 2 - 0.014), 0.44, -0.005], [0, 0, 0], 0.008, 1.4));
+  }
+  carcass.push(rbox(W - 0.05, 0.70, 0.018, [0, 0.44, -D / 2 + 0.02], [0, 0, 0], 0.006, 1.4));
+  // drawer dividers
+  for (const y of [0.325, 0.555]) {
+    carcass.push(rbox(W - 0.06, 0.016, D - 0.06, [0, y, 0], [0, 0, 0], 0.005, 1.4));
+  }
+  // overhanging top with a generous eased edge
+  carcass.push(rbox(W + 0.045, 0.042, D + 0.03, [0, H - 0.02, 0], [0, 0, 0], 0.016, 1.2));
+  g.add(mesh(mergeAll(carcass), M.oak, 'dresserCarcass'));
+
+  /* --- drawer fronts (the middle one not pushed home) ------------------ */
+  const proud = [0, 0.032, 0];
+  const fronts = [];
+  const knobs = [];
+  const knobGeo = lathe([
+    [0, 0], [0.009, 0], [0.010, 0.013], [0.021, 0.024], [0.023, 0.034], [0.015, 0.043], [0, 0.045]
+  ], 14);
+  knobGeo.rotateX(Math.PI / 2);          // face the room
+  const drawerY = [0.19, 0.44, 0.665];
+  drawerY.forEach((y, i) => {
+    const z = D / 2 - 0.006 + proud[i];
+    fronts.push(rbox(W - 0.075, i === 2 ? 0.185 : 0.205, 0.022, [0, y, z], [0, 0, 0], 0.009, 1.4));
+    for (const sx of [-1, 1]) knobs.push({ pos: [sx * 0.235, y, z + 0.012] });
+  });
+  g.add(mesh(mergeAll(fronts), M.oak, 'dresserDrawers'));
+  // Knobs get the worn material: this is where hands actually touch.
+  g.add(instanced(knobGeo, M.worn, knobs, 'dresserKnobs'));
+
+  /* --- changing mat on top -------------------------------------------- */
+  const mat = new THREE.Group();
+  mat.position.set(0.02, H + 0.02, 0);
+  const pad = rbox(0.80, 0.055, 0.46, [0, 0, 0], [0, 0, 0], 0.022, 1.6);
+  mat.add(mesh(pad, M.quilt, 'changingMat'));
+  const bolster = [];
+  for (const sx of [-1, 1]) {
+    bolster.push(tint(new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3([
+        new THREE.Vector3(sx * 0.375, 0.02, -0.20),
+        new THREE.Vector3(sx * 0.395, 0.045, 0),
+        new THREE.Vector3(sx * 0.375, 0.02, 0.20)
+      ]), 14, 0.026, 8, false), 0xf7dfe2));
+  }
+  mat.add(mesh(mergeAll(bolster, { colors: true }), M.plush, 'changingBolsters'));
+  g.add(mat);
+
+  g.userData.pick = g.children.slice();
+  return g;
+}
+
+/* --------------------------------------------------------------- shelf --- */
+
+/** Open shelf unit: books (one leaning), a teddy, stacking rings, a lamp. */
+export function buildShelf(M) {
+  const g = new THREE.Group();
+  g.name = 'shelf';
+  const W = 0.94, D = 0.25;
+  const carcass = [];
+  for (const sx of [-1, 1]) carcass.push(rbox(0.022, 0.66, D, [sx * W / 2, 0.30, 0], [0, 0, 0], 0.007, 1.6));
+  for (const y of [0, 0.33, 0.62]) carcass.push(rbox(W + 0.02, 0.024, D, [0, y, 0], [0, 0, 0], 0.008, 1.6));
+  carcass.push(rbox(W, 0.05, 0.014, [0, 0.14, -D / 2 + 0.007], [0, 0, 0], 0.004, 1.6));
+  g.add(mesh(mergeAll(carcass), M.paintedWhite, 'shelfCarcass'));
+
+  const books = buildBooks(M, { n: 9, y: 0.012, x0: -0.42, z: 0.01, lean: 5 });
+  g.add(books.covers, books.pages);
+  const books2 = buildBooks(M, { n: 5, y: 0.342, x0: 0.10, z: 0.01, lean: -1, seed: 44 });
+  g.add(books2.covers, books2.pages);
+
+  const teddy = buildTeddy(M, 0.13);
+  teddy.position.set(-0.26, 0.345, 0.0);
+  teddy.rotation.y = 0.5;
+  g.add(teddy);
+
+  const rings = buildStackingRings(M);
+  rings.position.set(0.30, 0.012, 0.0);
+  g.add(rings);
+
+  const lamp = buildLamp(M);
+  lamp.position.set(-0.30, 0.632, 0);
+  g.add(lamp);
+
+  g.userData.lamp = lamp;
+  g.userData.pick = [teddy, rings, lamp, books.covers];
+  return g;
+}
+
+/** A row of books: covers and page blocks are two instanced meshes. */
+export function buildBooks(M, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 12, h = 0.19 } = {}) {
+  const R = rng(seed);
+  const cols = [0xe4746a, 0xf0b45a, 0x6fa8b8, 0xd88fae, 0x8fb87a, 0xefe0c8, 0x9a86c4];
+  const covers = [], pages = [];
+  let x = x0;
+  for (let i = 0; i < n; i++) {
+    const t = 0.020 + R() * 0.016;
+    const hh = h * (0.82 + R() * 0.3);
+    const d = 0.13 + R() * 0.03;
+    const leaning = i === lean;
+    const tilt = leaning ? 0.30 : (R() - 0.5) * 0.02;
+    const px = x + t / 2 + (leaning ? hh * 0.14 : 0);
+    covers.push({
+      pos: [px, y + hh / 2 * Math.cos(tilt), z], rot: [0, 0, -tilt],
+      scale: [t, hh, d], color: cols[(i * 3 + seed) % cols.length]
+    });
+    pages.push({
+      pos: [px, y + hh / 2 * Math.cos(tilt), z + 0.004], rot: [0, 0, -tilt],
+      scale: [t * 0.82, hh * 0.93, d * 0.94], color: 0xf6ecdc
+    });
+    x += t + 0.002 + (leaning ? hh * 0.24 : 0);
+  }
+  const unit = roundedBox(1, 1, 1, 0.06, 1);
+  boxUV(unit, 1);
+  const unitPages = roundedBox(1, 1, 1, 0.02, 1);
+  boxUV(unitPages, 1);
+  return {
+    covers: instanced(unit, M.paper, covers, 'books'),
+    pages: instanced(unitPages, M.paper, pages, 'bookPages')
+  };
+}
+
+/** Stacking-ring toy: peg on a rocker base, five graded tori, one off-axis. */
+export function buildStackingRings(M) {
+  const g = new THREE.Group();
+  const base = tint(lathe([
+    [0, 0], [0.075, 0], [0.078, 0.012], [0.070, 0.022], [0.020, 0.028], [0.012, 0.03], [0, 0.032]
+  ], 18), 0xf3e3d2);
+  const peg = tint(xf(new THREE.CylinderGeometry(0.010, 0.013, 0.135, 10), [0, 0.098, 0]), 0xf3e3d2);
+  g.add(mesh(mergeAll([base, peg], { colors: true }), M.plastic, 'ringBase'));
+
+  const cols = [0xef8a7a, 0xf5c26b, 0x86c6b6, 0x8ab4de, 0xc59ad4];
+  const items = [];
+  let y = 0.034;
+  cols.forEach((c, i) => {
+    const rr = 0.062 - i * 0.008;
+    const tube = 0.017 - i * 0.0015;
+    items.push({
+      pos: [0, y + tube, 0],
+      // the top ring sits crooked, as they always do
+      rot: i === 4 ? [0.22, 0.4, 0.1] : [0, i * 0.7, 0],
+      scale: [rr / 0.06, 1, rr / 0.06], color: c
+    });
+    y += tube * 2 - 0.002;
+  });
+  const torus = new THREE.TorusGeometry(0.06, 0.016, 8, 20);
+  torus.rotateX(Math.PI / 2);
+  g.add(instanced(torus, M.plastic, items, 'rings'));
+  return g;
+}
+
+/* --------------------------------------------------------------- teddy --- */
+
+/** Knitted bear. One merged vertex-coloured mesh — eyes, nose and all. */
+export function buildTeddy(M, s = 0.13) {
+  const g = new THREE.Group();
+  g.name = 'teddy';
+  const FUR = 0xc9a077;
+  const PALE = 0xe8d2b4;
+  const DARK = 0x3a2a24;
+  const parts = [];
+  const ball = (r, x, y, z, sx, sy, sz, col) =>
+    parts.push(tint(xf(new THREE.SphereGeometry(r * s, 14, 11), [x * s, y * s, z * s], [0, 0, 0], [sx, sy, sz]), col));
+
+  ball(0.62, 0, 0.62, 0, 1.0, 0.92, 0.88, FUR);      // body
+  ball(0.50, 0, 1.42, 0.02, 1.0, 0.95, 0.95, FUR);   // head
+  ball(0.26, -0.42, 1.78, -0.02, 1, 1, 0.6, FUR);    // ears
+  ball(0.26, 0.42, 1.78, -0.02, 1, 1, 0.6, FUR);
+  ball(0.16, -0.42, 1.78, 0.06, 1, 1, 0.45, PALE);
+  ball(0.16, 0.42, 1.78, 0.06, 1, 1, 0.45, PALE);
+  ball(0.27, 0, 1.30, 0.40, 1.05, 0.85, 0.8, PALE);  // muzzle
+  ball(0.09, 0, 1.36, 0.60, 1.2, 0.8, 0.8, DARK);    // nose
+  ball(0.07, -0.20, 1.52, 0.42, 1, 1, 0.6, DARK);    // eyes
+  ball(0.07, 0.20, 1.52, 0.42, 1, 1, 0.6, DARK);
+  ball(0.24, -0.62, 0.82, 0.10, 1.35, 0.8, 0.9, FUR); // arms
+  ball(0.24, 0.62, 0.82, 0.10, 1.35, 0.8, 0.9, FUR);
+  ball(0.28, -0.34, 0.16, 0.18, 1.0, 0.75, 1.25, FUR); // legs
+  ball(0.28, 0.34, 0.16, 0.18, 1.0, 0.75, 1.25, FUR);
+  ball(0.30, 0, 0.60, 0.34, 1.0, 0.85, 0.55, PALE);  // tummy patch
+
+  g.add(mesh(mergeAll(parts, { colors: true }), M.plush, 'teddyBody'));
+  return g;
+}
+
+/* ---------------------------------------------------------------- lamp --- */
+
+/**
+ * Small table lamp. `userData.setOn` lights the shade from the inside by
+ * pushing emissive into the fabric — a lamp that only changes a point light
+ * looks broken because the shade itself stays dead.
+ */
+export function buildLamp(M, { shadeColor = 0xfff2e4, height = 0.30 } = {}) {
+  const g = new THREE.Group();
+  g.name = 'lamp';
+
+  const base = lathe([
+    [0, 0], [0.062, 0], [0.066, 0.012], [0.058, 0.035], [0.030, 0.075],
+    [0.020, 0.11], [0.018, 0.13], [0, 0.132]
+  ], 20);
+  g.add(mesh(base, M.ceramic, 'lampBase'));
+
+  const stem = xf(new THREE.CylinderGeometry(0.008, 0.008, 0.10, 8), [0, 0.175, 0]);
+  g.add(mesh(stem, M.metal, 'lampStem'));
+
+  // open-ended cone: you can see the inside of the shade, which is where the
+  // emissive glow actually reads
+  const shade = new THREE.CylinderGeometry(0.072, 0.105, 0.125, 24, 1, true);
+  shade.translate(0, height - 0.06, 0);
+  const shadeMesh = mesh(shade, M.shade, 'lampShade');
+  shadeMesh.castShadow = false;
+  g.add(shadeMesh);
+
+  const bulb = new THREE.SphereGeometry(0.028, 12, 10);
+  bulb.translate(0, height - 0.075, 0);
+  const bulbMesh = new THREE.Mesh(bulb, M.bulb);
+  g.add(bulbMesh);
+
+  g.userData.setOn = (on) => {
+    M.shade.emissiveIntensity = on ? 0.85 : 0.0;
+    M.bulb.emissiveIntensity = on ? 3.2 : 0.0;
+  };
+  g.userData.top = height;
+  return g;
+}
+
+/* ------------------------------------------------------------- toy box --- */
+
+/** Toy box with a hinged lid left ajar and rope handles. */
+export function buildToyBox(M) {
+  const g = new THREE.Group();
+  g.name = 'toybox';
+  const W = 0.74, D = 0.46, H = 0.42;
+  const body = [];
+  body.push(rbox(W, 0.022, D, [0, 0.028, 0], [0, 0, 0], 0.006, 1.6));
+  for (const sz of [-1, 1]) body.push(rbox(W, H - 0.02, 0.020, [0, H / 2 + 0.02, sz * (D / 2 - 0.01)], [0, 0, 0], 0.008, 1.6));
+  for (const sx of [-1, 1]) body.push(rbox(0.020, H - 0.02, D - 0.04, [sx * (W / 2 - 0.01), H / 2 + 0.02, 0], [0, 0, 0], 0.008, 1.6));
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      body.push(rbox(0.05, 0.045, 0.05, [sx * (W / 2 - 0.03), 0.022, sz * (D / 2 - 0.03)], [0, 0, 0], 0.012, 1.6));
+    }
+  }
+  g.add(mesh(mergeAll(body), M.paintedMint, 'toyboxBody'));
+
+  // lid pivots at the back edge; left open a crack
+  const lidPivot = new THREE.Group();
+  lidPivot.position.set(0, H + 0.03, -D / 2 + 0.01);
+  lidPivot.rotation.x = -0.16;
+  const lid = rbox(W + 0.03, 0.028, D + 0.02, [0, 0, D / 2 - 0.01], [0, 0, 0], 0.01, 1.6);
+  const lidMesh = mesh(lid, M.paintedMint, 'toyboxLid');
+  lidPivot.add(lidMesh);
+  // finger pull, worn back to bare wood
+  const pull = new THREE.TorusGeometry(0.045, 0.008, 8, 18, Math.PI);
+  pull.rotateX(Math.PI / 2);
+  pull.rotateZ(Math.PI);
+  g.add(mesh(xf(pull, [0, H + 0.055, D / 2 + 0.012], [0.16, 0, 0]), M.worn, 'toyboxPull'));
+  g.add(lidPivot);
+
+  g.userData.lid = lidPivot;
+  g.userData.pick = [lidMesh];
+  return g;
+}
+
+/* ------------------------------------------------------------ wardrobe --- */
+
+/** Wardrobe with a cornice, panelled doors (one ajar) and clothes inside. */
+export function buildWardrobe(M) {
+  const g = new THREE.Group();
+  g.name = 'wardrobe';
+  const W = 1.02, D = 0.58, H = 1.94;
+  const carcass = [];
+  carcass.push(rbox(W - 0.06, 0.10, D - 0.06, [0, 0.05, 0], [0, 0, 0], 0.012, 1.2));
+  for (const sx of [-1, 1]) carcass.push(rbox(0.03, H - 0.16, D - 0.02, [sx * (W / 2 - 0.015), H / 2 + 0.04, -0.005], [0, 0, 0], 0.008, 1.2));
+  carcass.push(rbox(W - 0.05, H - 0.16, 0.018, [0, H / 2 + 0.04, -D / 2 + 0.02], [0, 0, 0], 0.006, 1.2));
+  carcass.push(rbox(W - 0.05, 0.026, D - 0.04, [0, H - 0.10, 0], [0, 0, 0], 0.006, 1.2));
+  carcass.push(rbox(W - 0.05, 0.026, D - 0.04, [0, 0.115, 0], [0, 0, 0], 0.006, 1.2));
+  // cornice: a real moulding profile wrapped round the front and both returns
+  // The profile is authored as (x = projection from the face, y = height) and
+  // extruded along +Z, so each run just needs the right yaw to face outwards.
+  const crown = [[0, 0], [0.045, 0.008], [0.045, 0.026], [0.028, 0.046], [0.024, 0.062], [0, 0.070]];
+  const crownY = H - 0.075;
+  const frontRun = extrudeProfile(crown, W + 0.09);
+  frontRun.rotateY(-Math.PI / 2);                   // now runs along -X, faces +Z
+  carcass.push(xf(frontRun, [(W + 0.09) / 2, crownY, D / 2]));
+  const rightRun = extrudeProfile(crown, D + 0.05); // runs along +Z, faces +X
+  carcass.push(xf(rightRun, [W / 2, crownY, -D / 2 - 0.005]));
+  const leftRun = extrudeProfile(crown, D + 0.05);
+  leftRun.rotateY(Math.PI);                          // runs along -Z, faces -X
+  carcass.push(xf(leftRun, [-W / 2, crownY, D / 2 + 0.045]));
+  g.add(mesh(mergeAll(carcass), M.oak, 'wardrobeCarcass'));
+
+  /* --- doors ----------------------------------------------------------- */
+  const doorW = (W - 0.075) / 2, doorH = H - 0.28;
+  const doors = new THREE.Group();
+  for (const sx of [-1, 1]) {
+    const hinge = new THREE.Group();
+    hinge.position.set(sx * (W / 2 - 0.02), 0.145 + doorH / 2, D / 2 - 0.012);
+    // the left door never quite shuts — the room has been lived in
+    hinge.rotation.y = sx < 0 ? 0.12 : 0;
+    const panelParts = [rbox(doorW, doorH, 0.024, [sx * doorW / 2, 0, 0], [0, 0, 0], 0.008, 1.2)];
+    for (const py of [doorH * 0.24, -doorH * 0.24]) {
+      panelParts.push(rbox(doorW - 0.13, doorH * 0.40, 0.008, [sx * doorW / 2, py, 0.014], [0, 0, 0], 0.01, 1.4));
+    }
+    const leaf = mesh(mergeAll(panelParts), M.oak, 'wardrobeDoor');
+    hinge.add(leaf);
+    // slim brass bar handle
+    const handle = mergeAll([
+      xf(new THREE.CylinderGeometry(0.007, 0.007, 0.16, 8), [sx * (doorW - 0.055), 0.03, 0.038]),
+      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [sx * (doorW - 0.055), 0.10, 0.024], [Math.PI / 2, 0, 0]),
+      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [sx * (doorW - 0.055), -0.04, 0.024], [Math.PI / 2, 0, 0])
+    ]);
+    hinge.add(mesh(handle, M.brass, 'wardrobeHandle'));
+    doors.add(hinge);
+  }
+  g.add(doors);
+
+  /* --- clothes glimpsed through the gap -------------------------------- */
+  const inside = [];
+  inside.push(tint(xf(new THREE.CylinderGeometry(0.01, 0.01, W - 0.12, 8), [0, H - 0.30, -0.02], [0, 0, Math.PI / 2]), 0xcfc8bf));
+  const shirtCols = [0xf2c6d0, 0xcfe0ef, 0xf6e6c8, 0xd9e9df, 0xe8d6ef];
+  for (let i = 0; i < 5; i++) {
+    const x = -0.30 + i * 0.075;
+    inside.push(tint(xf(roundedBox(0.055, 0.44, 0.16, 0.02, 1), [x, H - 0.55, -0.06], [0, (i % 2 ? 0.1 : -0.08), 0]), shirtCols[i]));
+  }
+  g.add(mesh(mergeAll(inside, { colors: true }), M.cloth, 'wardrobeClothes'));
+
+  g.userData.doors = doors;
+  g.userData.pick = [doors.children[0].children[0], doors.children[1].children[0]];
+  return g;
+}
+
+/* ----------------------------------------------------------------- rug --- */
+
+/**
+ * Round tufted rug. Built as a radial grid so the pile can dish very slightly
+ * in the middle and — the good bit — one edge can lift off the floor where
+ * someone has caught it with a foot.
+ */
+export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
+  const pos = [], col = [], uv = [], idx = [];
+  const base = new THREE.Color(0xf6dfe4);
+  const band = new THREE.Color(0xfaf1e6);
+  const edge = new THREE.Color(0xe9c3cc);
+  const c = new THREE.Color();
+  const liftAngle = 2.35;
+  for (let i = 0; i <= rings; i++) {
+    const rr = i / rings;
+    const r = rr * radius;
+    for (let j = 0; j <= segs; j++) {
+      const a = (j / segs) * Math.PI * 2;
+      let d = a - liftAngle;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      // pile thickness + a dished centre + the lifted corner
+      let y = 0.013 - rr * rr * 0.004;
+      y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
+      y += Math.sin(a * 3 + rr * 6) * 0.0015;
+      pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
+      uv.push((Math.cos(a) * rr * 0.5 + 0.5), (Math.sin(a) * rr * 0.5 + 0.5));
+      // concentric colour bands, hand-drawn wobble on the boundaries
+      const wob = Math.sin(a * 5) * 0.015;
+      if (rr > 0.93 + wob) c.copy(edge);
+      else if (rr > 0.62 + wob && rr < 0.74 + wob) c.copy(band);
+      else if (rr < 0.24 + wob) c.copy(band);
+      else c.copy(base);
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  const row = segs + 1;
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segs; j++) {
+      const a = i * row + j, b = a + 1, cIdx = a + row, dIdx = cIdx + 1;
+      idx.push(a, cIdx, b, b, cIdx, dIdx);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = mesh(g, M.carpet, 'rug');
+  m.castShadow = false;         // a 13 mm rug casting a shadow map just aliases
+  return m;
+}
+
+/* -------------------------------------------------------------- pouffe --- */
+
+/** Floor cushion with real seams and a tufted button. */
+export function buildPouffe(M) {
+  const g = new THREE.Group();
+  g.name = 'pouffe';
+  const prof = [
+    [0.00, 0.00], [0.22, 0.005], [0.275, 0.045], [0.298, 0.13],
+    [0.285, 0.22], [0.225, 0.285], [0.115, 0.318], [0.00, 0.325]
+  ];
+  const body = tint(lathe(prof, 28), 0xe7d3c0);
+  g.add(mesh(body, M.cloth, 'pouffeBody'));
+
+  // six panel seams, sampled from the same profile so they hug the surface
+  const seams = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.2;
+    const pts = prof.slice(1).map(p => new THREE.Vector3(
+      Math.cos(a) * p[0] * 1.005, p[1] + 0.001, Math.sin(a) * p[0] * 1.005));
+    seams.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.0045, 5, false));
+  }
+  seams.push(lathe([[0, 0.318], [0.032, 0.322], [0.030, 0.334], [0.012, 0.340], [0, 0.338]], 14));
+  g.add(mesh(tint(mergeAll(seams), 0xcbb09b), M.cloth, 'pouffeSeams'));
+  return g;
+}
+
+/* --------------------------------------------------------------- plant --- */
+
+/** Potted plant: turned pot, soil, and instanced leaves on real stems. */
+export function buildPlant(M, { seed = 4, leaves = 11, scale = 1 } = {}) {
+  const g = new THREE.Group();
+  g.name = 'plant';
+  const pot = lathe([
+    [0, 0], [0.14, 0], [0.145, 0.02], [0.152, 0.10], [0.168, 0.22],
+    [0.175, 0.245], [0.168, 0.25], [0.158, 0.245], [0.150, 0.14], [0.140, 0.03], [0, 0.028]
+  ], 24);
+  g.add(mesh(pot, M.ceramic, 'plantPot'));
+
+  const soil = lathe([[0, 0.235], [0.10, 0.238], [0.148, 0.228], [0.152, 0.222], [0, 0.222]], 20);
+  g.add(mesh(tint(soil, 0x4a3a2e), M.cloth, 'plantSoil'));
+
+  const R = rng(seed);
+  const items = [];
+  const greens = [0x6fae5f, 0x86bd6c, 0x5c9a52, 0x9ccb7c];
+  for (let i = 0; i < leaves; i++) {
+    const a = (i / leaves) * Math.PI * 2 + R() * 0.5;
+    const lean = 0.28 + R() * 0.55;
+    const s = (0.8 + R() * 0.55) * scale;
+    items.push({
+      pos: [Math.cos(a) * 0.05, 0.235, Math.sin(a) * 0.05],
+      rot: [Math.cos(a + Math.PI / 2) * lean, -a, Math.sin(a + Math.PI / 2) * lean],
+      scale: s,
+      color: greens[i % greens.length]
+    });
+  }
+  g.add(instanced(leafGeo(), M.leaf, items, 'plantLeaves'));
+  return g;
+}
+
+/** One leaf: a tapered, curled blade on a stem. Grown along +Y. */
+export function leafGeo(len = 0.34, wide = 0.075) {
+  const cols = 6, rows = 12;
+  const g = new THREE.PlaneGeometry(1, 1, cols, rows);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) + 0.5;          // 0..1 across
+    const t = pos.getY(i) + 0.5;          // 0..1 along
+    const stem = t < 0.28;
+    // width profile: thin stalk, fat belly, drawn-out tip
+    const w = stem ? 0.012 : Math.sin(Math.min(1, (t - 0.28) / 0.72) * Math.PI) ** 0.7 * wide;
+    const x = (u - 0.5) * 2 * w;
+    const y = t * len;
+    // curl along the length + a V-fold across the midrib
+    const z = -Math.pow(t, 2.2) * len * 0.42 + Math.abs(u - 0.5) * 2 * w * 0.55;
+    pos.setXYZ(i, x, y, z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/* ------------------------------------------------------ laundry basket --- */
+
+/**
+ * Woven basket. The lattice is the point: 24 leaning staves crossed by four
+ * hoops reads as a real woven object and costs two draw calls.
+ */
+export function buildBasket(M) {
+  const g = new THREE.Group();
+  g.name = 'basket';
+  const rBot = 0.20, rTop = 0.255, H = 0.40;
+  const staves = [];
+  const n = 26;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const lean = Math.atan2(rTop - rBot, H);
+    staves.push({
+      pos: [Math.cos(a) * (rBot + rTop) / 2, H / 2, Math.sin(a) * (rBot + rTop) / 2],
+      rot: [Math.sin(a) * lean, -a, -Math.cos(a) * lean],
+      color: i % 2 ? 0xd9bd93 : 0xcdae83
+    });
+  }
+  const stave = roundedBox(0.016, H + 0.02, 0.010, 0.004, 1);
+  boxUV(stave, 3);
+  g.add(instanced(stave, M.plastic, staves, 'basketStaves'));
+
+  const hoops = [];
+  for (const [y, rr] of [[0.03, rBot + 0.005], [0.15, 0.222], [0.28, 0.242], [H - 0.005, rTop]]) {
+    const t = new THREE.TorusGeometry(rr, 0.011, 6, 34);
+    t.rotateX(Math.PI / 2);
+    hoops.push(tint(xf(t, [0, y, 0]), 0xe3cba4));
+  }
+  hoops.push(tint(lathe([[0, 0], [rBot, 0], [rBot, 0.012], [0, 0.012]], 24), 0xd9bd93));
+  g.add(mesh(mergeAll(hoops, { colors: true }), M.plastic, 'basketHoops'));
+
+  // liner folded over the rim, and one sock that didn't make it in
+  const liner = tint(lathe([
+    [rTop - 0.02, H - 0.02], [rTop + 0.012, H + 0.005], [rTop - 0.005, H - 0.055],
+    [rTop - 0.06, H - 0.10], [rTop - 0.10, H - 0.14]
+  ], 26), 0xf3e4e6);
+  const sock = tint(xf(roundedBox(0.055, 0.13, 0.03, 0.014, 2), [rTop * 0.72, H + 0.02, rTop * 0.5], [0.5, 0.6, 0.25]), 0xd8e6ef);
+  g.add(mesh(mergeAll([liner, sock], { colors: true }), M.cloth, 'basketLiner'));
+  return g;
+}
+
+/* ------------------------------------------------------------ pictures --- */
+
+/**
+ * Four little paintings drawn once into a 2×2 atlas, so any number of framed
+ * pictures costs exactly one extra draw call. The mount board is drawn into
+ * the canvas rather than modelled — it is a flat piece of card, and nobody
+ * ever sees its thickness.
+ */
+export function nurseryArt() {
+  return TEX.painted('nurseryArt', 1024, (g, S) => {
+    const H = S / 2;
+    const panel = (ox, oy, bg, draw) => {
+      g.save();
+      g.translate(ox, oy);
+      g.fillStyle = '#f6efe4';
+      g.fillRect(0, 0, H, H);
+      g.fillStyle = bg;
+      g.fillRect(H * 0.10, H * 0.10, H * 0.80, H * 0.80);
+      g.save();
+      g.beginPath();
+      g.rect(H * 0.10, H * 0.10, H * 0.80, H * 0.80);
+      g.clip();
+      draw(g, H);
+      g.restore();
+      // print texture: a faint paper tooth over the whole panel
+      g.globalAlpha = 0.05;
+      for (let i = 0; i < 900; i++) {
+        g.fillStyle = i % 2 ? '#ffffff' : '#8a7a70';
+        g.fillRect(Math.random() * H, Math.random() * H, 2, 2);
+      }
+      g.globalAlpha = 1;
+      g.restore();
+    };
+    const circle = (x, y, r, c) => { g.fillStyle = c; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); };
+
+    // 1. hot-air balloon
+    panel(0, 0, '#dcecf4', (g, H) => {
+      const cx = H * 0.5, cy = H * 0.42, r = H * 0.20;
+      const stripes = ['#e8836f', '#f3c06a', '#8fc4b0', '#e8836f'];
+      for (let i = 0; i < 4; i++) {
+        g.fillStyle = stripes[i];
+        g.beginPath();
+        g.moveTo(cx, cy - r);
+        g.bezierCurveTo(cx + r * (i - 1.5) * 0.75, cy - r * 0.6, cx + r * (i - 1.5) * 0.75, cy + r * 0.6, cx, cy + r * 1.05);
+        g.bezierCurveTo(cx + r * (i - 0.5) * 0.75, cy + r * 0.6, cx + r * (i - 0.5) * 0.75, cy - r * 0.6, cx, cy - r);
+        g.fill();
+      }
+      g.strokeStyle = '#a8825f'; g.lineWidth = H * 0.008;
+      g.beginPath(); g.moveTo(cx - r * 0.3, cy + r); g.lineTo(cx - r * 0.18, cy + r * 1.45);
+      g.moveTo(cx + r * 0.3, cy + r); g.lineTo(cx + r * 0.18, cy + r * 1.45); g.stroke();
+      g.fillStyle = '#b98a55';
+      g.fillRect(cx - r * 0.22, cy + r * 1.42, r * 0.44, r * 0.3);
+      circle(H * 0.76, H * 0.28, H * 0.035, '#ffffffcc');
+      circle(H * 0.72, H * 0.30, H * 0.028, '#ffffffcc');
+    });
+
+    // 2. moon and stars
+    panel(H, 0, '#3f4a76', (g, H) => {
+      circle(H * 0.58, H * 0.42, H * 0.19, '#f7e6b8');
+      circle(H * 0.48, H * 0.36, H * 0.17, '#3f4a76');
+      for (let i = 0; i < 26; i++) {
+        const x = H * (0.14 + Math.random() * 0.72), y = H * (0.14 + Math.random() * 0.72);
+        circle(x, y, H * (0.004 + Math.random() * 0.008), '#fff6dd');
+      }
+    });
+
+    // 3. rainbow over hills
+    panel(0, H, '#f7f0e2', (g, H) => {
+      const cols = ['#e8836f', '#f3b25f', '#f0dd83', '#8fc4b0', '#8fb0d8', '#b79ad0'];
+      g.lineWidth = H * 0.045;
+      cols.forEach((c, i) => {
+        g.strokeStyle = c;
+        g.beginPath();
+        g.arc(H * 0.5, H * 0.74, H * (0.42 - i * 0.048), Math.PI, 0);
+        g.stroke();
+      });
+      g.fillStyle = '#9dc48a';
+      g.beginPath(); g.moveTo(0, H); g.quadraticCurveTo(H * 0.5, H * 0.62, H, H); g.fill();
+    });
+
+    // 4. whale
+    panel(H, H, '#cfe4ee', (g, H) => {
+      g.fillStyle = '#6e9bc0';
+      g.beginPath();
+      g.moveTo(H * 0.22, H * 0.55);
+      g.bezierCurveTo(H * 0.30, H * 0.32, H * 0.68, H * 0.32, H * 0.74, H * 0.55);
+      g.bezierCurveTo(H * 0.68, H * 0.72, H * 0.34, H * 0.74, H * 0.22, H * 0.55);
+      g.fill();
+      g.beginPath();
+      g.moveTo(H * 0.74, H * 0.55); g.lineTo(H * 0.88, H * 0.40);
+      g.lineTo(H * 0.86, H * 0.62); g.fill();
+      circle(H * 0.34, H * 0.50, H * 0.018, '#2c3f52');
+      g.strokeStyle = '#ffffff'; g.lineWidth = H * 0.014;
+      g.beginPath(); g.arc(H * 0.46, H * 0.30, H * 0.10, Math.PI * 0.9, Math.PI * 1.9); g.stroke();
+      g.fillStyle = '#b6d6e4';
+      g.beginPath(); g.moveTo(0, H * 0.82); g.quadraticCurveTo(H * 0.5, H * 0.72, H, H * 0.86); g.lineTo(H, H); g.lineTo(0, H); g.fill();
+    });
+  });
+}
+
+/** Framed pictures for one wall. `list` = [{x,y,w,h,art,tilt}] in wall space. */
+export function buildPictures(M, list) {
+  const g = new THREE.Group();
+  g.name = 'pictures';
+  const frames = [];
+  const arts = [];
+  const tex = nurseryArt();
+  for (const p of list) {
+    const t = p.tilt || 0;
+    const cos = Math.cos(t), sin = Math.sin(t);
+    const push = (geo) => frames.push(xf(geo, [p.x, p.y, 0], [0, 0, t]));
+    const w = p.w, h = p.h, b = 0.028;
+    push(rbox(w + b * 2, b, 0.032, [0, h / 2 + b / 2, 0], [0, 0, 0], 0.006, 2));
+    push(rbox(w + b * 2, b, 0.032, [0, -h / 2 - b / 2, 0], [0, 0, 0], 0.006, 2));
+    push(rbox(b, h, 0.032, [-w / 2 - b / 2, 0, 0], [0, 0, 0], 0.006, 2));
+    push(rbox(b, h, 0.032, [w / 2 + b / 2, 0, 0], [0, 0, 0], 0.006, 2));
+    push(rbox(w + b, h + b, 0.010, [0, 0, -0.012], [0, 0, 0], 0.004, 2));
+
+    const plane = new THREE.PlaneGeometry(w, h);
+    const uv = plane.attributes.uv;
+    const ox = (p.art % 2) * 0.5, oy = p.art < 2 ? 0.5 : 0;   // canvas y is flipped
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, ox + uv.getX(i) * 0.5, oy + uv.getY(i) * 0.5);
+    arts.push(xf(plane, [p.x + sin * 0, p.y, 0.006], [0, 0, t]));
+  }
+  g.add(mesh(mergeAll(frames), M.beech, 'pictureFrames'));
+  const artMat = new THREE.MeshPhysicalMaterial({
+    map: tex, roughness: 0.72, metalness: 0, clearcoat: 0.3, clearcoatRoughness: 0.35
+  });
+  const artMesh = mesh(mergeAll(arts), artMat, 'pictureArt');
+  artMesh.castShadow = false;
+  g.add(artMesh);
+  g.userData.pick = [artMesh];
+  return g;
+}
+
+/* --------------------------------------------------------------- clock --- */
+
+/** Wall clock. Hands are separate meshes so they can actually tell the time. */
+export function buildClock(M, { r = 0.135 } = {}) {
+  const g = new THREE.Group();
+  g.name = 'clock';
+  const case_ = [];
+  const rim = new THREE.TorusGeometry(r, 0.016, 8, 40);
+  case_.push(rim);
+  case_.push(xf(new THREE.CylinderGeometry(r, r, 0.03, 40), [0, 0, -0.016], [Math.PI / 2, 0, 0]));
+  g.add(mesh(mergeAll(case_), M.beech, 'clockCase'));
+
+  const faceTex = TEX.painted('clockFace', 512, (c, S) => {
+    c.fillStyle = '#fdf7ef';
+    c.fillRect(0, 0, S, S);
+    const cx = S / 2, cy = S / 2;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const long = i % 3 === 0;
+      c.strokeStyle = long ? '#5a4a48' : '#a89890';
+      c.lineWidth = long ? S * 0.022 : S * 0.012;
+      c.beginPath();
+      c.moveTo(cx + Math.cos(a) * S * 0.40, cy + Math.sin(a) * S * 0.40);
+      c.lineTo(cx + Math.cos(a) * (long ? S * 0.33 : S * 0.36), cy + Math.sin(a) * (long ? S * 0.33 : S * 0.36));
+      c.stroke();
+    }
+    c.fillStyle = '#e8a0b4';
+    c.beginPath(); c.arc(cx, cy + S * 0.20, S * 0.035, 0, Math.PI * 2); c.fill();
+  });
+  const faceMat = new THREE.MeshPhysicalMaterial({ map: faceTex, roughness: 0.55, clearcoat: 0.6, clearcoatRoughness: 0.1 });
+  const face = new THREE.Mesh(new THREE.CircleGeometry(r - 0.012, 40), faceMat);
+  face.position.z = 0.004;
+  face.receiveShadow = true;
+  g.add(face);
+
+  const hand = (len, wide) => {
+    const m = mesh(rbox(wide, len, 0.006, [0, len / 2 - wide * 0.6, 0], [0, 0, 0], 0.003, 3), M.dark, 'clockHand');
+    m.castShadow = false;
+    return m;
+  };
+  const hour = hand(r * 0.52, 0.014);
+  const min = hand(r * 0.78, 0.010);
+  hour.position.z = 0.010;
+  min.position.z = 0.014;
+  g.add(hour, min);
+  g.userData.hour = hour;
+  g.userData.minute = min;
+  return g;
+}
+
+/* ------------------------------------------------------------- bunting --- */
+
+/**
+ * Bunting strung between two points. The cord follows a real catenary and the
+ * flags hang off it as instances; `userData.update` walks a travelling wave
+ * along the line so the whole garland breathes.
+ */
+export function buildBunting(M, from, to, { n = 11, sag = 0.22, seed = 6 } = {}) {
+  const g = new THREE.Group();
+  g.name = 'bunting';
+  const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to);
+  const pts = [];
+  for (let i = 0; i <= 24; i++) {
+    const t = i / 24;
+    const p = a.clone().lerp(b, t);
+    p.y -= Math.sin(t * Math.PI) * sag;       // catenary, close enough at this span
+    pts.push(p);
+  }
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const cord = mesh(new THREE.TubeGeometry(curve, 40, 0.004, 5, false), M.dark, 'buntingCord');
+  cord.castShadow = false;
+  g.add(cord);
+
+  const cols = [0xef8a7a, 0xf5c26b, 0x8fc4b0, 0x8fb0d8, 0xefb6cd, 0xfdf3e6];
+  const R = rng(seed);
+  const items = [];
+  const anchors = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const p = curve.getPointAt(t);
+    const tan = curve.getTangentAt(t);
+    anchors.push({ p: p.clone(), tan: tan.clone(), phase: R() * 6.28 });
+    items.push({
+      pos: [p.x, p.y - 0.055, p.z],
+      rot: [0, 0, Math.atan2(tan.y, tan.x)],
+      color: cols[i % cols.length]
+    });
+  }
+  const flag = new THREE.Shape();
+  flag.moveTo(-0.052, 0.055);
+  flag.lineTo(0.052, 0.055);
+  flag.lineTo(0, -0.075);
+  flag.closePath();
+  const flagGeo = new THREE.ExtrudeGeometry(flag, {
+    depth: 0.004, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.002,
+    bevelSegments: 1, steps: 1
+  });
+  boxUV(flagGeo, 6);
+  const flags = instanced(flagGeo, M.cloth, items, 'buntingFlags');
+  flags.castShadow = false;      // paper-thin triangles alias badly in VSM
+  g.add(flags);
+
+  g.userData.update = (t) => {
+    for (let i = 0; i < anchors.length; i++) {
+      const an = anchors[i];
+      const s = Math.sin(t * 1.35 + an.phase) * 0.09 + Math.sin(t * 2.7 + an.phase * 1.7) * 0.03;
+      _e.set(s * 0.7, s * 0.5, Math.atan2(an.tan.y, an.tan.x) + s * 0.35);
+      _q.setFromEuler(_e);
+      _v.set(an.p.x, an.p.y - 0.055, an.p.z);
+      _s.set(1, 1, 1);
+      flags.setMatrixAt(i, _m4.compose(_v, _q, _s));
+    }
+    flags.instanceMatrix.needsUpdate = true;
+  };
+  return g;
+}
+
+/* ---------------------------------------------------------- nightlight --- */
+
+/** Mushroom nightlight. Owns its material so it can glow without the lamp. */
+export function buildNightlight(M) {
+  const g = new THREE.Group();
+  g.name = 'nightlight';
+  const glowMat = new THREE.MeshPhysicalMaterial({
+    color: 0xfff0e0,
+    emissive: new THREE.Color(0xffbf7a),
+    emissiveIntensity: 0,
+    roughness: 0.35,
+    transmission: 0.45,
+    thickness: 0.05,
+    ior: 1.4,
+    transparent: true,
+    opacity: 0.92
+  });
+  const dome = new THREE.SphereGeometry(0.055, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.62);
+  dome.translate(0, 0.028, 0);
+  const domeMesh = new THREE.Mesh(dome, glowMat);
+  g.add(domeMesh);
+  const foot = lathe([[0, 0], [0.042, 0], [0.045, 0.008], [0.030, 0.022], [0.026, 0.03], [0, 0.03]], 18);
+  g.add(mesh(foot, M.ceramic, 'nightlightFoot'));
+  g.userData.setOn = (on) => { glowMat.emissiveIntensity = on ? 2.4 : 0; };
+  g.userData.material = glowMat;
+  return g;
+}
+
+/* ----------------------------------------------------------- highchair --- */
+
+/** Splay-legged high chair with a tray and a quilted seat pad. */
+export function buildHighchair(M) {
+  const g = new THREE.Group();
+  g.name = 'highchair';
+  const frame = [];
+  const legH = 0.62;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const lean = 0.10;
+      frame.push(rbox(0.036, legH, 0.036,
+        [sx * (0.14 + lean * 0.5), legH / 2, sz * (0.13 + lean * 0.5)],
+        [-sz * lean, 0, sx * lean], 0.01, 2));
+    }
+  }
+  // stretchers + footrest
+  for (const sz of [-1, 1]) frame.push(rbox(0.30, 0.024, 0.022, [0, 0.20, sz * 0.155], [0, 0, 0], 0.008, 2));
+  frame.push(rbox(0.28, 0.020, 0.13, [0, 0.245, 0.14], [0, 0, 0], 0.006, 2));
+  frame.push(rbox(0.34, 0.028, 0.31, [0, legH, 0], [0, 0, 0], 0.01, 2));
+  // back rest, tilted, with two slats
+  frame.push(rbox(0.32, 0.30, 0.026, [0, legH + 0.16, -0.15], [-0.11, 0, 0], 0.012, 2));
+  for (const sx of [-1, 1]) {
+    frame.push(rbox(0.030, 0.32, 0.030, [sx * 0.15, legH + 0.16, -0.145], [-0.11, 0, 0], 0.01, 2));
+  }
+  g.add(mesh(mergeAll(frame), M.beech, 'highchairFrame'));
+
+  const pad = mesh(rbox(0.30, 0.035, 0.27, [0, legH + 0.03, 0.005], [0, 0, 0], 0.014, 1.8), M.quilt, 'highchairPad');
+  g.add(pad);
+
+  // tray with a rounded front edge
+  const trayShape = new THREE.Shape();
+  trayShape.moveTo(-0.19, -0.10);
+  trayShape.lineTo(0.19, -0.10);
+  trayShape.quadraticCurveTo(0.23, 0.06, 0, 0.13);
+  trayShape.quadraticCurveTo(-0.23, 0.06, -0.19, -0.10);
+  const trayGeo = new THREE.ExtrudeGeometry(trayShape, {
+    depth: 0.022, bevelEnabled: true, bevelSize: 0.008, bevelThickness: 0.006,
+    bevelSegments: 2, steps: 1, curveSegments: 8
+  });
+  trayGeo.rotateX(-Math.PI / 2);
+  boxUV(trayGeo, 2);
+  const tray = mesh(xf(trayGeo, [0, legH + 0.10, 0.18], [0, Math.PI, 0]), M.paintedWhite, 'highchairTray');
+  g.add(tray);
+
+  g.userData.tray = tray;
+  g.userData.pick = [tray, pad];
+  return g;
+}
+
+/* ---------------------------------------------------------- play table --- */
+
+/** Low round play table with two stools. */
+export function buildPlayTable(M) {
+  const g = new THREE.Group();
+  g.name = 'playTable';
+  const H = 0.40, R = 0.30;
+  const top = lathe([
+    [0, 0], [R - 0.02, 0], [R, 0.008], [R, 0.028], [R - 0.02, 0.036], [0, 0.036]
+  ], 32);
+  const parts = [xf(top, [0, H, 0])];
+  const legProfile = [
+    [0.021, 0], [0.024, 0.02], [0.018, 0.05], [0.022, 0.09],
+    [0.017, 0.28], [0.023, 0.32], [0.017, 0.36], [0.020, H]
+  ];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    parts.push(xf(lathe(legProfile, 10), [Math.cos(a) * 0.21, 0, Math.sin(a) * 0.21], [0.05 * Math.sin(a), 0, -0.05 * Math.cos(a)]));
+  }
+  parts.push(xf(new THREE.TorusGeometry(0.205, 0.012, 6, 24), [0, 0.11, 0], [Math.PI / 2, 0, 0]));
+  g.add(mesh(mergeAll(parts), M.beech, 'playTableTop'));
+
+  const stools = [];
+  for (const [sx, sz, ry] of [[-0.46, 0.12, 0.4], [0.42, -0.20, -0.9]]) {
+    const seat = lathe([[0, 0], [0.115, 0], [0.12, 0.006], [0.115, 0.026], [0, 0.03]], 22);
+    stools.push(xf(seat, [sx, 0.235, sz]));
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + ry;
+      stools.push(xf(new THREE.CylinderGeometry(0.014, 0.017, 0.235, 8),
+        [sx + Math.cos(a) * 0.075, 0.118, sz + Math.sin(a) * 0.075],
+        [0.09 * Math.sin(a), 0, -0.09 * Math.cos(a)]));
+    }
+  }
+  g.add(mesh(boxUV(mergeAll(stools), 1.4), M.paintedMint, 'stools'));
+  g.userData.pick = g.children.slice();
+  return g;
+}
+
+/* ---------------------------------------------------------- door leaf --- */
+
+/** Panelled door, hinged so the room can leave it ajar. */
+export function buildDoorLeaf(M, { w = 0.86, h = 2.03 } = {}) {
+  const g = new THREE.Group();
+  g.name = 'door';
+  const parts = [rbox(w, h, 0.042, [w / 2, h / 2, 0], [0, 0, 0], 0.008, 1.2)];
+  for (const [py, ph] of [[h * 0.30, h * 0.34], [h * 0.70, h * 0.30]]) {
+    parts.push(rbox(w - 0.20, ph, 0.012, [w / 2, py, 0.022], [0, 0, 0], 0.012, 1.4));
+  }
+  g.add(mesh(mergeAll(parts), M.paintedWhite, 'doorLeaf'));
+  const knob = lathe([[0, 0], [0.012, 0], [0.014, 0.014], [0.026, 0.03], [0.022, 0.048], [0, 0.052]], 14);
+  knob.rotateX(Math.PI / 2);
+  g.add(mesh(xf(knob, [w - 0.085, 1.02, 0.021]), M.brass, 'doorKnob'));
+  return g;
+}
+
+/* ------------------------------------------------------------- clutter --- */
+
+/**
+ * The toys that end up on the floor. Two instanced meshes plus one shared soft
+ * blob, so the whole mess costs three draw calls however many toys there are.
+ * Toys pop in with a squash-and-settle rather than appearing, because things
+ * that appear instantly read as bugs to a four-year-old.
+ */
+export function buildClutter(M, spots, { seed = 77 } = {}) {
+  const group = new THREE.Group();
+  group.name = 'clutter';
+  const R = rng(seed);
+  const blockCols = [0xef8a7a, 0xf5c26b, 0x8fc4b0, 0x8fb0d8, 0xc9a6e0];
+  const ballCols = [0xf3a3bd, 0xffd98a, 0x9fd4c4];
+
+  const toys = spots.map((s, i) => ({
+    kind: i % 3 === 2 ? 'ball' : 'block',
+    x: s[0], z: s[1], rot: s[2] !== undefined ? s[2] : R() * 6.28,
+    tilt: (R() - 0.5) * 0.5,
+    size: 0.062 + R() * 0.022,
+    color: (i % 3 === 2 ? ballCols : blockCols)[i % 5 % (i % 3 === 2 ? 3 : 5)],
+    v: 0, target: 0, phase: R() * 6.28
+  }));
+
+  const blocks = toys.filter(t => t.kind === 'block');
+  const balls = toys.filter(t => t.kind === 'ball');
+
+  const blockGeo = roundedBox(1, 1, 1, 0.14, 2);
+  boxUV(blockGeo, 1);
+  const ballGeo = new THREE.SphereGeometry(0.5, 16, 12);
+
+  const blockMesh = instanced(blockGeo, M.plastic, blocks.map(t => ({ color: t.color, scale: 0 })), 'clutterBlocks');
+  const ballMesh = instanced(ballGeo, M.plastic, balls.map(t => ({ color: t.color, scale: 0 })), 'clutterBalls');
+  blockMesh.frustumCulled = false;
+  ballMesh.frustumCulled = false;
+  group.add(blockMesh, ballMesh);
+
+  const write = () => {
+    let bi = 0, si = 0;
+    for (const t of toys) {
+      const v = t.v;
+      const lift = Math.sin(Math.min(1, v) * Math.PI) * 0.06;      // little hop
+      const squash = 1 + Math.sin(Math.min(1, v) * Math.PI) * 0.18;
+      _e.set(t.tilt * v, t.rot, t.tilt * 0.6 * v);
+      _q.setFromEuler(_e);
+      _v.set(t.x, t.size * 0.5 * v + lift, t.z);
+      const s = t.size * v;
+      _s.set(s / squash, s * squash, s / squash);
+      _m4.compose(_v, _q, _s);
+      if (t.kind === 'block') blockMesh.setMatrixAt(bi++, _m4);
+      else ballMesh.setMatrixAt(si++, _m4);
+    }
+    blockMesh.instanceMatrix.needsUpdate = true;
+    ballMesh.instanceMatrix.needsUpdate = true;
+  };
+  write();
+
+  return {
+    group,
+    meshes: [blockMesh, ballMesh],
+    toys,
+    /** How many toys should be out (a number, or true/false for all/none). */
+    set(n) {
+      const count = n === true ? toys.length : n === false ? 0 : Math.max(0, Math.min(toys.length, n | 0));
+      toys.forEach((t, i) => { t.target = i < count ? 1 : 0; });
+      return count;
+    },
+    count() { return toys.reduce((a, t) => a + (t.target > 0.5 ? 1 : 0), 0); },
+    update(dt) {
+      let moving = false;
+      for (const t of toys) {
+        const d = t.target - t.v;
+        if (Math.abs(d) > 0.001) {
+          // in fast and bouncy, out slow and shy
+          t.v += d * Math.min(1, dt * (t.target > 0.5 ? 7 : 4));
+          moving = true;
+        } else if (t.v !== t.target) {
+          t.v = t.target;
+          moving = true;
+        }
+      }
+      if (moving) write();
+      return moving;
+    }
+  };
+}

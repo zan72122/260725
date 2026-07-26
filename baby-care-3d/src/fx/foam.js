@@ -1,0 +1,439 @@
+/* ============================================================================
+ * fx/foam.js — soap lather that grows, sculpts and rinses away locally
+ * ----------------------------------------------------------------------------
+ * Lather is the one bath effect a child will judge you on, so it is modelled
+ * as an actual accumulating substance rather than a texture that fades in.
+ *
+ *   • Foam lives as a pool of blobs — position, radius, growth target — drawn
+ *     as one InstancedMesh of clumped icospheres. Scrubbing the same spot
+ *     twice *grows* the blob already there; scrubbing next to it spawns a
+ *     neighbour. That is what makes the mass build up into a cluster instead
+ *     of a spray of equal beads.
+ *   • Blobs are parented to lightweight anchors (head, body, each hand, the
+ *     water surface) so they ride the baby without this module knowing
+ *     anything about the rig.
+ *   • Stroking upward raises `horn`, which blends every head blob from its
+ *     scattered base position onto a golden-angle spiral that tapers as it
+ *     rises: a real sculpted foam horn, and it un-sculpts as it is rinsed.
+ *   • Rinsing is spatial. `rinse(point, radius, dt)` only shrinks blobs the
+ *     spray actually reaches, so aiming matters.
+ * ========================================================================== */
+
+import * as THREE from 'three';
+import * as MAT from '../engine/materials.js';
+import * as TEX from '../engine/textures.js';
+import { rng } from './water.js';
+
+const _m = new THREE.Matrix4();
+const _p = new THREE.Vector3();
+const _s = new THREE.Vector3();
+const _wp = new THREE.Vector3();
+const _IDQ = new THREE.Quaternion();
+
+const CAP = [90, 150, 220];
+const BUB = [10, 24, 42];
+
+/** Icosphere pushed around by a few sines — reads as a clump, not a ball. */
+function clumpGeometry(detail) {
+  const geo = new THREE.IcosahedronGeometry(1, detail);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = 1
+      + 0.13 * Math.sin(x * 7.3 + y * 4.1)
+      + 0.10 * Math.sin(y * 9.1 - z * 5.7)
+      + 0.07 * Math.sin(z * 11.4 + x * 6.2);
+    p.setXYZ(i, x * n, y * n, z * n);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+export class FoamSystem {
+  constructor(ctx, { parent, headRadius = 0.068 } = {}) {
+    this.ctx = ctx;
+    this.tier = Math.max(0, Math.min(2, ctx?.tier ?? 2));
+    this.capacity = CAP[this.tier];
+    this.headRadius = headRadius;
+    this.blobs = [];
+    this.horn = 0;
+    this.hornTarget = 0;
+    this.time = 0;
+    this.bubbleRate = 0;
+    this._bubbleAcc = 0;
+    this.rand = rng(9137);
+    this.anchors = new Map();
+
+    /* --- foam blobs ---------------------------------------------------- */
+    this.geometry = clumpGeometry(this.tier >= 2 ? 2 : 1);
+    const fm = MAT.makeFoam().clone();          // clone: the cached one is shared
+    const maps = TEX.foamSurface({ seed: 77, cells: 22 });
+    fm.map = maps.map;
+    fm.normalMap = maps.normalMap;
+    fm.roughnessMap = maps.roughnessMap;
+    fm.normalScale.set(1.7, 1.7);
+    fm.roughness = 0.9;
+    fm.sheen = 1.0;
+    fm.sheenRoughness = 0.55;
+    fm.transmission = this.tier >= 1 ? 0.22 : 0.0;
+    fm.thickness = 0.03;
+    fm.ior = 1.10;
+    fm.envMapIntensity = 1.5;
+    this.material = fm;
+
+    const mesh = new THREE.InstancedMesh(this.geometry, this.material, this.capacity);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    mesh.castShadow = this.tier >= 1;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.name = 'bath-foam';
+    mesh.renderOrder = 7;
+    this.mesh = mesh;
+    parent.add(mesh);
+
+    /* --- free-floating bubbles ----------------------------------------- */
+    this.bubbles = [];
+    this.bubbleCap = BUB[this.tier];
+    this.bubbleGeometry = new THREE.SphereGeometry(1, this.tier >= 2 ? 18 : 12,
+      this.tier >= 2 ? 14 : 9);
+    this.bubbleMaterial = MAT.makeBubble().clone();
+    this.bubbleMaterial.transmission = this.tier >= 1 ? 0.95 : 0.0;
+    this.bubbleMaterial.opacity = this.tier >= 1 ? 0.30 : 0.42;
+    const bmesh = new THREE.InstancedMesh(this.bubbleGeometry, this.bubbleMaterial, this.bubbleCap);
+    bmesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    bmesh.count = 0;
+    bmesh.frustumCulled = false;
+    bmesh.name = 'bath-bubbles';
+    bmesh.renderOrder = 9;
+    this.bubbleMesh = bmesh;
+    parent.add(bmesh);
+  }
+
+  /* ----------------------------------------------------------- anchors -- */
+
+  setAnchor(id, object3D) { this.anchors.set(id, object3D); return object3D; }
+  setHeadRadius(r) { this.headRadius = Math.max(0.03, r); }
+
+  _anchor(region) {
+    return this.anchors.get(region) || this.anchors.get('body') || this.mesh;
+  }
+
+  /* -------------------------------------------------------- accumulate -- */
+
+  /**
+   * Deposit lather. Repeated calls near an existing blob grow it; further away
+   * they seed a new one. `amount` is roughly "one scrub stroke" = 0.02.
+   */
+  add(region, worldPoint, amount = 0.02, maxRadius = 0.036) {
+    const anchor = this._anchor(region);
+    anchor.updateMatrixWorld();
+    _p.copy(worldPoint);
+    anchor.worldToLocal(_p);
+
+    // grow the nearest blob if we are close enough to merge with it
+    let best = null, bestD = 1e9;
+    for (const b of this.blobs) {
+      if (b.region !== region) continue;
+      const d = b.local.distanceTo(_p);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    const merge = maxRadius * 1.15;
+    if (best && bestD < merge) {
+      best.target = Math.min(maxRadius, best.target + amount);
+      best.stamp = this.time;
+      return best;
+    }
+    return this._spawn(region, _p, amount, maxRadius);
+  }
+
+  _spawn(region, local, amount, maxRadius) {
+    if (this.blobs.length >= this.capacity) {
+      // recycle the smallest blob rather than refusing to lather
+      let idx = 0, small = 1e9;
+      for (let i = 0; i < this.blobs.length; i++) {
+        if (this.blobs[i].target < small) { small = this.blobs[i].target; idx = i; }
+      }
+      this.blobs.splice(idx, 1);
+    }
+    const r = this.rand;
+    const b = {
+      region,
+      local: local.clone(),
+      base: local.clone(),
+      r: 0.004,
+      target: Math.min(maxRadius, 0.010 + amount),
+      max: maxRadius,
+      quat: new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(r() * 6.28, r() * 6.28, r() * 6.28)),
+      squash: 0.78 + r() * 0.34,
+      phase: r() * 6.28,
+      stamp: this.time,
+      rank: 0
+    };
+    this.blobs.push(b);
+    this._reRank();
+    return b;
+  }
+
+  /** Deposit lather straight onto an anchor in a small random cap. */
+  seed(region, count = 3, spread = 0.05, up = 0.02, amount = 0.014) {
+    const anchor = this._anchor(region);
+    anchor.updateMatrixWorld();
+    const r = this.rand;
+    for (let i = 0; i < count; i++) {
+      const a = r() * Math.PI * 2;
+      const rad = Math.sqrt(r()) * spread;
+      _p.set(Math.cos(a) * rad, up + r() * 0.02, Math.sin(a) * rad * 0.85);
+      anchor.localToWorld(_p);
+      this.add(region, _p, amount);
+    }
+  }
+
+  _reRank() {
+    let n = 0;
+    for (const b of this.blobs) if (b.region === 'head') b.rank = n++;
+    this._headCount = n;
+  }
+
+  /* ------------------------------------------------------------ sculpt -- */
+
+  /** Stroke upward: pull the head lather into a horn. `v` is 0..1 absolute. */
+  setHorn(v) { this.hornTarget = THREE.MathUtils.clamp(v, 0, 1); }
+  addHorn(v) { this.setHorn(this.hornTarget + v); }
+  get hornAmount() { return this.horn; }
+
+  /* ------------------------------------------------------------- rinse -- */
+
+  /** Dissolve foam only where the spray actually lands. Returns amount removed. */
+  rinse(worldPoint, radius = 0.09, dt = 0.016, rate = 0.16) {
+    let removed = 0;
+    const r2 = radius * radius;
+    for (let i = this.blobs.length - 1; i >= 0; i--) {
+      const b = this.blobs[i];
+      const anchor = this._anchor(b.region);
+      _wp.copy(b.local);
+      anchor.localToWorld(_wp);
+      if (_wp.distanceToSquared(worldPoint) > r2) continue;
+      const cut = rate * dt;
+      b.target = Math.max(0, b.target - cut);
+      removed += cut;
+      if (b.target <= 0.001 && b.r < 0.007) {
+        this.blobs.splice(i, 1);
+        this._reRank();
+      }
+    }
+    if (removed > 0) {
+      this.hornTarget = Math.max(0, this.hornTarget - removed * 1.2);
+    }
+    return removed;
+  }
+
+  /** Global dissolve — used when the whole baby goes under. */
+  dissolve(dt, rate = 0.08) {
+    for (let i = this.blobs.length - 1; i >= 0; i--) {
+      const b = this.blobs[i];
+      b.target = Math.max(0, b.target - rate * dt);
+      if (b.target <= 0.001 && b.r < 0.007) { this.blobs.splice(i, 1); this._reRank(); }
+    }
+    this.hornTarget = Math.max(0, this.hornTarget - rate * dt * 1.5);
+  }
+
+  /* ------------------------------------------------------------ queries -- */
+
+  density(region) {
+    let s = 0;
+    for (const b of this.blobs) if (b.region === region) s += b.r;
+    return s;
+  }
+
+  /** 0..1 — how lathered the baby is overall. */
+  total() {
+    let s = 0;
+    for (const b of this.blobs) s += b.r;
+    return Math.min(1, s / (this.capacity * 0.030 * 0.55));
+  }
+
+  clear() {
+    this.blobs.length = 0;
+    this.bubbles.length = 0;
+    this.horn = this.hornTarget = 0;
+    this.mesh.count = 0;
+    this.bubbleMesh.count = 0;
+    this._headCount = 0;
+  }
+
+  /* ------------------------------------------------------------ harness -- */
+
+  /** Deterministically dial the lather to a given amount (screenshot harness). */
+  setAmount(v) {
+    v = THREE.MathUtils.clamp(v, 0, 1);
+    this.clear();
+    if (v <= 0.001) return;
+    const rand = rng(20517);
+    const hr = this.headRadius;
+
+    const nHead = Math.round(v * Math.min(52, this.capacity * 0.42));
+    for (let i = 0; i < nHead; i++) {
+      // golden-angle cap over the crown so the mass is even, never stripey
+      const k = (i + 0.5) / nHead;
+      const a = i * 2.39996;
+      const rad = Math.sqrt(k) * hr * 1.05;
+      _p.set(Math.cos(a) * rad,
+             hr * 0.42 + (1 - k) * hr * 0.42 + rand() * 0.012,
+             Math.sin(a) * rad * 0.86);
+      const b = this._spawn('head', _p, 0.02, 0.034);
+      b.target = 0.018 + rand() * 0.014;
+      b.r = b.target;
+    }
+
+    const nBody = Math.round(v * Math.min(26, this.capacity * 0.2));
+    for (let i = 0; i < nBody; i++) {
+      const a = rand() * Math.PI * 2;
+      const rad = 0.03 + rand() * 0.05;
+      _p.set(Math.cos(a) * rad, -0.02 + rand() * 0.09, Math.sin(a) * rad * 0.7 + 0.02);
+      const b = this._spawn('body', _p, 0.02, 0.030);
+      b.target = 0.013 + rand() * 0.012;
+      b.r = b.target;
+    }
+
+    const nWater = Math.round(v * Math.min(34, this.capacity * 0.28));
+    for (let i = 0; i < nWater; i++) {
+      const a = rand() * Math.PI * 2;
+      const rad = Math.sqrt(rand());
+      _p.set(Math.cos(a) * rad * 0.30, 0.004 + rand() * 0.012, Math.sin(a) * rad * 0.20);
+      const b = this._spawn('water', _p, 0.02, 0.032);
+      b.target = 0.014 + rand() * 0.016;
+      b.r = b.target;
+    }
+
+    // a healthy lather has already been swept up into a peak
+    this.hornTarget = this.horn = THREE.MathUtils.clamp((v - 0.45) / 0.4, 0, 1) * 0.9;
+    this._reRank();
+  }
+
+  /* ----------------------------------------------------------- bubbles -- */
+
+  spawnBubbles(worldPos, count = 3, spread = 0.05) {
+    const r = this.rand;
+    for (let i = 0; i < count && this.bubbles.length < this.bubbleCap; i++) {
+      this.bubbles.push({
+        p: new THREE.Vector3(
+          worldPos.x + (r() * 2 - 1) * spread,
+          worldPos.y + r() * 0.02,
+          worldPos.z + (r() * 2 - 1) * spread * 0.8),
+        v: new THREE.Vector3((r() * 2 - 1) * 0.03, 0.055 + r() * 0.075, (r() * 2 - 1) * 0.03),
+        r: 0.007 + r() * 0.014,
+        life: 0,
+        maxLife: 2.4 + r() * 2.8,
+        phase: r() * 6.28,
+        wob: 0.6 + r() * 0.8
+      });
+    }
+  }
+
+  setBubbleRate(v) { this.bubbleRate = Math.max(0, v); }
+
+  /* -------------------------------------------------------------- step -- */
+
+  update(dt, ctx) {
+    this.time += dt;
+    this.horn += (this.hornTarget - this.horn) * Math.min(1, dt * 3.4);
+
+    /* --- blobs --------------------------------------------------------- */
+    const grow = Math.min(1, dt * 5.5);
+    const hCount = Math.max(1, this._headCount || 1);
+    let n = 0;
+    for (let i = this.blobs.length - 1; i >= 0; i--) {
+      const b = this.blobs[i];
+      b.r += (b.target - b.r) * grow;
+      if (b.target <= 0.001 && b.r < 0.0035) { this.blobs.splice(i, 1); this._reRank(); continue; }
+    }
+    for (const b of this.blobs) {
+      let scaleK = 1;
+      if (b.region === 'head' && this.horn > 0.001) {
+        const k = hCount > 1 ? b.rank / (hCount - 1) : 0;
+        const a = b.rank * 2.39996 + this.time * 0.12;
+        const rad = this.headRadius * 0.95 * Math.pow(1 - k, 0.85);
+        _p.set(
+          Math.cos(a) * rad + Math.sin(k * Math.PI) * this.headRadius * 0.22,
+          this.headRadius * 0.55 + k * this.headRadius * 2.5,
+          Math.sin(a) * rad * 0.9);
+        b.local.lerpVectors(b.base, _p, this.horn);
+        scaleK = 1 - this.horn * k * 0.55;
+      } else if (this.horn <= 0.001 && b.region === 'head') {
+        b.local.lerp(b.base, Math.min(1, dt * 4));
+      }
+
+      const anchor = this._anchor(b.region);
+      _wp.copy(b.local);
+      anchor.localToWorld(_wp);
+
+      const wob = 1 + Math.sin(this.time * 2.2 + b.phase) * 0.035;
+      const s = b.r * wob * scaleK;
+      _s.set(s, s * b.squash, s * (1.8 - b.squash));
+      _m.compose(_wp, b.quat, _s);
+      this.mesh.setMatrixAt(n++, _m);
+      if (n >= this.capacity) break;
+    }
+    this.mesh.count = n;
+    if (n > 0) this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.visible = n > 0;
+
+    /* --- bubbles ------------------------------------------------------- */
+    if (this.bubbleRate > 0) {
+      this._bubbleAcc += dt * this.bubbleRate;
+      while (this._bubbleAcc >= 1) {
+        this._bubbleAcc -= 1;
+        const src = this.blobs.length
+          ? this.blobs[(this.rand() * this.blobs.length) | 0] : null;
+        if (src) {
+          const anchor = this._anchor(src.region);
+          _wp.copy(src.local);
+          anchor.localToWorld(_wp);
+          this.spawnBubbles(_wp, 1, 0.03);
+        }
+      }
+    }
+
+    let bn = 0;
+    for (let i = this.bubbles.length - 1; i >= 0; i--) {
+      const b = this.bubbles[i];
+      b.life += dt;
+      if (b.life >= b.maxLife) {
+        this.bubbles.splice(i, 1);
+        ctx?.fx?.burst?.('sparkle', b.p, 1, { scale: 0.4 });
+        continue;
+      }
+      b.v.y += (0.075 - b.v.y) * Math.min(1, dt * 1.5);
+      b.p.addScaledVector(b.v, dt);
+      // the sideways drift of a rising bubble is what makes it read as light
+      b.p.x += Math.sin(this.time * b.wob * 2.1 + b.phase) * dt * 0.035;
+      b.p.z += Math.cos(this.time * b.wob * 1.7 + b.phase) * dt * 0.035;
+      const fade = Math.min(1, (b.maxLife - b.life) / 0.4);
+      const pulse = 1 + Math.sin(this.time * 5 + b.phase) * 0.06;
+      const s = b.r * pulse * (0.6 + 0.4 * Math.min(1, b.life * 4)) * fade;
+      _s.set(s, s * (1 - Math.sin(this.time * 4 + b.phase) * 0.05), s);
+      _m.compose(b.p, _IDQ, _s);
+      this.bubbleMesh.setMatrixAt(bn++, _m);
+      if (bn >= this.bubbleCap) break;
+    }
+    this.bubbleMesh.count = bn;
+    if (bn > 0) this.bubbleMesh.instanceMatrix.needsUpdate = true;
+    this.bubbleMesh.visible = bn > 0;
+  }
+
+  dispose() {
+    this.mesh.removeFromParent();
+    this.bubbleMesh.removeFromParent();
+    this.mesh.dispose();
+    this.bubbleMesh.dispose();
+    this.geometry.dispose();
+    this.bubbleGeometry.dispose();
+    this.material.dispose();
+    this.bubbleMaterial.dispose();
+    this.blobs.length = 0;
+    this.bubbles.length = 0;
+    this.anchors.clear();
+  }
+}

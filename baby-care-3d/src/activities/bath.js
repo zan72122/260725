@@ -1,883 +1,2227 @@
-/* ============================================================
- * activities/bath.js — 🛁 おふろ（工程つき）
- *  phase 1 undress: ふくをぬがせて洗濯かごへ
- *  phase 2 fill   : 蛇口でお湯はり＋赤青ノブで温度調整＋手でたしかめる
- *  phase 3 wash   : 原因つきの汚れをスポンジで／シャンプーで泡ヘア
- *  phase 4 rinse  : シャワーをあてた場所だけ泡がながれおちる
- *  phase 5 dry    : タオルでふく（拭き残し→くしゃみ）→ドライヤー「ブオー」
- * ============================================================ */
-(function () {
-  'use strict';
+/* ============================================================================
+ * activities/bath.js — 🛁 おふろ
+ * ----------------------------------------------------------------------------
+ * The full ritual, in the order a real bath happens:
+ *
+ *   1. undress — clothes come off and fly to the laundry basket; anything
+ *      stained is flagged for washing so the dress scene picks it up.
+ *   2. fill    — the tap runs a real falling stream, the red and blue knobs
+ *      mix the temperature. Too hot and the tub billows steam; too cold and
+ *      the baby shivers. The water level rises smoothly.
+ *   3. test    — a hand in the water before anyone gets in.
+ *   4. wash    — dirt sits where its cause put it (mouth = food, hands =
+ *      play, feet = rain mud). Pump the shampoo, scrub the head, watch the
+ *      lather build, then stroke upward to sculpt a foam horn.
+ *   5. rinse   — the shower only clears foam where it is actually aimed.
+ *   6. dry     — towel off; a missed patch earns a sneeze. Then the hairdryer.
+ *
+ * Everything visual lives in `src/fx/water.js` and `src/fx/foam.js`; this file
+ * owns the set, the props and the gameplay.
+ * ========================================================================== */
 
-  var GOOD_TEMP_MIN = 0.35, GOOD_TEMP_MAX = 0.75;
+import * as THREE from 'three';
+import * as MAT from '../engine/materials.js';
+import * as TEX from '../engine/textures.js';
+import { WaterSurface, WaterlineRing, TapStream, SteamVeil, DynamicTube, rng } from '../fx/water.js';
+import { FoamSystem } from '../fx/foam.js';
 
-  var bath = {
-    objects: [],
-    phase: '',
-    temp: 0.5,
-    waterLevel: 0,
-    filling: false,
-    duck: null,
-    duckVy: 0,
-    foamMeshes: [],   // あたまの泡
-    sudsMeshes: [],   // からだの泡（こすったあと）
-    dropMeshes: [],   // ぬれたしずく（dryフェーズ）
-    shampooUsed: false,
-    scrubbing: false,
-    showerDrag: false,
-    towelDrag: false,
-    lastFx: 0,
-    sneezeTimer: 6,
-    waterY: 0.5,
+/* ------------------------------------------------------------ constants --- */
 
-    enter: function () {
-      var G = AX.G;
-      var scene = G.scene;
-      this.objects = [];
-      this.foamMeshes = [];
-      this.sudsMeshes = [];
-      this.dropMeshes = [];
-      this.shampooUsed = false;
-      this.waterLevel = 0;
-      this.filling = false;
-      this.temp = Math.random() < 0.5 ? 0.12 : 0.92;  // さいしょは熱すぎ or 冷たすぎ
-      this.sneezeTimer = 6;
+/** Oval stretch applied to the lathed bowl: a baby bath is not a cylinder. */
+const SX = 1.5;
 
-      /* --- バスタブ --- */
-      var tub = new THREE.Group();
-      var tubMat = AX.lambert(0xffffff);
-      var wall = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 0.85, 0.6, 28, 1, true), tubMat);
-      wall.material.side = THREE.DoubleSide;
-      wall.position.y = 0.3;
-      tub.add(wall);
-      var bottom = new THREE.Mesh(new THREE.CircleGeometry(0.86, 28), tubMat);
-      bottom.rotation.x = -Math.PI / 2;
-      bottom.position.y = 0.02;
-      tub.add(bottom);
-      var rim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.09, 12, 28), AX.lambert(0xaee4ff));
-      rim.rotation.x = Math.PI / 2;
-      rim.position.y = 0.6;
-      tub.add(rim);
-      this.water = new THREE.Mesh(
-        new THREE.CircleGeometry(1.0, 28),
-        new THREE.MeshLambertMaterial({ color: 0x6fd0ff, transparent: true, opacity: 0.55 })
-      );
-      this.water.rotation.x = -Math.PI / 2;
-      this.water.position.y = 0.08;
-      this.water.visible = false;
-      tub.add(this.water);
-      tub.position.set(0.35, 0, 0.3);
-      scene.add(tub);
-      this.objects.push(tub);
-      this.tub = tub;
+/**
+ * Bowl cross-section, inner floor → inner wall → rolled rim → outer wall →
+ * base fillet. Every direction change is at least two points apart so the
+ * lathe produces a real bevel with its own specular, not a hard crease.
+ */
+const PROFILE = [
+  [0.000, 0.034], [0.120, 0.030], [0.190, 0.038], [0.226, 0.070],
+  [0.244, 0.120], [0.252, 0.180], [0.258, 0.226], [0.266, 0.250],
+  [0.276, 0.259], [0.286, 0.253], [0.290, 0.238], [0.288, 0.150],
+  [0.274, 0.060], [0.246, 0.016], [0.200, 0.002], [0.000, 0.000]
+];
+const INNER_COUNT = 8;                 // profile points that form the wetted bowl
+const RIM_R = PROFILE[INNER_COUNT - 1][0];
+const HALF_X = RIM_R * SX;
+const HALF_Z = RIM_R;
+const STAND_H = 0.30;
+const WATER_MIN = 0.042;
+const WATER_MAX = 0.208;
 
-      /* --- じゃぐち＋あかあおノブ --- */
-      var faucet = new THREE.Group();
-      var pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 10), AX.lambert(0xcfd8dc));
-      pipe.position.y = 0.25;
-      faucet.add(pipe);
-      var spout = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 10), AX.lambert(0xcfd8dc));
-      spout.rotation.x = Math.PI / 2;
-      spout.position.set(0, 0.48, 0.14);
-      faucet.add(spout);
-      var spoutTip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.08, 10), AX.lambert(0xb0bec5));
-      spoutTip.position.set(0, 0.44, 0.3);
-      faucet.add(spoutTip);
-      var faucetHit = AX.hitProxy(0.4);
-      faucetHit.position.set(0, 0.4, 0.1);
-      faucet.add(faucetHit);
-      faucet.position.set(0.35, 0.55, -0.5);
-      scene.add(faucet);
-      this.objects.push(faucet);
-      this.faucet = faucet;
+const TEMP_OK_MIN = 0.36, TEMP_OK_MAX = 0.72;
 
-      this.knobHot = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), AX.lambert(0xe0433a));
-      this.knobHot.position.set(0.0, 1.25, -0.45);
-      scene.add(this.knobHot);
-      this.objects.push(this.knobHot);
-      this.knobCold = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), AX.lambert(0x3d8bff));
-      this.knobCold.position.set(0.7, 1.25, -0.45);
-      scene.add(this.knobCold);
-      this.objects.push(this.knobCold);
+const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _ndc = new THREE.Vector2();
 
-      // おんどけい（かおつき）
-      this.gauge = AX.emojiSprite('😊', 0.4);
-      this.gauge.position.set(0.35, 1.95, -0.45);
-      scene.add(this.gauge);
-      this.objects.push(this.gauge);
+/* -------------------------------------------------------------- helpers --- */
 
-      // おゆのながれ（みえたりきえたり）
-      this.stream = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.045, 0.06, 1.0, 10),
-        new THREE.MeshLambertMaterial({ color: 0xaadfff, transparent: true, opacity: 0.75 })
-      );
-      this.stream.position.set(0.35, 0.55, -0.2);
-      this.stream.visible = false;
-      scene.add(this.stream);
-      this.objects.push(this.stream);
+/** Inner bowl height for a normalised ellipse radius (0 = centre, 1 = rim). */
+function bowlY(e) {
+  const r = THREE.MathUtils.clamp(e, 0, 1) * RIM_R;
+  for (let i = 1; i < INNER_COUNT; i++) {
+    if (r <= PROFILE[i][0]) {
+      const a = PROFILE[i - 1], b = PROFILE[i];
+      const t = (r - a[0]) / Math.max(1e-6, b[0] - a[0]);
+      return a[1] + (b[1] - a[1]) * t;
+    }
+  }
+  return PROFILE[INNER_COUNT - 1][1];
+}
 
-      /* --- せんたくかご --- */
-      var basket = new THREE.Group();
-      var basketBody = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.24, 0.36, 12, 1, true), AX.lambert(0xd9b98a));
-      basketBody.material.side = THREE.DoubleSide;
-      basketBody.position.y = 0.18;
-      basket.add(basketBody);
-      var basketBottom = new THREE.Mesh(new THREE.CircleGeometry(0.24, 12), AX.lambert(0xd9b98a));
-      basketBottom.rotation.x = -Math.PI / 2;
-      basketBottom.position.y = 0.005;
-      basket.add(basketBottom);
-      basket.position.set(1.95, 0, 0.9);
-      scene.add(basket);
-      this.objects.push(basket);
-      this.basket = basket;
+/** Box with genuinely rounded, shaded edges — no hard 90° corners anywhere. */
+function roundedBox(w, h, d, r, seg = 5) {
+  r = Math.min(r, w / 2 - 1e-4, h / 2 - 1e-4, d / 2 - 1e-4);
+  const geo = new THREE.BoxGeometry(w, h, d, seg, seg, seg);
+  const p = geo.attributes.position;
+  const ix = w / 2 - r, iy = h / 2 - r, iz = d / 2 - r;
+  const v = new THREE.Vector3(), inner = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    inner.set(
+      THREE.MathUtils.clamp(v.x, -ix, ix),
+      THREE.MathUtils.clamp(v.y, -iy, iy),
+      THREE.MathUtils.clamp(v.z, -iz, iz));
+    v.sub(inner);
+    const len = v.length();
+    if (len > 1e-6) v.multiplyScalar(r / len);
+    p.setXYZ(i, inner.x + v.x, inner.y + v.y, inner.z + v.z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
 
-      /* --- シャンプーボトル --- */
-      this.shampoo = new THREE.Group();
-      var shBody = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.22, 10), AX.lambert(0xff9dbf));
-      shBody.position.y = 0.11;
-      this.shampoo.add(shBody);
-      var shPump = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.1, 8), AX.lambert(0xffffff));
-      shPump.position.y = 0.27;
-      this.shampoo.add(shPump);
-      var shNozzle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.03), AX.lambert(0xffffff));
-      shNozzle.position.set(0.04, 0.3, 0);
-      this.shampoo.add(shNozzle);
-      var shHit = AX.hitProxy(0.3);
-      shHit.position.y = 0.15;
-      this.shampoo.add(shHit);
-      this.shampoo.position.set(-0.75, 0.6, -0.1);
-      scene.add(this.shampoo);
-      this.objects.push(this.shampoo);
+/** Chrome pipework: a smooth tube through a handful of control points. */
+function pipe(points, radius, segments = 48, radial = 10) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  return new THREE.TubeGeometry(curve, segments, radius, radial, false);
+}
 
-      /* --- スポンジ --- */
-      this.sponge = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.18), AX.lambert(0xffe27a));
-      var spongeTop = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.18), AX.lambert(0x9dff8a));
-      spongeTop.position.y = 0.09;
-      this.sponge.add(spongeTop);
-      this.sponge.position.set(-0.7, 0.72, 0.75);
-      G.scene.add(this.sponge);
-      this.objects.push(this.sponge);
-      this.spongeHome = this.sponge.position.clone();
+/**
+ * A towel folded over a rail: back panel, half-cylinder over the bar, front
+ * panel, with a slow sag across the width and a wavy hem.
+ */
+function drapedTowel(width, railR, dropBack, dropFront, segU = 16, segV = 30) {
+  const arc = Math.PI * railR;
+  const total = dropBack + arc + dropFront;
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= segV; j++) {
+    const s = (j / segV) * total;
+    let y, z;
+    if (s < dropBack) { y = -(dropBack - s); z = -railR; }
+    else if (s < dropBack + arc) {
+      const a = Math.PI - ((s - dropBack) / arc) * Math.PI;
+      y = Math.sin(a) * railR; z = Math.cos(a) * railR;
+    } else { y = -(s - dropBack - arc); z = railR; }
+    for (let i = 0; i <= segU; i++) {
+      const u = i / segU;
+      const x = (u - 0.5) * width;
+      // cloth sags between the two ends of the rail and ripples down the drop
+      const sag = -Math.sin(u * Math.PI) * 0.012 * (s > dropBack + arc ? 1 : 0.3);
+      const ripple = Math.sin(u * Math.PI * 3.0 + s * 5.0) * 0.004
+                   * THREE.MathUtils.clamp((s - dropBack - arc) / 0.12, 0, 1);
+      pos.push(x, y + sag + ripple * 0.4, z + ripple);
+      uv.push(u, s / total);
+    }
+  }
+  for (let j = 0; j < segV; j++) {
+    for (let i = 0; i < segU; i++) {
+      const a = j * (segU + 1) + i, b = a + 1, c = a + segU + 1, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
 
-      /* --- シャワーヘッド（rinse用・ドラッグでうごく） --- */
-      this.showerHead = new THREE.Group();
-      var shH = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, 0.07, 12), AX.lambert(0xdddddd));
-      this.showerHead.add(shH);
-      var shHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.3, 8), AX.lambert(0xbbbbbb));
-      shHandle.position.set(0.12, 0.16, 0);
-      shHandle.rotation.z = -0.5;
-      this.showerHead.add(shHandle);
-      this.showerHead.position.set(-0.9, 1.7, 0.4);
-      this.showerHead.visible = false;
-      G.scene.add(this.showerHead);
-      this.objects.push(this.showerHead);
+/* ------------------------------------------------------------- droplets --- */
 
-      /* --- タオル / ドライヤー（dry用） --- */
-      this.towel = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.05), AX.lambert(0xfff3b8));
-      this.towel.position.set(1.6, 1.15, 0.2);
-      this.towel.visible = false;
-      G.scene.add(this.towel);
-      this.objects.push(this.towel);
-      this.towelHome = this.towel.position.clone();
+/**
+ * Water clinging to skin: instanced beads that hang, swell, then run down and
+ * drip off. Rubbing them off with the towel is the dry-phase mechanic, and a
+ * bead left behind is what triggers the sneeze.
+ */
+class Droplets {
+  constructor(ctx, parent, cap) {
+    this.ctx = ctx;
+    this.cap = cap;
+    this.list = [];
+    this.rand = rng(3313);
+    this.geometry = new THREE.SphereGeometry(1, 10, 8);
+    this.material = MAT.makeGlass({ thickness: 0.006, roughness: 0.03, tint: 0xd6efff });
+    this.material.opacity = 0.85;
+    this.material.transmission = (ctx?.tier ?? 2) >= 1 ? 0.92 : 0.0;
+    this.mesh = new THREE.InstancedMesh(this.geometry, this.material, cap);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 8;
+    this.mesh.name = 'bath-droplets';
+    parent.add(this.mesh);
+    this._m = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._s = new THREE.Vector3();
+    this._p = new THREE.Vector3();
+  }
 
-      this.dryer = new THREE.Group();
-      var dBody = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.24, 12), AX.lambert(0xff8fb3));
-      dBody.rotation.z = Math.PI / 2;
-      this.dryer.add(dBody);
-      var dGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.2, 8), AX.lambert(0xe0538c));
-      dGrip.position.set(0.02, -0.14, 0);
-      dGrip.rotation.z = 0.3;
-      this.dryer.add(dGrip);
-      this.dryer.position.set(1.6, 1.15, 0.2);
-      this.dryer.visible = false;
-      G.scene.add(this.dryer);
-      this.objects.push(this.dryer);
+  spawn(anchor, local, r) {
+    if (this.list.length >= this.cap) return;
+    this.list.push({
+      anchor, local: local.clone(), r,
+      vel: 0, run: 0,
+      wob: this.rand() * 6.28,
+      bottom: local.y - 0.10 - this.rand() * 0.06
+    });
+  }
 
-      /* --- あかちゃん：タブのよこに立つ --- */
-      var baby = G.baby;
-      baby.setPose('stand');
-      baby.group.position.set(-1.35, 0, 0.75);
-      baby.group.rotation.set(0, 0.4, 0);
-      baby.setMood('idle');
-      baby.shadow.visible = true;
-
-      // よごれを最初からみせる（おふろの動機づけ：原因と場所が一致）
-      baby.addDirtSpots(CARE.buildBathDirt());
-
-      if (CARE.state.naked) {
-        // もうぬいでいる → お湯はりから
-        this._toPhase('fill');
-      } else {
-        this._toPhase('undress');
+  /** Deterministic full-body coverage, used on leaving the tub. */
+  fill(anchors, amount) {
+    this.list.length = 0;
+    const rand = rng(7717);
+    const plan = [
+      ['head', 14, 0.062, 0.02],
+      ['body', 16, 0.070, 0.02],
+      ['handL', 3, 0.030, 0.0],
+      ['handR', 3, 0.030, 0.0]
+    ];
+    for (const [id, n, spread, up] of plan) {
+      const a = anchors.get(id);
+      if (!a) continue;
+      const count = Math.round(n * amount);
+      for (let i = 0; i < count; i++) {
+        const ang = rand() * Math.PI * 2;
+        const rad = Math.sqrt(rand()) * spread;
+        this.spawn(a, new THREE.Vector3(
+          Math.cos(ang) * rad,
+          up + (rand() - 0.35) * spread * 1.4,
+          Math.sin(ang) * rad * 0.75 + spread * 0.45),
+          0.0045 + rand() * 0.004);
       }
+    }
+  }
 
-      UI.clearContext();
-    },
+  /** Wipe every bead within `radius` of a world point. Returns how many went. */
+  wipe(worldPoint, radius) {
+    let n = 0;
+    const r2 = radius * radius;
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const d = this.list[i];
+      this._p.copy(d.local);
+      d.anchor.localToWorld(this._p);
+      if (this._p.distanceToSquared(worldPoint) <= r2) { this.list.splice(i, 1); n++; }
+    }
+    return n;
+  }
 
-    /* ---------- フェーズ管理 ---------- */
+  clear() { this.list.length = 0; this.mesh.count = 0; }
+  get count() { return this.list.length; }
 
-    _toPhase: function (p) {
-      var G = AX.G;
-      this.phase = p;
-      if (p === 'undress') {
-        UI.bigFeedback('👕');
-        UI.celebrate('おふくを ぬがせてあげよう');
-      } else if (p === 'fill') {
-        UI.bigFeedback('🚰');
-        UI.celebrate('おゆを ためて おんどをちょうせつ！');
-      } else if (p === 'wash') {
-        UI.bigFeedback('🧽');
-        UI.celebrate('ごしごし あらってあげよう');
-      } else if (p === 'rinse') {
-        this.showerHead.visible = true;
-        UI.bigFeedback('🚿');
-        UI.celebrate('シャワーで ながそう！');
-      } else if (p === 'dry') {
-        this.towel.visible = true;
-        UI.bigFeedback('🧖');
-        UI.celebrate('タオルで ふきふき');
-        // ぬれしずくをからだ4かしょへ
-        this._addDrops();
-        CARE.finishBath();
-        this.sneezeTimer = 6;
-      } else if (p === 'done') {
-        UI.setNeedy('dress', true);  // つぎはおきがえ！
+  update(dt, time) {
+    let n = 0;
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const d = this.list[i];
+      // beads hang, swell, then break loose and accelerate down the skin
+      d.vel = Math.min(0.09, d.vel + dt * 0.035);
+      d.local.y -= d.vel * dt;
+      d.local.x += Math.sin(time * 1.7 + d.wob) * dt * 0.002;
+      if (d.local.y < d.bottom) {
+        this.list.splice(i, 1);
+        this._p.copy(d.local);
+        d.anchor.localToWorld(this._p);
+        this.ctx?.fx?.burst?.('splash', this._p, 1, { scale: 0.35 });
+        continue;
       }
-    },
+      this._p.copy(d.local);
+      d.anchor.localToWorld(this._p);
+      const stretch = 1 + d.vel * 4.0;
+      this._s.set(d.r, d.r * stretch, d.r);
+      this._m.compose(this._p, this._q, this._s);
+      this.mesh.setMatrixAt(n++, this._m);
+      if (n >= this.cap) break;
+    }
+    this.mesh.count = n;
+    if (n) this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.visible = n > 0;
+  }
 
-    /* ---------- 入力 ---------- */
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.dispose();
+    this.geometry.dispose();
+    this.material.dispose();
+    this.list.length = 0;
+  }
+}
 
-    onDown: function (x, y) {
-      var G = AX.G;
-      var baby = G.baby;
+/* ============================================================== activity == */
 
-      if (this.phase === 'undress') {
-        var hit = G.pick(x, y, [baby.root], true);
-        if (hit) this._undress();
+export class BathActivity {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.tier = Math.max(0, Math.min(2, ctx?.tier ?? 2));
+    this.rand = rng(5501);
+
+    this.phase = '';
+    this.time = 0;
+    this.temp = 0.5;
+    this.filling = false;
+    this.shampooUsed = false;
+    this.inTub = false;
+    this.wet = 0;
+    this.sneezeTimer = 7;
+    this.dryerBlast = 0;
+    this._drag = null;
+    this._lastScrub = 0;
+    this._lastPointerY = null;
+    this._scrubStrokeUp = 0;
+    this._hopT = -1;
+    this._flying = [];
+    this._disposables = [];
+    this._touchedMaterials = new Set();
+    this._steamOverride = null;
+    this._splashPulse = 0;
+
+    this.dirt = { face: 0, hands: 0, feet: 0, body: 0, hair: 0 };
+  }
+
+  /* =========================================================== build ==== */
+
+  async build() {
+    const ctx = this.ctx;
+    const scene = ctx.scene;
+
+    this.root = new THREE.Group();
+    this.root.name = 'bath';
+    scene.add(this.root);
+
+    // Position the whole set on the room's tub anchor when the room offers
+    // one, so this activity never fights the nursery layout.
+    const anchor = ctx.room?.anchor?.('tub');
+    this.tub = new THREE.Group();
+    this.tub.name = 'bath-tub';
+    if (anchor) {
+      anchor.updateMatrixWorld();
+      anchor.getWorldPosition(_v);
+      this.tub.position.set(_v.x, 0, _v.z);
+      this.tub.rotation.y = new THREE.Euler().setFromQuaternion(
+        anchor.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
+    } else {
+      this.tub.position.set(0.42, 0, 0.22);
+      this.tub.rotation.y = -0.18;
+    }
+    this.root.add(this.tub);
+
+    this.bowl = new THREE.Group();
+    this.bowl.position.y = STAND_H;
+    this.tub.add(this.bowl);
+
+    this._buildStand();
+    this._buildBowl();
+    this._buildMixer();
+    this._buildShower();
+    this._buildCaddy();
+    this._buildTowelRail();
+    this._buildBasket();
+    this._buildMat();
+    this._buildCue();
+
+    /* --- water --------------------------------------------------------- */
+    this.water = new WaterSurface(ctx, {
+      parent: this.bowl,
+      halfX: HALF_X, halfZ: HALF_Z, bowlY,
+      minY: WATER_MIN, maxY: WATER_MAX,
+      tint: 0xc9e9f2
+    });
+    this.water.setTemperature(this.temp);
+
+    this.stream = new TapStream(this.bowl, {
+      from: this.spoutTip.clone(), tier: this.tier
+    });
+
+    this.steam = new SteamVeil(ctx, {
+      parent: this.bowl, count: 7, radiusX: HALF_X * 0.9, radiusZ: HALF_Z * 0.9
+    });
+
+    /* --- foam ---------------------------------------------------------- */
+    this.foam = new FoamSystem(ctx, { parent: this.root });
+    this.anchors = new Map();
+    for (const id of ['head', 'body', 'handL', 'handR', 'water']) {
+      const o = new THREE.Object3D();
+      o.name = 'bath-anchor-' + id;
+      this.root.add(o);
+      this.anchors.set(id, o);
+      this.foam.setAnchor(id, o);
+    }
+    this.anchors.get('water').position.copy(this.tub.position);
+
+    /* --- waterlines ---------------------------------------------------- */
+    this.rings = [];
+    for (let i = 0; i < 3; i++) {
+      const r = new WaterlineRing(0.12);
+      this.root.add(r.mesh);
+      this.rings.push(r);
+    }
+
+    /* --- droplets & wet hair ------------------------------------------- */
+    this.droplets = new Droplets(ctx, this.root, this.tier >= 2 ? 40 : (this.tier === 1 ? 26 : 14));
+    this._buildWetStrands();
+
+    /* --- floating toys ------------------------------------------------- */
+    this._buildToys();
+
+    /* --- camera -------------------------------------------------------- */
+    this.root.updateMatrixWorld(true);
+    this.towelHome = this.towel.getWorldPosition(new THREE.Vector3());
+    this._registerCameras();
+
+    return this;
+  }
+
+  /* ---------------------------------------------------------- set build -- */
+
+  _buildStand() {
+    const wood = MAT.makeWood({ light: 0xe6c79a, dark: 0x9a6a42, seed: 12, repeat: 2, clearcoat: 0.4 });
+    this._materials(wood);
+    const legGeo = new THREE.CylinderGeometry(0.019, 0.024, STAND_H, 12);
+    this._disposables.push(legGeo);
+    const spanX = 0.30, spanZ = 0.20;
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const leg = new THREE.Mesh(legGeo, wood);
+      leg.position.set(sx * spanX, STAND_H / 2, sz * spanZ);
+      leg.rotation.z = -sx * 0.06;
+      leg.rotation.x = sz * 0.05;
+      leg.castShadow = leg.receiveShadow = true;
+      this.tub.add(leg);
+    }
+    // cross rails + a slatted shelf for the bottles
+    const railGeo = roundedBox(0.66, 0.018, 0.026, 0.008, 3);
+    this._disposables.push(railGeo);
+    for (const sz of [-1, 1]) {
+      const r = new THREE.Mesh(railGeo, wood);
+      r.position.set(0, 0.10, sz * spanZ);
+      r.castShadow = r.receiveShadow = true;
+      this.tub.add(r);
+    }
+    const shelfGeo = roundedBox(0.60, 0.014, 0.30, 0.007, 3);
+    this._disposables.push(shelfGeo);
+    const shelf = new THREE.Mesh(shelfGeo, wood);
+    shelf.position.set(0, 0.093, 0);
+    shelf.castShadow = shelf.receiveShadow = true;
+    this.tub.add(shelf);
+  }
+
+  _buildBowl() {
+    const pts = PROFILE.map(([r, y]) => new THREE.Vector2(r, y));
+    const geo = new THREE.LatheGeometry(pts, 72);
+    geo.scale(SX, 1, 1);
+    geo.computeVertexNormals();
+    this._disposables.push(geo);
+
+    const enamel = MAT.makeCeramic({ color: 0xfdfbff, repeat: 2, seed: 31 });
+    this._materials(enamel);
+    enamel.side = THREE.DoubleSide;
+    enamel.envMapIntensity = 1.6;
+    const bowl = new THREE.Mesh(geo, enamel);
+    bowl.castShadow = true;
+    bowl.receiveShadow = true;
+    bowl.name = 'bath-bowl';
+    this.bowl.add(bowl);
+    this.bowlMesh = bowl;
+
+    // a soft mint band under the rim, painted straight onto the enamel look
+    const bandGeo = new THREE.TorusGeometry(0.2885, 0.006, 10, 88);
+    bandGeo.scale(SX, 1, 1);
+    bandGeo.rotateX(Math.PI / 2);
+    this._disposables.push(bandGeo);
+    const band = new THREE.Mesh(bandGeo, this._materials(
+      MAT.makePlastic({ color: 0x9fe0d6, seed: 44, matte: 0.3, clearcoat: 0.85 })));
+    band.position.y = 0.190;
+    band.castShadow = false;
+    band.receiveShadow = true;
+    this.bowl.add(band);
+
+    /* --- drain --------------------------------------------------------- */
+    const metal = this._materials(MAT.makeMetal({ color: 0xd9dee4, roughness: 0.18 }).clone());
+    const drainWell = new THREE.CylinderGeometry(0.030, 0.026, 0.012, 20);
+    this._disposables.push(drainWell);
+    const well = new THREE.Mesh(drainWell, metal);
+    well.position.set(0.0, 0.0295, 0.0);
+    well.receiveShadow = true;
+    this.bowl.add(well);
+    const grateGeo = new THREE.TorusGeometry(0.020, 0.0035, 8, 24);
+    grateGeo.rotateX(Math.PI / 2);
+    this._disposables.push(grateGeo);
+    const grate = new THREE.Mesh(grateGeo, metal);
+    grate.position.set(0, 0.0355, 0);
+    this.bowl.add(grate);
+    const barGeo = roundedBox(0.042, 0.003, 0.005, 0.0015, 2);
+    this._disposables.push(barGeo);
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(barGeo, metal);
+      b.position.set(0, 0.0355, (i - 1) * 0.010);
+      this.bowl.add(b);
+    }
+  }
+
+  _buildMixer() {
+    const chrome = this._materials(MAT.makeMetal({ color: 0xe2e7ec, roughness: 0.13 }).clone());
+    const g = new THREE.Group();
+    g.position.set(-0.40, 0, -0.34);
+    this.tub.add(g);
+    this.mixer = g;
+
+    const baseGeo = new THREE.CylinderGeometry(0.045, 0.055, 0.020, 24);
+    this._disposables.push(baseGeo);
+    const base = new THREE.Mesh(baseGeo, chrome);
+    base.position.y = 0.010;
+    base.castShadow = base.receiveShadow = true;
+    g.add(base);
+
+    const colGeo = pipe([
+      [0, 0.02, 0], [0, 0.30, 0], [0, 0.56, 0], [0, 0.66, 0.02],
+      [0.06, 0.705, 0.10], [0.17, 0.715, 0.20], [0.22, 0.700, 0.26]
+    ], 0.0135, 60, 12);
+    this._disposables.push(colGeo);
+    const col = new THREE.Mesh(colGeo, chrome);
+    col.castShadow = col.receiveShadow = true;
+    g.add(col);
+
+    const tipGeo = new THREE.CylinderGeometry(0.019, 0.016, 0.026, 18);
+    this._disposables.push(tipGeo);
+    const tip = new THREE.Mesh(tipGeo, chrome);
+    tip.position.set(0.232, 0.688, 0.268);
+    tip.rotation.z = 0.35;
+    tip.castShadow = true;
+    g.add(tip);
+    this.spoutMesh = tip;
+
+    // spout tip expressed in bowl space, where the stream lives
+    this.spoutTip = new THREE.Vector3(
+      g.position.x + 0.232, g.position.y + 0.678 - STAND_H, g.position.z + 0.272);
+
+    /* --- the two knobs -------------------------------------------------- */
+    const crossGeo = pipe([[-0.11, 0.50, 0], [0, 0.505, 0], [0.11, 0.50, 0]], 0.011, 24, 10);
+    this._disposables.push(crossGeo);
+    const cross = new THREE.Mesh(crossGeo, chrome);
+    cross.castShadow = true;
+    g.add(cross);
+
+    const knobGeo = new THREE.SphereGeometry(0.030, 20, 14);
+    knobGeo.scale(1, 0.78, 1);
+    this._disposables.push(knobGeo);
+    const capGeo = new THREE.CylinderGeometry(0.011, 0.013, 0.010, 14);
+    this._disposables.push(capGeo);
+
+    const hotMat = this._materials(MAT.makePlastic({ color: 0xe8503f, seed: 71, matte: 0.24, clearcoat: 1 }));
+    const coldMat = this._materials(MAT.makePlastic({ color: 0x3f8fe8, seed: 72, matte: 0.24, clearcoat: 1 }));
+
+    this.knobHot = new THREE.Mesh(knobGeo, hotMat);
+    this.knobHot.position.set(-0.115, 0.522, 0);
+    this.knobHot.castShadow = true;
+    g.add(this.knobHot);
+    const hotCap = new THREE.Mesh(capGeo, chrome);
+    hotCap.position.set(-0.115, 0.548, 0);
+    g.add(hotCap);
+
+    this.knobCold = new THREE.Mesh(knobGeo, coldMat);
+    this.knobCold.position.set(0.115, 0.522, 0);
+    this.knobCold.castShadow = true;
+    g.add(this.knobCold);
+    const coldCap = new THREE.Mesh(capGeo, chrome);
+    coldCap.position.set(0.115, 0.548, 0);
+    g.add(coldCap);
+
+    /* --- temperature gauge on the front of the tub --------------------- */
+    const gaugeBody = roundedBox(0.14, 0.036, 0.014, 0.014, 4);
+    this._disposables.push(gaugeBody);
+    const gauge = new THREE.Mesh(gaugeBody,
+      this._materials(MAT.makePlastic({ color: 0xf7f2ea, seed: 73, matte: 0.5 })));
+    gauge.position.set(0.09, 0.16, 0.284);
+    gauge.rotation.x = 0.16;
+    gauge.castShadow = true;
+    this.bowl.add(gauge);
+
+    // vertical gradient rotated a quarter turn so cold reads left, hot right
+    const scaleGeo = new THREE.PlaneGeometry(0.020, 0.118);
+    scaleGeo.rotateZ(-Math.PI / 2);
+    this._disposables.push(scaleGeo);
+    const scaleTex = TEX.gradient([
+      [0.0, '#e8503f'], [0.34, '#ffc46a'], [0.5, '#7be09a'],
+      [0.66, '#63d3f0'], [1.0, '#2f7fe0']
+    ], { size: 128 });
+    const scaleMat = this._materials(new THREE.MeshBasicMaterial({ map: scaleTex }));
+    const scale = new THREE.Mesh(scaleGeo, scaleMat);
+    scale.position.set(0.09, 0.16, 0.2925);
+    scale.rotation.x = 0.16;
+    this.bowl.add(scale);
+    this.gaugeScale = scale;
+
+    const beadGeo = new THREE.SphereGeometry(0.009, 14, 10);
+    this._disposables.push(beadGeo);
+    this.gaugeBead = new THREE.Mesh(beadGeo,
+      this._materials(MAT.makePlastic({ color: 0xfffdf6, seed: 74, matte: 0.2, clearcoat: 1 })));
+    this.gaugeBead.castShadow = false;
+    this.bowl.add(this.gaugeBead);
+  }
+
+  _buildShower() {
+    const chrome = this._materials(MAT.makeMetal({ color: 0xdfe5ea, roughness: 0.16 }).clone());
+    const head = new THREE.Group();
+    this.tub.add(head);
+    this.showerHead = head;
+    this.showerHome = new THREE.Vector3(-0.40, 0.86, -0.30);
+    head.position.copy(this.showerHome);
+    head.rotation.z = 0.5;
+
+    const cupGeo = new THREE.CylinderGeometry(0.046, 0.036, 0.028, 26);
+    this._disposables.push(cupGeo);
+    const cup = new THREE.Mesh(cupGeo, chrome);
+    cup.castShadow = true;
+    head.add(cup);
+
+    const faceGeo = new THREE.CylinderGeometry(0.044, 0.044, 0.006, 26);
+    this._disposables.push(faceGeo);
+    const face = new THREE.Mesh(faceGeo,
+      this._materials(MAT.makePlastic({ color: 0xdcdfe4, seed: 75, matte: 0.55 })));
+    face.position.y = -0.016;
+    head.add(face);
+
+    const gripGeo = new THREE.CylinderGeometry(0.014, 0.017, 0.11, 16);
+    this._disposables.push(gripGeo);
+    const grip = new THREE.Mesh(gripGeo, chrome);
+    grip.position.set(0.0, 0.072, 0.0);
+    grip.castShadow = true;
+    head.add(grip);
+
+    // hose — re-pathed every frame as the head is dragged around
+    const hoseMat = this._materials(MAT.makeMetal({ color: 0xc9d0d8, roughness: 0.34 }).clone());
+    this.hose = new DynamicTube(26, 9, () => 0.0095, hoseMat);
+    this.hose.mesh.castShadow = true;
+    this.tub.add(this.hose.mesh);
+
+    /* --- spray cone ---------------------------------------------------- */
+    const coneGeo = new THREE.CylinderGeometry(0.028, 0.115, 0.42, 22, 1, true);
+    this._disposables.push(coneGeo);
+    this.sprayUniforms = { uTime: { value: 0 }, uOn: { value: 0 } };
+    this.sprayMat = this._materials(new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: this.sprayUniforms,
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() { vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }`,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv; uniform float uTime, uOn;
+        void main() {
+          if ( uOn < 0.02 ) discard;
+          float y = vUv.y * 7.0 + uTime * 6.5;
+          float s = 0.5 + 0.5 * sin( y * 8.0 + vUv.x * 60.0 );
+          s *= 0.5 + 0.5 * sin( y * 3.0 - vUv.x * 23.0 );
+          float fade = smoothstep( 0.0, 0.25, vUv.y ) * smoothstep( 1.0, 0.45, vUv.y );
+          float a = ( 0.06 + s * 0.22 ) * fade * uOn;
+          gl_FragColor = vec4( vec3( 0.86, 0.94, 1.0 ) * ( 0.8 + s ), a );
+        }`
+    }));
+    this.spray = new THREE.Mesh(coneGeo, this.sprayMat);
+    this.spray.position.y = -0.23;
+    this.spray.renderOrder = 5;
+    this.spray.visible = false;
+    head.add(this.spray);
+  }
+
+  _buildCaddy() {
+    const wood = this._materials(MAT.makeWood({ light: 0xe9cfa6, dark: 0xa87a4c, seed: 21, repeat: 2 }));
+    const stool = new THREE.Group();
+    stool.position.set(0.62, 0, -0.06);
+    stool.rotation.y = -0.35;
+    this.tub.add(stool);
+    this.caddy = stool;
+
+    const topGeo = roundedBox(0.26, 0.020, 0.20, 0.012, 4);
+    this._disposables.push(topGeo);
+    const top = new THREE.Mesh(topGeo, wood);
+    top.position.y = 0.34;
+    top.castShadow = top.receiveShadow = true;
+    stool.add(top);
+    const legGeo = new THREE.CylinderGeometry(0.011, 0.014, 0.34, 10);
+    this._disposables.push(legGeo);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const l = new THREE.Mesh(legGeo, wood);
+      l.position.set(sx * 0.10, 0.17, sz * 0.072);
+      l.rotation.z = -sx * 0.05; l.rotation.x = sz * 0.05;
+      l.castShadow = true;
+      stool.add(l);
+    }
+
+    /* --- shampoo bottle with a working pump ---------------------------- */
+    const bottle = new THREE.Group();
+    bottle.position.set(-0.055, 0.35, -0.01);
+    stool.add(bottle);
+    this.shampoo = bottle;
+
+    const bodyPts = [
+      new THREE.Vector2(0.000, 0.000), new THREE.Vector2(0.036, 0.000),
+      new THREE.Vector2(0.042, 0.010), new THREE.Vector2(0.044, 0.080),
+      new THREE.Vector2(0.041, 0.128), new THREE.Vector2(0.030, 0.150),
+      new THREE.Vector2(0.019, 0.158), new THREE.Vector2(0.019, 0.170),
+      new THREE.Vector2(0.000, 0.170)
+    ];
+    const bodyGeo = new THREE.LatheGeometry(bodyPts, 32);
+    this._disposables.push(bodyGeo);
+    const bodyMat = this._materials(MAT.makePlastic({ color: 0xffa9c9, seed: 76, matte: 0.22, clearcoat: 0.9 }));
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.castShadow = body.receiveShadow = true;
+    bottle.add(body);
+
+    const collarGeo = new THREE.CylinderGeometry(0.021, 0.021, 0.016, 20);
+    this._disposables.push(collarGeo);
+    const collarMat = this._materials(MAT.makePlastic({ color: 0xfff6ee, seed: 77, matte: 0.35 }));
+    const collar = new THREE.Mesh(collarGeo, collarMat);
+    collar.position.y = 0.178;
+    collar.castShadow = true;
+    bottle.add(collar);
+
+    const pump = new THREE.Group();
+    pump.position.y = 0.186;
+    bottle.add(pump);
+    this.pump = pump;
+    const stemGeo = new THREE.CylinderGeometry(0.0065, 0.0065, 0.036, 12);
+    this._disposables.push(stemGeo);
+    const stem = new THREE.Mesh(stemGeo, collarMat);
+    stem.position.y = 0.018;
+    pump.add(stem);
+    const spoutGeo = pipe([[0, 0.036, 0], [0.008, 0.040, 0], [0.024, 0.036, 0], [0.030, 0.026, 0]], 0.0072, 20, 8);
+    this._disposables.push(spoutGeo);
+    const ps = new THREE.Mesh(spoutGeo, collarMat);
+    ps.castShadow = true;
+    pump.add(ps);
+
+    /* --- sponge -------------------------------------------------------- */
+    const spGeo = roundedBox(0.085, 0.042, 0.058, 0.016, 5);
+    this._disposables.push(spGeo);
+    const sponge = new THREE.Mesh(spGeo,
+      this._materials(MAT.makeCloth({ color: 0xffe680, weave: 'terry', threads: 90, repeat: 4, seed: 78 })));
+    sponge.position.set(0.072, 0.372, 0.02);
+    sponge.rotation.y = 0.4;
+    sponge.castShadow = sponge.receiveShadow = true;
+    stool.add(sponge);
+    this.sponge = sponge;
+    this.spongeHome = sponge.position.clone();
+    this.spongeRot = sponge.rotation.clone();
+    const spTopGeo = roundedBox(0.083, 0.016, 0.056, 0.008, 4);
+    this._disposables.push(spTopGeo);
+    const spTop = new THREE.Mesh(spTopGeo,
+      this._materials(MAT.makeCloth({ color: 0x8fe07a, weave: 'terry', threads: 90, repeat: 4, seed: 79 })));
+    spTop.position.y = 0.026;
+    spTop.castShadow = true;
+    sponge.add(spTop);
+
+    /* --- hairdryer ----------------------------------------------------- */
+    const dryer = new THREE.Group();
+    dryer.position.set(0.03, 0.40, -0.055);
+    dryer.rotation.set(0, 0.5, Math.PI / 2);
+    dryer.visible = false;
+    stool.add(dryer);
+    this.dryer = dryer;
+    this.dryerHome = { pos: dryer.position.clone(), rot: dryer.rotation.clone() };
+    const dBodyGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.12, 22);
+    this._disposables.push(dBodyGeo);
+    const dMat = this._materials(MAT.makePlastic({ color: 0xff8fb3, seed: 80, matte: 0.3, clearcoat: 0.8 }));
+    const dBody = new THREE.Mesh(dBodyGeo, dMat);
+    dBody.castShadow = true;
+    dryer.add(dBody);
+    const dNozGeo = new THREE.CylinderGeometry(0.030, 0.036, 0.030, 22);
+    this._disposables.push(dNozGeo);
+    const dNoz = new THREE.Mesh(dNozGeo, this._materials(MAT.makePlastic({ color: 0xf0f2f5, seed: 81, matte: 0.4 })));
+    dNoz.position.y = 0.072;
+    dryer.add(dNoz);
+    const dGripGeo = roundedBox(0.034, 0.10, 0.030, 0.014, 4);
+    this._disposables.push(dGripGeo);
+    const dGrip = new THREE.Mesh(dGripGeo, dMat);
+    dGrip.position.set(0.0, -0.10, 0.0);
+    dGrip.rotation.z = 0.22;
+    dGrip.castShadow = true;
+    dryer.add(dGrip);
+  }
+
+  _buildTowelRail() {
+    const chrome = this._materials(MAT.makeMetal({ color: 0xdde3e9, roughness: 0.2 }).clone());
+    const rail = new THREE.Group();
+    rail.position.set(0.0, 0, -0.52);
+    this.tub.add(rail);
+
+    const postGeo = new THREE.CylinderGeometry(0.010, 0.013, 0.66, 12);
+    this._disposables.push(postGeo);
+    for (const sx of [-1, 1]) {
+      const p = new THREE.Mesh(postGeo, chrome);
+      p.position.set(sx * 0.22, 0.33, 0);
+      p.castShadow = p.receiveShadow = true;
+      rail.add(p);
+    }
+    const footGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.012, 18);
+    this._disposables.push(footGeo);
+    for (const sx of [-1, 1]) {
+      const f = new THREE.Mesh(footGeo, chrome);
+      f.position.set(sx * 0.22, 0.006, 0);
+      f.receiveShadow = true;
+      rail.add(f);
+    }
+    const barGeo = new THREE.CylinderGeometry(0.0095, 0.0095, 0.46, 14);
+    barGeo.rotateZ(Math.PI / 2);
+    this._disposables.push(barGeo);
+    const bar = new THREE.Mesh(barGeo, chrome);
+    bar.position.set(0, 0.655, 0);
+    bar.castShadow = true;
+    rail.add(bar);
+
+    const towelGeo = drapedTowel(0.30, 0.0125, 0.20, 0.26, 16, 34);
+    this._disposables.push(towelGeo);
+    const terry = this._materials(MAT.makeTerry({ color: 0xfff0f5, repeat: 3, seed: 71 }));
+    terry.side = THREE.DoubleSide;
+    const towel = new THREE.Mesh(towelGeo, terry);
+    towel.position.set(-0.02, 0.655, 0);
+    towel.castShadow = towel.receiveShadow = true;
+    rail.add(towel);
+    this.towel = towel;
+    this.towelHome = new THREE.Vector3();
+    this.towelParent = rail;
+  }
+
+  _buildBasket() {
+    const g = new THREE.Group();
+    g.position.set(0.80, 0, 0.36);
+    g.rotation.y = 0.4;
+    this.tub.add(g);
+    this.basket = g;
+
+    const weave = this._materials(MAT.makeCloth({
+      color: 0xe8d3ac, weave: 'plain', threads: 46, repeat: 5, seed: 82, sheen: 0.4
+    }));
+    weave.side = THREE.DoubleSide;
+    const pts = [
+      new THREE.Vector2(0.000, 0.000), new THREE.Vector2(0.105, 0.000),
+      new THREE.Vector2(0.118, 0.014), new THREE.Vector2(0.132, 0.140),
+      new THREE.Vector2(0.140, 0.220), new THREE.Vector2(0.144, 0.238)
+    ];
+    const geo = new THREE.LatheGeometry(pts, 30);
+    this._disposables.push(geo);
+    const b = new THREE.Mesh(geo, weave);
+    b.castShadow = b.receiveShadow = true;
+    g.add(b);
+    const rimGeo = new THREE.TorusGeometry(0.144, 0.011, 10, 34);
+    rimGeo.rotateX(Math.PI / 2);
+    this._disposables.push(rimGeo);
+    const rim = new THREE.Mesh(rimGeo,
+      this._materials(MAT.makeCloth({ color: 0xd3b986, weave: 'plain', threads: 30, repeat: 4, seed: 83 })));
+    rim.position.y = 0.238;
+    rim.castShadow = true;
+    g.add(rim);
+  }
+
+  _buildMat() {
+    const geo = roundedBox(0.46, 0.020, 0.34, 0.055, 6);
+    this._disposables.push(geo);
+    const m = new THREE.Mesh(geo,
+      this._materials(MAT.makeTerry({ color: 0xffdcea, repeat: 3, seed: 84 })));
+    m.position.set(0.02, 0.010, 0.58);
+    m.rotation.y = 0.12;
+    m.receiveShadow = true;
+    m.castShadow = false;
+    this.tub.add(m);
+    this.bathMat = m;
+  }
+
+  _buildToys() {
+    const rand = this.rand;
+    this.floaters = [];
+
+    /* --- rubber duck --------------------------------------------------- */
+    const duck = new THREE.Group();
+    this.bowl.add(duck);
+    const yellow = this._materials(MAT.makePlastic({ color: 0xffcf2e, seed: 85, matte: 0.28, clearcoat: 0.9 }));
+    const dBody = new THREE.SphereGeometry(0.052, 22, 16);
+    dBody.scale(1.22, 0.86, 0.98);
+    this._disposables.push(dBody);
+    const db = new THREE.Mesh(dBody, yellow);
+    db.castShadow = true;
+    duck.add(db);
+    const tail = new THREE.ConeGeometry(0.030, 0.055, 14);
+    this._disposables.push(tail);
+    const dt = new THREE.Mesh(tail, yellow);
+    dt.position.set(-0.056, 0.020, 0);
+    dt.rotation.z = -0.9;
+    dt.castShadow = true;
+    duck.add(dt);
+    const dHead = new THREE.SphereGeometry(0.033, 18, 14);
+    this._disposables.push(dHead);
+    const dh = new THREE.Mesh(dHead, yellow);
+    dh.position.set(0.040, 0.052, 0);
+    dh.castShadow = true;
+    duck.add(dh);
+    const beak = new THREE.ConeGeometry(0.014, 0.030, 12);
+    this._disposables.push(beak);
+    const bk = new THREE.Mesh(beak, this._materials(MAT.makePlastic({ color: 0xff8a3d, seed: 86, matte: 0.3 })));
+    bk.position.set(0.070, 0.048, 0);
+    bk.rotation.z = -Math.PI / 2;
+    duck.add(bk);
+    const eyeGeo = new THREE.SphereGeometry(0.0055, 10, 8);
+    this._disposables.push(eyeGeo);
+    const eyeMat = this._materials(MAT.makePlastic({ color: 0x2a1f22, seed: 87, matte: 0.1, clearcoat: 1 }));
+    for (const sz of [-1, 1]) {
+      const e = new THREE.Mesh(eyeGeo, eyeMat);
+      e.position.set(0.055, 0.060, sz * 0.020);
+      duck.add(e);
+    }
+    this.duck = duck;
+    this.floaters.push({ obj: duck, x: 0.19, z: 0.11, ry: -0.6, buoy: 0.026, vy: 0, spin: 0.22 });
+
+    /* --- little boat --------------------------------------------------- */
+    const boat = new THREE.Group();
+    this.bowl.add(boat);
+    const hullPts = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      hullPts.push(new THREE.Vector2(0.001 + Math.sin(t * Math.PI * 0.5) * 0.048, t * 0.040));
+    }
+    const hullGeo = new THREE.LatheGeometry(hullPts, 22);
+    hullGeo.scale(1.5, 1, 1);
+    this._disposables.push(hullGeo);
+    const hull = new THREE.Mesh(hullGeo,
+      this._materials(MAT.makePlastic({ color: 0x5ec8ff, seed: 88, matte: 0.28, clearcoat: 0.85 })));
+    hull.castShadow = true;
+    boat.add(hull);
+    const mastGeo = new THREE.CylinderGeometry(0.0035, 0.0035, 0.085, 8);
+    this._disposables.push(mastGeo);
+    const mast = new THREE.Mesh(mastGeo,
+      this._materials(MAT.makeWood({ light: 0xe8c99a, dark: 0xa57c4e, seed: 22, repeat: 1 })));
+    mast.position.y = 0.062;
+    mast.castShadow = true;
+    boat.add(mast);
+    const sailGeo = new THREE.PlaneGeometry(0.055, 0.070, 6, 6);
+    {
+      const p = sailGeo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        p.setZ(i, Math.sin((p.getY(i) / 0.07 + 0.5) * Math.PI) * 0.010);
+      }
+      sailGeo.computeVertexNormals();
+    }
+    this._disposables.push(sailGeo);
+    const sail = new THREE.Mesh(sailGeo,
+      this._materials(MAT.makeCloth({ color: 0xfff4f8, weave: 'plain', threads: 90, repeat: 2, seed: 89 })));
+    sail.material.side = THREE.DoubleSide;
+    sail.position.set(0.020, 0.078, 0);
+    sail.rotation.y = Math.PI / 2;
+    sail.castShadow = true;
+    boat.add(sail);
+    this.floaters.push({ obj: boat, x: -0.20, z: -0.09, ry: 0.9, buoy: 0.014, vy: 0, spin: -0.16 });
+
+    /* --- squeaky star -------------------------------------------------- */
+    const star = new THREE.Group();
+    this.bowl.add(star);
+    const armGeo = roundedBox(0.028, 0.070, 0.026, 0.012, 4);
+    this._disposables.push(armGeo);
+    const starMat = this._materials(MAT.makePlastic({ color: 0xff8ac4, seed: 90, matte: 0.34, clearcoat: 0.8 }));
+    for (let i = 0; i < 5; i++) {
+      const a = new THREE.Mesh(armGeo, starMat);
+      const ang = (i / 5) * Math.PI * 2;
+      a.position.set(Math.sin(ang) * 0.030, 0, Math.cos(ang) * 0.030);
+      a.rotation.set(Math.cos(ang) * 0.5, ang, -Math.sin(ang) * 0.5);
+      a.castShadow = true;
+      star.add(a);
+    }
+    const coreGeo = new THREE.SphereGeometry(0.030, 16, 12);
+    coreGeo.scale(1, 0.55, 1);
+    this._disposables.push(coreGeo);
+    const core = new THREE.Mesh(coreGeo, starMat);
+    core.castShadow = true;
+    star.add(core);
+    this.floaters.push({ obj: star, x: 0.06, z: -0.16, ry: 0.2, buoy: 0.010, vy: 0, spin: 0.3 });
+
+    for (const f of this.floaters) {
+      f.obj.position.set(f.x, WATER_MIN, f.z);
+      f.obj.rotation.y = f.ry;
+      f.obj.visible = false;
+      f.driftPhase = rand() * 6.28;
+    }
+  }
+
+  _buildWetStrands() {
+    // A few dark, clumped strands that appear only when the hair is soaked.
+    const g = new THREE.Group();
+    g.visible = false;
+    this.root.add(g);
+    this.wetStrands = g;
+    const mat = this._materials(MAT.makeHair({ color: 0x4a3123, sheenColor: 0xffd9a8 }));
+    mat.transparent = false;
+    mat.alphaTest = 0;
+    mat.roughness = 0.30;
+    mat.clearcoat = 0.7;
+    const rand = rng(6607);
+    for (let i = 0; i < 9; i++) {
+      const len = 0.030 + rand() * 0.030;
+      const geo = new THREE.ConeGeometry(0.0085, len, 7, 3);
+      const p = geo.attributes.position;
+      for (let k = 0; k < p.count; k++) {
+        const y = p.getY(k);
+        const t = (y + len / 2) / len;
+        p.setX(k, p.getX(k) + Math.sin(t * 2.2) * 0.008);
+      }
+      geo.computeVertexNormals();
+      this._disposables.push(geo);
+      const s = new THREE.Mesh(geo, mat);
+      const a = (i / 9) * Math.PI * 2 + 0.4;
+      const rad = 0.052 + rand() * 0.012;
+      s.position.set(Math.cos(a) * rad, 0.012 - len * 0.35, Math.sin(a) * rad * 0.85);
+      s.rotation.set(Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5);
+      s.castShadow = true;
+      g.add(s);
+    }
+  }
+
+  /** A wordless "look here" marker — a 4-year-old reads this, not text. */
+  _buildCue() {
+    const g = new THREE.Group();
+    g.visible = false;
+    this.root.add(g);
+    this.cue = g;
+    const ringGeo = new THREE.TorusGeometry(0.055, 0.006, 10, 40);
+    ringGeo.rotateX(-Math.PI / 2);
+    this._disposables.push(ringGeo);
+    const mat = this._materials(new THREE.MeshBasicMaterial({
+      color: 0xfff0b0, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false
+    }));
+    this.cueMat = mat;
+    const ring = new THREE.Mesh(ringGeo, mat);
+    g.add(ring);
+    const chevGeo = new THREE.ConeGeometry(0.024, 0.040, 4);
+    this._disposables.push(chevGeo);
+    const chev = new THREE.Mesh(chevGeo, mat);
+    chev.rotation.x = Math.PI;
+    chev.position.y = 0.075;
+    g.add(chev);
+    this.cueChevron = chev;
+  }
+
+  _registerCameras() {
+    const rig = this.ctx.cameraRig;
+    if (!rig?.addPreset) return;
+    this.tub.updateMatrixWorld(true);
+    const c = this.tub.getWorldPosition(new THREE.Vector3());
+    const add = (name, pos, target, fov, focus) => {
+      try {
+        rig.addPreset(name, {
+          pos: [c.x + pos[0], pos[1], c.z + pos[2]],
+          target: [c.x + target[0], target[1], c.z + target[2]],
+          fov, focusRange: focus
+        });
+      } catch (e) { /* the rig may not accept overrides — never fatal */ }
+    };
+    add('tub', [0.30, 1.00, 1.12], [-0.02, 0.50, 0.0], 34, 0.22);
+    add('bath-face', [0.16, 0.84, 0.66], [0.0, 0.62, 0.0], 30, 0.13);
+    add('bath-dry', [0.30, 0.86, 1.06], [0.02, 0.42, 0.52], 33, 0.20);
+  }
+
+  /* ============================================================ enter ==== */
+
+  async enter() {
+    const ctx = this.ctx;
+    ctx.ui?.setHud?.(true);
+
+    /* --- dirt, sourced from what actually happened earlier -------------- */
+    const s = ctx.state?.dirt;
+    const rainy = (ctx.state?.weather || 'clear') === 'rain';
+    this.dirt = {
+      face: s?.face ?? 0.75,
+      hands: s?.hands ?? 0.60,
+      feet: s?.feet ?? (rainy ? 0.85 : 0.45),
+      body: s?.body ?? 0.30,
+      hair: s?.hair ?? 0.40
+    };
+    for (const z of Object.keys(this.dirt)) ctx.baby?.setDirt?.(z, this.dirt[z]);
+
+    /* --- deliberately wrong to start with: the child has to mix --------- */
+    this.temp = 0.10;
+    this.water.setTemperature(this.temp);
+    this.water.setLevel(0, true);
+    this.filling = false;
+    this.shampooUsed = false;
+    this.inTub = false;
+    this.wet = 0;
+    this.foam.clear();
+    this.droplets.clear();
+
+    // measure the head so the lather sits on it whatever the rig does
+    const hr = this._estimateHeadRadius();
+    this.foam.setHeadRadius(hr);
+
+    this._placeBabyOnMat();
+    ctx.baby?.setWet?.(0);
+    ctx.baby?.lookAt?.(this._world(this.bowl, 0, WATER_MAX, 0));
+
+    const naked = !!ctx.state?.naked;
+    this._setPhase(naked ? 'fill' : 'undress');
+    this.root.visible = true;
+    return this;
+  }
+
+  async exit() {
+    const ctx = this.ctx;
+    this._restoreMaterials();
+    ctx.baby?.setWet?.(this.wet);
+    this.foam.clear();
+    for (const z of ['face', 'hands', 'feet', 'body', 'hair']) {
+      ctx.baby?.setFoam?.(z, 0);
+    }
+    this.stream.setFlow(0);
+    this.steam.setAmount(0);
+    ctx.ui?.hidePrompt?.();
+    return this;
+  }
+
+  dispose() {
+    this._restoreMaterials();
+    this.water.dispose();
+    this.stream.dispose();
+    this.steam.dispose();
+    this.foam.dispose();
+    this.droplets.dispose();
+    for (const r of this.rings) r.dispose();
+    this.rings.length = 0;
+    this.hose.mesh.removeFromParent();
+    this.hose.dispose();
+
+    for (const d of this._disposables) d?.dispose?.();
+    this._disposables.length = 0;
+    for (const m of this._matList || []) m?.dispose?.();
+    this._matList = [];
+
+    this.root.traverse(o => {
+      if (o.isInstancedMesh) o.dispose?.();
+    });
+    this.root.removeFromParent();
+    this.root.clear();
+    this.anchors?.clear();
+  }
+
+  /* ------------------------------------------------------------ helpers -- */
+
+  _materials(m) { (this._matList ||= []).push(m); return m; }
+
+  _restoreMaterials() {
+    for (const m of this._touchedMaterials) MAT.applyWetness(m, 0);
+    this._touchedMaterials.clear();
+  }
+
+  _world(obj, x, y, z) {
+    obj.updateMatrixWorld();
+    return obj.localToWorld(new THREE.Vector3(x, y, z));
+  }
+
+  _sfx(name, opts) { try { this.ctx.audio?.play?.(name, opts); } catch (e) { /* optional */ } }
+
+  _prompt(text, icon) { try { this.ctx.ui?.prompt?.(text, icon ? { icon } : undefined); } catch (e) { /**/ } }
+
+  _toast(text, icon) { try { this.ctx.ui?.toast?.(text, icon ? { icon } : undefined); } catch (e) { /**/ } }
+
+  _estimateHeadRadius() {
+    const b = this.ctx.baby;
+    try {
+      const h = b?.headWorldPos?.();
+      const c = b?.focusPoint?.();
+      if (h && c) {
+        const d = h.distanceTo(c);
+        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.55, 0.045, 0.10);
+      }
+    } catch (e) { /**/ }
+    return 0.068;
+  }
+
+  _babyPoint(kind) {
+    const b = this.ctx.baby;
+    try {
+      if (kind === 'head' && b?.headWorldPos) return b.headWorldPos();
+      if (kind === 'mouth' && b?.mouthWorldPos) return b.mouthWorldPos();
+      if (kind === 'handL' && b?.handWorldPos) return b.handWorldPos('left');
+      if (kind === 'handR' && b?.handWorldPos) return b.handWorldPos('right');
+      if (kind === 'body' && b?.focusPoint) return b.focusPoint();
+    } catch (e) { /**/ }
+    const p = b?.group?.position ? b.group.position.clone() : new THREE.Vector3();
+    const dy = { head: 0.30, mouth: 0.27, body: 0.18, handL: 0.14, handR: 0.14, feet: 0.03 };
+    return p.setY(p.y + (dy[kind] ?? 0.18));
+  }
+
+  /* ------------------------------------------------------- baby placing -- */
+
+  _placeBabyInTub() {
+    const b = this.ctx.baby;
+    if (!b?.group) return;
+    const p = this._world(this.bowl, 0.015, PROFILE[0][1] - 0.004, 0.0);
+    b.group.position.copy(p);
+    b.group.rotation.set(0, this.tub.rotation.y + 0.16, 0);
+    b.playPose?.('bathe', { seconds: 0.5 });
+    this.inTub = true;
+  }
+
+  _placeBabyOnMat() {
+    const b = this.ctx.baby;
+    if (!b?.group) return;
+    const p = this._world(this.tub, 0.02, 0.019, 0.58);
+    b.group.position.copy(p);
+    b.group.rotation.set(0, this.tub.rotation.y + 0.30, 0);
+    b.playPose?.('stand', { seconds: 0.5 });
+    this.inTub = false;
+  }
+
+  /* ============================================================ phases == */
+
+  _setPhase(p) {
+    if (this.phase === p) return;
+    this.phase = p;
+    const ctx = this.ctx;
+    switch (p) {
+      case 'undress':
+        this._prompt('おふくを ぬがせてあげよう', 'shirt');
+        this._cueAt(this._babyPoint('body'), 0.10);
+        break;
+      case 'fill':
+        this._prompt('じゃぐちを ひねって おゆを ためよう', 'tap');
+        this._cueAt(this._world(this.mixer, 0.232, 0.70, 0.27), 0.075);
+        ctx.baby?.lookAt?.(this._world(this.mixer, 0.232, 0.66, 0.27));
+        break;
+      case 'temper':
+        this._prompt('あかと あおの ノブで ちょうどいい おんどに', 'temp');
+        this._cueAt(this._world(this.mixer, 0, 0.60, 0), 0.13);
+        break;
+      case 'test':
+        this._prompt('てで おゆを さわって たしかめよう', 'hand');
+        this._cueAt(this._world(this.bowl, 0.0, this.water.surfaceY + 0.02, 0.06), 0.11);
+        break;
+      case 'wash':
+        this._prompt('ごしごし きれいに あらってあげよう', 'sponge');
+        this._cueAt(this._babyPoint('body'), 0.11);
+        this.foam.setBubbleRate(this.tier >= 1 ? 1.2 : 0.4);
+        break;
+      case 'shampoo':
+        this._prompt('シャンプーを おして あたまを あわあわに', 'shampoo');
+        this._cueAt(this._world(this.shampoo, 0.02, 0.23, 0), 0.06);
+        break;
+      case 'rinse':
+        this._prompt('シャワーで あわを ながそう', 'shower');
+        this._cueAt(this.showerHead.getWorldPosition(new THREE.Vector3()), 0.08);
+        this.foam.setBubbleRate(0.4);
+        break;
+      case 'dry':
+        this._prompt('タオルで ふきふき しよう', 'towel');
+        this._cueAt(this.towelHome, 0.10);
+        break;
+      case 'dryer':
+        this._prompt('ドライヤーで かわかそう', 'dryer');
+        this.dryer.visible = true;
+        this._cueAt(this._world(this.caddy, 0.03, 0.44, -0.055), 0.075);
+        break;
+      case 'done':
+        this._prompt('ぴかぴか！ つぎは おきがえ しようね', 'star');
+        this._cueHide();
+        break;
+    }
+  }
+
+  _cueAt(worldPos, radius = 0.09) {
+    this.cue.visible = true;
+    this.cue.position.copy(worldPos);
+    this.cue.scale.setScalar(radius / 0.055);
+    this._cueT = 0;
+  }
+
+  _cueHide() { this.cue.visible = false; }
+
+  /* ============================================================ input === */
+
+  onPointer(p) {
+    if (!this.root) return;
+    if (p.type === 'up') { this._endDrag(); return; }
+    this._updateRay(p);
+    if (p.type === 'down') this._onDown(p);
+    else if (this._drag) this._onDragMove(p);
+  }
+
+  _updateRay(p) {
+    const dom = this.ctx.renderer?.domElement;
+    if (!dom) return;
+    const r = dom.getBoundingClientRect();
+    _ndc.set(((p.x - r.left) / r.width) * 2 - 1, -((p.y - r.top) / r.height) * 2 + 1);
+    this._ray ||= new THREE.Raycaster();
+    this._ray.setFromCamera(_ndc, this.ctx.camera);
+  }
+
+  /** Generous invisible hit sphere — small parts need fat targets for a 4yo. */
+  _hitSphere(worldPos, radius) {
+    if (!this._ray) return false;
+    this._sphere ||= new THREE.Sphere();
+    this._sphere.set(worldPos, radius);
+    return this._ray.ray.intersectsSphere(this._sphere);
+  }
+
+  _hitBaby() {
+    const g = this.ctx.baby?.group;
+    if (!g || !this._ray) return null;
+    const hits = this._ray.intersectObject(g, true);
+    return hits.length ? hits[0] : null;
+  }
+
+  _hitWater() {
+    if (!this._ray) return null;
+    const hits = this._ray.intersectObject(this.water.mesh, false);
+    return hits.length ? hits[0].point : null;
+  }
+
+  /** Where the pointer crosses a vertical plane through the baby. */
+  _planePoint(zWorld) {
+    if (!this._ray) return null;
+    this._plane ||= new THREE.Plane();
+    this._plane.set(new THREE.Vector3(0, 0, 1), -zWorld);
+    const out = new THREE.Vector3();
+    return this._ray.ray.intersectPlane(this._plane, out) ? out : null;
+  }
+
+  _onDown(p) {
+    const ctx = this.ctx;
+    ctx.audio?.unlock?.();
+    this._lastPointerY = p.y;
+
+    switch (this.phase) {
+      case 'undress':
+        if (this._hitBaby()) this._undress();
+        return;
+
+      case 'fill':
+      case 'temper':
+      case 'test': {
+        if (this._hitSphere(this._world(this.mixer, -0.115, 0.522, 0), 0.075)) {
+          this._turnKnob(+1); return;
+        }
+        if (this._hitSphere(this._world(this.mixer, 0.115, 0.522, 0), 0.075)) {
+          this._turnKnob(-1); return;
+        }
+        if (this._hitSphere(this._world(this.mixer, 0.19, 0.70, 0.22), 0.13)) {
+          this._toggleTap(); return;
+        }
+        const wp = this._hitWater();
+        if (wp && this.water.level > 0.02) {
+          this._touchWater(wp);
+          return;
+        }
         return;
       }
 
-      if (this.phase === 'fill') {
-        if (G.pick(x, y, [this.knobHot], false)) {
-          this.temp = Math.min(1, this.temp + 0.2);
-          SND.play('tap');
-          this.knobHot.scale.setScalar(1.25);
-          FX.burst('smoke', this.knobHot.position, 1);
-          return;
+      case 'wash':
+      case 'shampoo': {
+        if (this._hitSphere(this._world(this.shampoo, 0.015, 0.215, 0), 0.075)) {
+          this._pumpShampoo(); return;
         }
-        if (G.pick(x, y, [this.knobCold], false)) {
-          this.temp = Math.max(0, this.temp - 0.2);
-          SND.play('tap');
-          this.knobCold.scale.setScalar(1.25);
-          FX.burst('drops', this.knobCold.position, 2);
-          return;
+        if (this.duck.visible &&
+            this._hitSphere(this.duck.getWorldPosition(_v3), 0.075)) {
+          this._pokeDuck(); return;
         }
-        if (G.pick(x, y, [this.faucet], true)) {
-          if (this.waterLevel < 1) {
-            this.filling = !this.filling;
-            SND.play(this.filling ? 'pour' : 'tap');
-          }
-          return;
-        }
-        // おゆを手でたしかめる
-        if (this.waterLevel >= 1 && G.pick(x, y, [this.water], false)) {
-          this._testWater();
-          return;
-        }
+        const hit = this._hitBaby();
+        if (hit) { this._drag = 'scrub'; this._scrub(hit.point, p); return; }
+        const wp = this._hitWater();
+        if (wp) { this._splashPlay(wp); return; }
         return;
       }
 
-      if (this.phase === 'wash') {
-        // あひる
-        if (this.duck && G.pick(x, y, [this.duck], true)) {
-          SND.play('quack');
-          this.duckVy = 1.6;
-          FX.burst('drops', this.duck.position, 5);
-          baby.giggle();
-          SND.play('giggle');
-          G.bumpMeter('happy', 0.03);
-          return;
-        }
-        // シャンプーボトルをプッシュ
-        if (G.pick(x, y, [this.shampoo], true)) {
-          this._pumpShampoo();
-          return;
-        }
-        this.scrubbing = true;
-        this._scrub(x, y);
+      case 'rinse':
+        this._drag = 'shower';
+        this._moveShower(p);
         return;
-      }
 
-      if (this.phase === 'rinse') {
-        this.showerDrag = true;
-        this._moveShower(x, y);
+      case 'dry':
+        this._drag = 'towel';
+        this._moveTowel(p);
         return;
-      }
 
-      if (this.phase === 'dry') {
-        if (G.pick(x, y, [this.dryer], true)) {
+      case 'dryer':
+        if (this._hitSphere(this._world(this.caddy, 0.03, 0.40, -0.055), 0.11)) {
           this._useDryer();
-          return;
-        }
-        if (G.pick(x, y, [this.towel], false) || this.towelDrag) {
-          this.towelDrag = true;
-          return;
-        }
-        this.towelDrag = true; // どこからでもタオルでOK（4さいむけ）
-        return;
-      }
-    },
-
-    onMove: function (x, y, isDown) {
-      if (!isDown) return;
-      if (this.phase === 'wash' && this.scrubbing) this._scrub(x, y);
-      if (this.phase === 'rinse' && this.showerDrag) this._moveShower(x, y);
-      if (this.phase === 'dry' && this.towelDrag) this._towelWipe(x, y);
-    },
-
-    onUp: function () {
-      this.scrubbing = false;
-      this.showerDrag = false;
-      this.towelDrag = false;
-    },
-
-    /* ---------- 1. ぬがせる ---------- */
-
-    _undress: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      SND.play('whoosh');
-      SND.play('pop');
-      // ふくがとんでいく（スプライト）
-      var cloth = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: FX.emojiTexture('👕', 128), transparent: true
-      }));
-      cloth.scale.set(0.5, 0.5, 1);
-      cloth.position.copy(AX.chestWorld());
-      G.scene.add(cloth);
-      this.objects.push(cloth);
-      this.flyingCloth = { obj: cloth, t: 0 };
-
-      // ワードローブ更新：シミつきなら「dirty」
-      var key = this._currentOutfitKey();
-      CARE.state.wardrobe[key] = CARE.clothesDirty() ? 'dirty' : 'clean';
-      CARE.state.clothesStains = [];
-      CARE.save();
-      baby.clearStains();
-      baby.setNaked(true);
-      CARE.state.naked = true;
-      baby.setMood('excited');   // おふろだ！わくわく
-      SND.play('giggle');
-      UI.bigFeedback('🧺');
-      var self = this;
-      setTimeout(function () {
-        if (AX.G.currentName === 'bath') {
-          baby.setMood('idle');
-          self._toPhase('fill');
-        }
-      }, 1100);
-    },
-
-    _currentOutfitKey: function () {
-      if (CARE.state.outfitStyle === 'rain') return 'rain';
-      if (CARE.state.outfitStyle === 'pajama') return 'pajama';
-      return ('000000' + AX.G.baby.outfitColor.toString(16)).slice(-6);
-    },
-
-    /* ---------- 2. おゆはり＋おんど ---------- */
-
-    _testWater: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      FX.burst('drops', new THREE.Vector3(0.35, this._waterTopY() + 0.1, 0.6), 4);
-      SND.play('splash');
-      if (this.temp > GOOD_TEMP_MAX) {
-        // あちち！
-        baby.setMood('surprised');
-        SND.play('sadBaby');
-        UI.bigFeedback('🥵');
-        FX.burst('smoke', new THREE.Vector3(0.35, this._waterTopY() + 0.3, 0.5), 5);
-        this._moodResetSoon();
-      } else if (this.temp < GOOD_TEMP_MIN) {
-        // つめたい…ぶるぶる
-        baby.giggle(); // ぶるぶるはgiggleの震えで代用
-        baby.setMood('pout');
-        SND.play('shiver');
-        UI.bigFeedback('🥶');
-        this._moodResetSoon();
-      } else {
-        // ちょうどいい！ざぶーん
-        SND.play('chime');
-        UI.bigFeedback('👌');
-        this._babyIntoTub();
-      }
-    },
-
-    _babyIntoTub: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      baby.setMood('excited');
-      this.hopT = 0;
-      this.hopFrom = baby.group.position.clone();
-      this.hopTo = new THREE.Vector3(0.35, 0.22, 0.3);
-      this.hopping = true;
-    },
-
-    _finishHop: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      this.hopping = false;
-      baby.setPose('sit');
-      baby.group.position.copy(this.hopTo);
-      baby.group.rotation.set(0, 0, 0);
-      baby.shadow.visible = false;
-      SND.play('splash');
-      FX.burst('drops', new THREE.Vector3(0.35, 0.7, 0.7), 8);
-      FX.burst('bubbles', new THREE.Vector3(0.35, 0.7, 0.6), 6);
-      baby.giggle();
-      SND.play('giggle');
-
-      // あひるをうかべる
-      var duck = new THREE.Group();
-      var duckMat = AX.lambert(0xffd93d);
-      var dBody = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 12), duckMat);
-      dBody.scale.set(1.25, 0.95, 1);
-      var dHead = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), duckMat);
-      dHead.position.set(0.12, 0.14, 0);
-      var dBeak = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.07, 8), AX.lambert(0xff8a3d));
-      dBeak.rotation.z = -Math.PI / 2;
-      dBeak.position.set(0.22, 0.13, 0);
-      var dEye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), AX.lambert(0x333333));
-      dEye.position.set(0.16, 0.18, 0.06);
-      duck.add(dBody); duck.add(dHead); duck.add(dBeak); duck.add(dEye);
-      duck.position.set(0.95, this._waterTopY() + 0.06, 0.75);
-      AX.G.scene.add(duck);
-      this.objects.push(duck);
-      this.duck = duck;
-
-      this._toPhase('wash');
-    },
-
-    _waterTopY: function () {
-      return 0.08 + this.waterLevel * 0.42;
-    },
-
-    /* ---------- 3. あらう ---------- */
-
-    _pumpShampoo: function () {
-      var G = AX.G;
-      SND.play('bubble');
-      this.shampoo.scale.y = 0.85;
-      this.shampooUsed = true;
-      // あたまに泡のたね
-      this._addFoam(2);
-      FX.burst('foam', AX.headWorld(), 4);
-      UI.bigFeedback('🧴');
-    },
-
-    _addFoam: function (n) {
-      var G = AX.G;
-      for (var i = 0; i < n && this.foamMeshes.length < 10; i++) {
-        var f = new THREE.Mesh(
-          new THREE.SphereGeometry(0.07 + Math.random() * 0.05, 8, 8),
-          new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 })
-        );
-        var ang = Math.random() * Math.PI * 2;
-        var r = Math.random() * 0.18;
-        var stack = this.foamMeshes.length * 0.045;
-        f.position.set(Math.cos(ang) * r, 0.26 + stack, Math.sin(ang) * r * 0.6);
-        G.baby.head.add(f);
-        this.foamMeshes.push(f);
-      }
-    },
-
-    _scrub: function (x, y) {
-      var G = AX.G;
-      var baby = G.baby;
-      var hit = G.pick(x, y, [baby.root], true);
-      var now = performance.now();
-      if (!hit) {
-        // みずをぱしゃぱしゃ
-        if (now - this.lastFx > 240) {
-          var p = G.rayPlane(x, y, new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.6));
-          if (p && p.y < 1.0 && Math.abs(p.x - 0.35) < 1.2) {
-            this.lastFx = now;
-            SND.play('bubble');
-            FX.burst('bubbles', new THREE.Vector3(p.x, this._waterTopY() + 0.1, 0.7), 2);
-          }
         }
         return;
+    }
+  }
+
+  _onDragMove(p) {
+    if (this._drag === 'scrub') {
+      const hit = this._hitBaby();
+      if (hit) this._scrub(hit.point, p);
+      else {
+        const wp = this._hitWater();
+        if (wp) this._splashPlay(wp);
       }
+    } else if (this._drag === 'shower') {
+      this._moveShower(p);
+    } else if (this._drag === 'towel') {
+      this._moveTowel(p);
+    }
+    this._lastPointerY = p.y;
+  }
 
-      this.sponge.position.copy(hit.point);
-      this.sponge.position.z += 0.12;
+  _endDrag() {
+    if (this._drag === 'shower') this.sprayUniforms.uOn.value = 0;
+    this._drag = null;
+    this._lastPointerY = null;
+  }
 
-      // あたまをこする → 泡がそだつ
-      var headWorldPos = AX.headWorld();
-      if (this.shampooUsed && hit.point.distanceTo(headWorldPos) < 0.45) {
-        if (now - this.lastFx > 140) {
-          this.lastFx = now;
-          this._addFoam(1);
-          FX.burst('foam', hit.point, 2);
-          SND.play('squeak');
-          // うえへドラッグすると泡タワー（ツノ・モヒカン）
-          if (this._lastScrubY != null && this._lastScrubY - y > 14 && this.foamMeshes.length >= 3) {
-            var top = this.foamMeshes[this.foamMeshes.length - 1];
-            top.position.y += 0.05;
-            top.scale.setScalar(Math.min(1.6, top.scale.x + 0.12));
-            FX.burst('sparkle', hit.point, 1);
-          }
-        }
-        this._lastScrubY = y;
+  /* ------------------------------------------------------- 1. undress --- */
+
+  _undress() {
+    const ctx = this.ctx;
+    if (this._undressing) return;
+    this._undressing = true;
+    this._sfx('whoosh');
+    this._sfx('pop');
+
+    const stained = !!(ctx.state?.clothesStains?.length) || (this.dirt.body ?? 0) > 0.25;
+    const chest = this._babyPoint('body');
+
+    // a real little garment, tumbling into the basket
+    const geo = roundedBox(0.13, 0.10, 0.05, 0.024, 4);
+    this._disposables.push(geo);
+    const mat = this._materials(MAT.makeCloth({
+      color: stained ? 0xe9dcc8 : 0xbfe4ff, weave: 'knit', threads: 70, repeat: 2, seed: 91
+    }));
+    const cloth = new THREE.Mesh(geo, mat);
+    cloth.position.copy(chest);
+    cloth.castShadow = true;
+    this.root.add(cloth);
+    this._flying.push({
+      obj: cloth, t: 0,
+      from: chest.clone(),
+      to: this._world(this.basket, 0, 0.16, 0),
+      spin: new THREE.Vector3(2.4, 3.1, 1.7)
+    });
+
+    ctx.baby?.setOutfit?.({ top: null, bottom: null, socks: null, shoes: null, hat: null, bib: null });
+    ctx.baby?.setMood?.('excited');
+    ctx.baby?.gesture?.('wave');
+    ctx.state?.patch?.({ naked: true, clothesStains: [] });
+    this._toast(stained ? 'よごれた おふく、せんたくかごへ！' : 'おふくを かごに いれたよ');
+    this._sfx('giggle');
+
+    setTimeout(() => {
+      if (!this.root) return;
+      this._undressing = false;
+      this.ctx.baby?.setMood?.('neutral');
+      this._setPhase('fill');
+    }, 900);
+  }
+
+  /* ---------------------------------------------------------- 2. fill --- */
+
+  _toggleTap() {
+    if (this.water.levelTarget >= 1 && !this.filling) {
+      this._setPhase('test');
+      return;
+    }
+    this.filling = !this.filling;
+    this._sfx(this.filling ? 'pour' : 'tap');
+    this.water.setLevel(this.filling ? 1 : this.water.level);
+    if (this.filling) {
+      this._setPhase('temper');
+      this._cueAt(this._world(this.mixer, 0, 0.60, 0), 0.13);
+    }
+  }
+
+  _turnKnob(dir) {
+    this.temp = THREE.MathUtils.clamp(this.temp + dir * 0.16, 0, 1);
+    this.water.setTemperature(this.temp);
+    const knob = dir > 0 ? this.knobHot : this.knobCold;
+    knob.rotation.y += dir * 0.8;
+    knob.scale.setScalar(1.22);
+    this._sfx('tap');
+    const good = this.temp >= TEMP_OK_MIN && this.temp <= TEMP_OK_MAX;
+    if (good && !this._tempGood) {
+      this._tempGood = true;
+      this._sfx('chime');
+      this._toast('ちょうど いい おんど！');
+      if (this.water.levelTarget >= 1 && this.water.level > 0.9) this._setPhase('test');
+    } else if (!good) {
+      this._tempGood = false;
+    }
+    this.ctx.baby?.lookAt?.(this._world(this.mixer, 0, 0.55, 0));
+  }
+
+  _touchWater(worldPoint) {
+    const local = this.bowl.worldToLocal(worldPoint.clone());
+    this.water.disturb(local.x, local.z, 0.075, 0.011);
+    this.ctx.fx?.burst?.('splash', worldPoint, 6);
+    this._sfx('splash');
+
+    if (this.phase === 'test' || (this.water.level > 0.85 && this.phase !== 'wash')) {
+      if (this.temp > TEMP_OK_MAX) {
+        this.ctx.baby?.setMood?.('surprised');
+        this.ctx.baby?.say?.('hot');
+        this._toast('あちち！ すこし さまそう');
+        this.ctx.fx?.burst?.('steam', this._world(this.bowl, 0, this.water.surfaceY + 0.05, 0), 14);
+        this._sfx('sadBaby');
+        this._setPhase('temper');
+      } else if (this.temp < TEMP_OK_MIN) {
+        this.ctx.baby?.setMood?.('sulk');
+        this.ctx.baby?.gesture?.('shiver');
+        this._toast('つめたい！ すこし あたためよう');
+        this._sfx('shiver');
+        this._setPhase('temper');
       } else {
-        if (now - this.lastFx > 120) {
-          this.lastFx = now;
-          FX.burst('foam', hit.point, 2);
-          SND.play('squeak');
-        }
-        // よごれをこすりおとす → そこに泡がのこる（すすぎのターゲット）
-        var removed = baby.scrubAt(hit.point, 0.3);
-        if (removed && Math.random() < 0.8) this._addSuds(hit.point);
+        this._sfx('chime');
+        this._toast('いい おゆだね、ざぶーん！');
+        this._enterTub();
       }
-
-      this._checkWashDone();
-    },
-
-    _addSuds: function (worldPoint) {
-      var G = AX.G;
-      var s = new THREE.Mesh(
-        new THREE.SphereGeometry(0.05 + Math.random() * 0.03, 8, 8),
-        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })
-      );
-      // ワールド→torsoローカルへ
-      var local = worldPoint.clone();
-      G.baby.torso.worldToLocal(local);
-      s.position.copy(local);
-      G.baby.torso.add(s);
-      this.sudsMeshes.push(s);
-    },
-
-    _checkWashDone: function () {
-      var G = AX.G;
-      if (this.phase !== 'wash') return;
-      if (G.baby.dirtMeshes.length === 0 && this.shampooUsed && this.foamMeshes.length >= 4) {
-        this._toPhase('rinse');
-      } else if (G.baby.dirtMeshes.length === 0 && !this.shampooUsed && !this._shampooHinted) {
-        // からだはきれい → シャンプーをわすれずに！
-        this._shampooHinted = true;
-        UI.bigFeedback('🧴');
-        UI.celebrate('シャンプーで あたまも あらおう！');
-        SND.play('chime');
-      }
-    },
-
-    /* ---------- 4. すすぎ（あてた場所だけ） ---------- */
-
-    _moveShower: function (x, y) {
-      var G = AX.G;
-      var p = G.rayPlane(x, y, new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.5));
-      if (!p) return;
-      this.showerHead.position.set(p.x, Math.max(1.2, Math.min(2.2, p.y)), 0.5);
-      this.showerRinsing = true;
-    },
-
-    _rinseUpdate: function (dt, t) {
-      var G = AX.G;
-      if (!this.showerDrag) return;
-      var hx = this.showerHead.position.x;
-      // みずがふる
-      var now = performance.now();
-      if (now - this.lastFx > 90) {
-        this.lastFx = now;
-        FX.burst('drops', new THREE.Vector3(hx, this.showerHead.position.y - 0.2, 0.55), 3);
-        if (Math.random() < 0.25) SND.play('bubble');
-      }
-      // シャワーのましたにある泡だけがながれおちる
-      var tmp = new THREE.Vector3();
-      var i;
-      for (i = this.foamMeshes.length - 1; i >= 0; i--) {
-        this.foamMeshes[i].getWorldPosition(tmp);
-        if (Math.abs(tmp.x - hx) < 0.32) {
-          this._washAwayFoam(this.foamMeshes[i], tmp);
-          this.foamMeshes.splice(i, 1);
-        }
-      }
-      for (i = this.sudsMeshes.length - 1; i >= 0; i--) {
-        this.sudsMeshes[i].getWorldPosition(tmp);
-        if (Math.abs(tmp.x - hx) < 0.32) {
-          this._washAwayFoam(this.sudsMeshes[i], tmp);
-          this.sudsMeshes.splice(i, 1);
-        }
-      }
-      if (this.foamMeshes.length === 0 && this.sudsMeshes.length === 0) {
-        // ぜんぶながれた！
-        this.showerHead.visible = false;
-        SND.play('chime');
-        var self = this;
-        setTimeout(function () {
-          if (AX.G.currentName === 'bath') self._toPhase('dry');
-        }, 500);
-      }
-    },
-
-    _washAwayFoam: function (mesh, worldPos) {
-      // かた→からだ→みずめんへ、ながれおちる演出
-      if (mesh.parent) mesh.parent.remove(mesh);
-      FX.burst('foam', worldPos, 3);
-      FX.burst('drops', worldPos, 2);
-      if (Math.random() < 0.4) SND.play('bubble');
-    },
-
-    /* ---------- 5. ふく＆かわかす ---------- */
-
-    _addDrops: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      var zones = [
-        { parent: baby.head, pos: [0.15, 0.15, 0.2] },
-        { parent: baby.head, pos: [-0.18, 0.05, 0.2] },
-        { parent: baby.torso, pos: [0.12, 0.1, 0.18] },
-        { parent: baby.torso, pos: [-0.14, -0.05, 0.18] },
-        { parent: baby.armL, pos: [0, -0.15, 0.06] },
-        { parent: baby.armR, pos: [0, -0.15, 0.06] }
-      ];
-      for (var i = 0; i < zones.length; i++) {
-        var d = new THREE.Mesh(
-          new THREE.SphereGeometry(0.035, 8, 8),
-          new THREE.MeshLambertMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.9 })
-        );
-        d.position.set(zones[i].pos[0], zones[i].pos[1], zones[i].pos[2]);
-        d.scale.set(0.8, 1.2, 0.6);
-        zones[i].parent.add(d);
-        this.dropMeshes.push(d);
-      }
-      // タブからマットのうえへ
-      var baby2 = G.baby;
-      baby2.setPose('stand');
-      baby2.group.position.set(-1.2, 0, 0.85);
-      baby2.group.rotation.set(0, 0.3, 0);
-      baby2.shadow.visible = true;
-    },
-
-    _towelWipe: function (x, y) {
-      var G = AX.G;
-      var p = G.rayPlane(x, y, new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.85));
-      if (p) this.towel.position.set(p.x, p.y, 0.95);
-      var hit = G.pick(x, y, [G.baby.root], true);
-      if (!hit) return;
-      var now = performance.now();
-      if (now - this.lastFx < 200) return;
-      var tmp = new THREE.Vector3();
-      for (var i = this.dropMeshes.length - 1; i >= 0; i--) {
-        this.dropMeshes[i].getWorldPosition(tmp);
-        if (tmp.distanceTo(hit.point) < 0.3) {
-          this.lastFx = now;
-          if (this.dropMeshes[i].parent) this.dropMeshes[i].parent.remove(this.dropMeshes[i]);
-          this.dropMeshes.splice(i, 1);
-          SND.play('squeak');
-          FX.burst('sparkle', hit.point, 2);
-          this.sneezeTimer = 6; // ふいてあげたのでリセット
-          if (this.dropMeshes.length === 0) {
-            // ぜんぶふけた → ドライヤーの出番
-            this.towel.visible = false;
-            this.dryer.visible = true;
-            UI.bigFeedback('💨');
-            UI.celebrate('ドライヤーで かわかそう！');
-            SND.play('chime');
-          }
-          return;
-        }
-      }
-    },
-
-    _useDryer: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      SND.play('dryer');
-      SND.play('hairFlutter');
-      baby.curlFlutter = 1.3;
-      this.dryer.position.set(-0.5, 1.5, 0.8);
-      this.dryerBlast = 1.3;
-      var self = this;
-      setTimeout(function () {
-        if (AX.G.currentName !== 'bath') return;
-        self._finishBathAll();
-      }, 1400);
-    },
-
-    _finishBathAll: function () {
-      var G = AX.G;
-      var baby = G.baby;
-      this.dryer.visible = false;
-      CARE.state.wet = false;
-      CARE.save();
-      G.bumpMeter('clean', 1);
-      baby.setMood('happy');
-      baby.clap();
-      SND.play('tada');
-      UI.bigFeedback('✨');
-      UI.celebrate('ぴかぴか！ つぎは おきがえ！');
-      FX.burst('sparkle', AX.headWorld(), 14);
-      FX.burst('stars', AX.headWorld(), 8);
-      UI.addStars(3, G.onSticker);
-      this._toPhase('done');
       this._moodResetSoon();
-    },
+    }
+  }
 
-    _moodResetSoon: function () {
-      setTimeout(function () {
-        if (AX.G.currentName === 'bath' && AX.G.baby.mood !== 'idle') AX.G.baby.setMood('idle');
-      }, 1500);
-    },
+  _enterTub() {
+    const b = this.ctx.baby;
+    if (!b?.group) return;
+    this.filling = false;
+    this._cueHide();
+    b.setMood?.('excited');
+    this._hopFrom = b.group.position.clone();
+    this._hopTo = this._world(this.bowl, 0.015, PROFILE[0][1] - 0.004, 0.0);
+    this._hopT = 0;
+  }
 
-    /* ---------- 毎フレーム ---------- */
+  _finishHop() {
+    const b = this.ctx.baby;
+    this._hopT = -1;
+    this._placeBabyInTub();
+    this.water.disturb(0, 0, 0.20, 0.020);
+    this.water.stir(0, 0, 0.16, 0.010);
+    this.ctx.fx?.burst?.('splash', this._world(this.bowl, 0, this.water.surfaceY, 0.04), 18);
+    this.foam.spawnBubbles(this._world(this.bowl, 0, this.water.surfaceY, 0.04), 5, 0.09);
+    this._sfx('splash');
+    this._sfx('giggle');
+    b?.setMood?.('giggle');
+    for (const f of this.floaters) f.obj.visible = true;
+    this._setPhase('wash');
+    this._moodResetSoon();
+  }
 
-    update: function (dt, t) {
-      var G = AX.G;
-      var baby = G.baby;
+  /* ---------------------------------------------------------- 3. wash --- */
 
-      // ノブのもどり
-      this.knobHot.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 6);
-      this.knobCold.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 6);
-      this.shampoo.scale.y += (1 - this.shampoo.scale.y) * dt * 8;
+  _pumpShampoo() {
+    this.shampooUsed = true;
+    this._pumpPress = 1;
+    this._sfx('bubble');
+    this._sfx('pop');
+    const head = this._babyPoint('head');
+    this.foam.seed('head', 5, this.foam.headRadius * 0.6, this.foam.headRadius * 0.55, 0.014);
+    this.ctx.fx?.burst?.('bubble', this._world(this.shampoo, 0.045, 0.222, 0), 5);
+    this.ctx.baby?.setFoam?.('hair', 0.25);
+    this.ctx.baby?.lookAt?.(this._world(this.shampoo, 0, 0.22, 0));
+    this._prompt('あたまを ごしごし！ うえに なでると ツノさん', 'sponge');
+    this._cueAt(head, 0.10);
+    this._setPhase('wash');
+  }
 
-      // おんどけいのかお
-      var face = this.temp > GOOD_TEMP_MAX ? '🥵' : this.temp < GOOD_TEMP_MIN ? '🥶' : '😊';
-      if (this._gaugeFace !== face) {
-        this._gaugeFace = face;
-        this.gauge.material.map = FX.emojiTexture(face, 64);
-        this.gauge.material.needsUpdate = true;
-      }
+  _pokeDuck() {
+    this._sfx('quack');
+    const f = this.floaters[0];
+    f.vy = 0.55;
+    f.spinKick = 4.0;
+    const p = this.duck.getWorldPosition(new THREE.Vector3());
+    const local = this.bowl.worldToLocal(p.clone());
+    this.water.disturb(local.x, local.z, 0.07, 0.010);
+    this.ctx.fx?.burst?.('splash', p, 5);
+    this.ctx.baby?.setMood?.('giggle');
+    this.ctx.state?.patch?.({});
+    this._moodResetSoon();
+  }
 
-      // おゆはり
-      if (this.filling && this.waterLevel < 1) {
-        this.waterLevel = Math.min(1, this.waterLevel + dt * 0.22);
-        this.water.visible = true;
-        this.stream.visible = true;
-        this.stream.position.y = 0.55;
-        this.stream.scale.y = 1;
-        if (Math.random() < dt * 4) SND.play('pour');
-        FX.burst('drops', new THREE.Vector3(0.35, this._waterTopY() + 0.1, 0.15), 1);
-        if (this.waterLevel >= 1) {
-          this.filling = false;
-          this.stream.visible = false;
-          SND.play('chime');
-          UI.bigFeedback('✋');
-          UI.celebrate('てで おんどを たしかめてみよう');
-        }
-      } else {
-        this.stream.visible = false;
-      }
-      this.water.position.y = this._waterTopY() + Math.sin(t * 2.5) * 0.012;
+  _splashPlay(worldPoint) {
+    const now = this.time;
+    if (now - this._lastScrub < 0.14) return;
+    this._lastScrub = now;
+    const local = this.bowl.worldToLocal(worldPoint.clone());
+    this.water.disturb(local.x, local.z, 0.055, 0.008);
+    this.water.stir(local.x, local.z, 0.05, 0.004);
+    this.ctx.fx?.burst?.('splash', worldPoint, 3);
+    this.foam.spawnBubbles(worldPoint, 1, 0.04);
+    if (this.rand() < 0.25) this._sfx('bubble');
+  }
 
-      // おゆのいろ（あついと赤っぽく・つめたいと青く）
-      if (this.water.visible) {
-        var wr = 0.44 + this.temp * 0.45;
-        var wg = 0.75 - Math.abs(this.temp - 0.5) * 0.3;
-        var wb = 1.0 - this.temp * 0.35;
-        this.water.material.color.setRGB(wr, wg, wb);
-        // あついと湯気
-        if (this.temp > GOOD_TEMP_MAX && Math.random() < dt * 3) {
-          FX.burst('smoke', new THREE.Vector3(0.35 + (Math.random() - 0.5), this._waterTopY() + 0.2, 0.4), 1);
-        }
-      }
+  _scrub(worldPoint, p) {
+    const ctx = this.ctx;
+    const now = this.time;
+    const head = this._babyPoint('head');
+    const dHead = worldPoint.distanceTo(head);
+    const headR = this.foam.headRadius;
 
-      // ざぶーんジャンプ
-      if (this.hopping) {
-        this.hopT = Math.min(1, this.hopT + dt * 1.6);
-        var k = this.hopT;
-        var pos = this.hopFrom.clone().lerp(this.hopTo, k);
-        pos.y += Math.sin(k * Math.PI) * 0.8;
-        baby.group.position.copy(pos);
-        if (this.hopT >= 1) this._finishHop();
-      }
+    // the sponge rides the pointer
+    this.sponge.parent === this.caddy && this.tub.attach(this.sponge);
+    this.sponge.position.copy(this.tub.worldToLocal(worldPoint.clone()));
+    this.sponge.position.y += 0.03;
 
-      // ふくがかごへとんでいく
-      if (this.flyingCloth) {
-        var fc = this.flyingCloth;
-        fc.t = Math.min(1, fc.t + dt * 1.4);
-        var target = this.basket.position.clone().setY(0.35);
-        fc.obj.position.lerp(target, fc.t * fc.t);
-        fc.obj.position.y += Math.sin(fc.t * Math.PI) * 0.5 * (1 - fc.t);
-        fc.obj.material.rotation += dt * 5;
-        if (fc.t >= 1) {
-          FX.burst('sparkle', target, 3);
-          SND.play('pofu');
-          if (fc.obj.parent) fc.obj.parent.remove(fc.obj);
-          this.flyingCloth = null;
-        }
-      }
+    // --- upward stroke on a lathered head sculpts the horn --------------
+    if (this._lastPointerY != null && p) {
+      const dy = this._lastPointerY - p.y;
+      if (dy > 3) this._scrubStrokeUp = Math.min(1, this._scrubStrokeUp + dy * 0.004);
+      else if (dy < -3) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp - 0.02);
+    }
 
-      // あひるのぷかぷか
-      if (this.duck) {
-        this.duckVy -= 4.5 * dt;
-        this.duck.position.y += this.duckVy * dt;
-        var floatY = this._waterTopY() + 0.06 + Math.sin(t * 2.2) * 0.03;
-        if (this.duck.position.y < floatY) {
-          this.duck.position.y = floatY;
-          this.duckVy = 0;
-        }
-        this.duck.rotation.z = Math.sin(t * 2.0) * 0.12;
-        this.duck.rotation.y = Math.sin(t * 0.7) * 0.5;
-      }
+    if (now - this._lastScrub < 0.07) return;
+    this._lastScrub = now;
 
-      // スポンジがおうちへ
-      if (!this.scrubbing && this.sponge) {
-        this.sponge.position.lerp(this.spongeHome, dt * 3);
-      }
-
-      // すすぎ
-      if (this.phase === 'rinse') this._rinseUpdate(dt, t);
-
-      // ふきのこし → くしゃみ＆ぶるぶる
-      if (this.phase === 'dry' && this.dropMeshes.length > 0) {
-        this.sneezeTimer -= dt;
-        if (this.sneezeTimer <= 0) {
-          this.sneezeTimer = 6;
-          SND.play('sneeze');
-          baby.setMood('surprised');
-          baby.giggle(); // ぶるっ
-          UI.bigFeedback('🤧');
-          FX.burst('drops', AX.headWorld(), 4);
+    if (this.shampooUsed && dHead < headR * 2.6) {
+      this.foam.add('head', worldPoint, 0.020, 0.032);
+      ctx.fx?.burst?.('bubble', worldPoint, 2);
+      this.dirt.hair = Math.max(0, this.dirt.hair - 0.14);
+      ctx.baby?.setDirt?.('hair', this.dirt.hair);
+      ctx.baby?.setFoam?.('hair', Math.min(1, this.foam.density('head') * 3));
+      if (this._scrubStrokeUp > 0.25) {
+        this.foam.setHorn(Math.min(1, this.foam.hornTarget + 0.09));
+        ctx.fx?.burst?.('sparkle', head.clone().setY(head.y + headR * 1.6), 2);
+        if (this.foam.hornAmount > 0.5 && !this._hornCheered) {
+          this._hornCheered = true;
+          this._toast('ツノつの あわヘア！');
+          this._sfx('chime');
+          ctx.baby?.setMood?.('giggle');
+          ctx.ui?.star?.(1);
           this._moodResetSoon();
         }
       }
+      this._sfx('squeak');
+      return;
+    }
 
-      // ドライヤーのかぜ
-      if (this.dryerBlast > 0) {
-        this.dryerBlast -= dt;
-        if (Math.random() < dt * 10) {
-          FX.burst('sparkle', AX.headWorld(), 1);
-          FX.burst('smoke', AX.headWorld(), 1);
+    // --- body: dirt comes off where the cause put it --------------------
+    const zone = this._zoneFor(worldPoint);
+    if (zone && this.dirt[zone] > 0) {
+      this.dirt[zone] = Math.max(0, this.dirt[zone] - 0.13);
+      ctx.baby?.setDirt?.(zone, this.dirt[zone]);
+      ctx.fx?.burst?.('bubble', worldPoint, 2);
+      this._sfx('squeak');
+      if (this.dirt[zone] === 0) {
+        ctx.fx?.burst?.('sparkle', worldPoint, 5);
+        this._sfx('chime');
+      }
+    }
+    const region = zone === 'hands'
+      ? (worldPoint.distanceTo(this._babyPoint('handL')) < worldPoint.distanceTo(this._babyPoint('handR')) ? 'handL' : 'handR')
+      : 'body';
+    this.foam.add(region, worldPoint, 0.014, 0.026);
+    ctx.baby?.setFoam?.('body', Math.min(1, this.foam.density('body') * 3));
+
+    this._checkWashDone();
+  }
+
+  _zoneFor(worldPoint) {
+    const cands = [
+      ['face', this._babyPoint('mouth'), 0.075],
+      ['hair', this._babyPoint('head'), 0.085],
+      ['hands', this._babyPoint('handL'), 0.060],
+      ['hands', this._babyPoint('handR'), 0.060],
+      ['body', this._babyPoint('body'), 0.13]
+    ];
+    let best = null, bestD = 1e9;
+    for (const [zone, p, r] of cands) {
+      const d = worldPoint.distanceTo(p);
+      if (d < r && d < bestD) { bestD = d; best = zone; }
+    }
+    if (!best) {
+      // below the body centre is the legs and feet
+      const body = this._babyPoint('body');
+      if (worldPoint.y < body.y - 0.05) return 'feet';
+    }
+    return best;
+  }
+
+  _checkWashDone() {
+    if (this.phase !== 'wash') return;
+    const dirty = Object.values(this.dirt).reduce((a, b) => a + b, 0);
+    if (dirty > 0.05) return;
+    if (!this.shampooUsed) {
+      if (!this._shampooHinted) {
+        this._shampooHinted = true;
+        this._setPhase('shampoo');
+        this._sfx('chime');
+      }
+      return;
+    }
+    if (this.foam.density('head') > 0.10) {
+      this._sfx('chime');
+      this._setPhase('rinse');
+      this.showerHead.position.copy(this.showerHome);
+    }
+  }
+
+  /* --------------------------------------------------------- 4. rinse --- */
+
+  _moveShower(p) {
+    const babyP = this._babyPoint('body');
+    const plane = this._planePoint(babyP.z + 0.16);
+    if (!plane) return;
+    const local = this.tub.worldToLocal(plane.clone());
+    local.y = THREE.MathUtils.clamp(local.y, STAND_H + 0.24, STAND_H + 0.72);
+    local.x = THREE.MathUtils.clamp(local.x, -0.44, 0.44);
+    this.showerHead.position.lerp(local, 0.5);
+    this.showerHead.rotation.z = THREE.MathUtils.clamp(-local.x * 0.6, -0.5, 0.5);
+    this.spray.visible = true;
+    this.sprayUniforms.uOn.value = 1;
+  }
+
+  _rinseStep(dt) {
+    if (this._drag !== 'shower') {
+      this.sprayUniforms.uOn.value *= Math.max(0, 1 - dt * 6);
+      this.spray.visible = this.sprayUniforms.uOn.value > 0.02;
+      return;
+    }
+    const headW = this.showerHead.getWorldPosition(_v);
+    // the spray lands a little below the head — that is where foam clears
+    const target = _v2.copy(headW).setY(headW.y - 0.24);
+    const removed = this.foam.rinse(target, 0.135, dt, 0.30);
+    this.droplets.wipe(target, 0.05);
+
+    if (this.time - (this._lastRinseFx || 0) > 0.09) {
+      this._lastRinseFx = this.time;
+      this.ctx.fx?.burst?.('splash', target, 3);
+      if (removed > 0) this.ctx.fx?.burst?.('bubble', target, 2);
+      if (this.rand() < 0.22) this._sfx('bubble');
+    }
+
+    // the jet hits the water and rings it
+    const localHead = this.bowl.worldToLocal(headW.clone());
+    if (Math.abs(localHead.x) < HALF_X && Math.abs(localHead.z) < HALF_Z) {
+      this.water.stir(localHead.x, localHead.z, 0.06, 0.0035);
+    }
+
+    if (this.phase === 'rinse' && this.foam.total() < 0.02 && this.foam.blobs.length === 0) {
+      this._sfx('chime');
+      this.ctx.baby?.setMood?.('happy');
+      this._leaveTub();
+    }
+  }
+
+  _leaveTub() {
+    const ctx = this.ctx;
+    this.sprayUniforms.uOn.value = 0;
+    this.spray.visible = false;
+    this.showerHead.position.copy(this.showerHome);
+    this._placeBabyOnMat();
+    ctx.baby?.setMood?.('happy');
+    ctx.baby?.gesture?.('shiver');
+    this.wet = 1;
+    ctx.baby?.setWet?.(1);
+    this._applyWetSkin(1);
+    this.droplets.fill(this.anchors, 1);
+    this.wetStrands.visible = true;
+    this.sneezeTimer = 7;
+    this._sfx('splash');
+    ctx.state?.patch?.({ wet: true });
+    // the tub empties behind them
+    this.water.setLevel(0.18);
+    this.foam.setBubbleRate(0);
+    for (const f of this.floaters) f.obj.visible = true;
+    this._setPhase('dry');
+    try { ctx.cameraRig?.goTo?.('bath-dry', 1.0); } catch (e) { /**/ }
+  }
+
+  /* ----------------------------------------------------------- 5. dry --- */
+
+  _moveTowel(p) {
+    const babyP = this._babyPoint('body');
+    const plane = this._planePoint(babyP.z + 0.20);
+    if (!plane) return;
+    if (this.towel.parent !== this.root) this.root.attach(this.towel);
+    this.towel.position.lerp(plane, 0.55);
+    this.towel.rotation.set(0.15, Math.sin(this.time * 3) * 0.12, Math.sin(this.time * 5) * 0.10);
+
+    const wiped = this.droplets.wipe(plane, 0.085);
+    if (wiped > 0) {
+      this._sfx('squeak');
+      this.ctx.fx?.burst?.('sparkle', plane, wiped * 2);
+      this.sneezeTimer = 7;
+      this.wet = Math.max(0, this.droplets.count / 26);
+      this.ctx.baby?.setWet?.(Math.max(0.25, this.wet));
+      this._applyWetSkin(Math.max(0.25, this.wet));
+      if (this.droplets.count === 0) {
+        this._sfx('chime');
+        this.ctx.baby?.setMood?.('happy');
+        this._setPhase('dryer');
+      }
+    }
+  }
+
+  _useDryer() {
+    const ctx = this.ctx;
+    this.dryerBlast = 1.6;
+    this._sfx('dryer');
+    this._sfx('hairFlutter');
+    const head = this._babyPoint('head');
+    this.dryer.visible = true;
+    this.root.attach(this.dryer);
+    this.dryer.position.copy(head).add(new THREE.Vector3(-0.26, 0.10, 0.16));
+    this.dryer.lookAt(head);
+    this.dryer.rotateX(Math.PI / 2);
+    ctx.baby?.setMood?.('happy');
+    this._cueHide();
+    setTimeout(() => {
+      if (!this.root || this.phase !== 'dryer') return;
+      this._finish();
+    }, 1500);
+  }
+
+  _finish() {
+    const ctx = this.ctx;
+    this.wet = 0;
+    ctx.baby?.setWet?.(0);
+    this._applyWetSkin(0);
+    this.wetStrands.visible = false;
+    this.dryer.visible = false;
+    this.droplets.clear();
+    ctx.state?.patch?.({ wet: false, naked: true });
+    try { ctx.state?.patch?.({ meters: { clean: 1 } }); } catch (e) { /**/ }
+    ctx.ui?.meter?.('clean', 1);
+    ctx.ui?.star?.(3);
+    ctx.baby?.setMood?.('happy');
+    ctx.baby?.gesture?.('clap');
+    this._sfx('tada');
+    const head = this._babyPoint('head');
+    ctx.fx?.burst?.('sparkle', head, 18);
+    ctx.fx?.burst?.('star', head, 8);
+    ctx.fx?.burst?.('confetti', head, 14);
+    this._setPhase('done');
+  }
+
+  _moodResetSoon(ms = 1600) {
+    clearTimeout(this._moodT);
+    this._moodT = setTimeout(() => {
+      if (this.root && this.phase !== 'done') this.ctx.baby?.setMood?.('neutral');
+    }, ms);
+  }
+
+  /* -------------------------------------------------------- wet skin ---- */
+
+  _applyWetSkin(amount) {
+    const g = this.ctx.baby?.group;
+    if (!g) return;
+    g.traverse(o => {
+      const m = o.material;
+      if (!m) return;
+      const list = Array.isArray(m) ? m : [m];
+      for (const mm of list) {
+        // already-wet surfaces (cornea, eyes, vinyl) must not be "wetted"
+        if (!mm || mm.userData?.noWetness) continue;
+        if (mm.transmission > 0.3) continue;
+        if ((mm.userData?._dryRoughness ?? mm.roughness ?? 1) < 0.18) continue;
+        this._touchedMaterials.add(mm);
+        MAT.applyWetness(mm, amount);
+      }
+    });
+  }
+
+  /* ============================================================ update == */
+
+  update(dt) {
+    if (!this.root) return;
+    const ctx = this.ctx;
+    this.time += dt;
+    ctx.baby?.group?.updateMatrixWorld?.();
+
+    this._syncAnchors();
+
+    /* --- filling ------------------------------------------------------- */
+    if (this.filling && this.water.level < 0.999) {
+      this.stream.setFlow(1);
+      const impactY = this.water.surfaceY;
+      this.stream.setPath(this.spoutTip, _v.set(this.spoutTip.x, impactY, this.spoutTip.z));
+      this.water.stir(this.spoutTip.x, this.spoutTip.z, 0.05, 0.0075 * dt * 60);
+      if (this.rand() < dt * 3) {
+        ctx.fx?.burst?.('splash', this._world(this.bowl, this.spoutTip.x, impactY, this.spoutTip.z), 2);
+      }
+      if (this.time - (this._lastPour || 0) > 0.9) { this._lastPour = this.time; this._sfx('pour'); }
+      if (this.water.level >= 0.985) {
+        this.filling = false;
+        this._sfx('chime');
+        this._setPhase('test');
+      }
+    } else {
+      this.stream.setFlow(Math.max(0, this.stream.flow - dt * 4));
+    }
+    this.stream.update(dt);
+
+    /* --- water --------------------------------------------------------- */
+    this.water.update(dt, ctx);
+    this.water.setFoamRim(Math.min(1, this.foam.total() * 1.4));
+
+    /* --- steam --------------------------------------------------------- */
+    const heat = THREE.MathUtils.clamp((this.temp - 0.45) / 0.5, 0, 1);
+    const steamAmt = this.water.level > 0.05
+      ? THREE.MathUtils.clamp(0.16 + heat * 0.95, 0, 1) * Math.min(1, this.water.level * 2)
+      : 0;
+    this.steam.setBase(this.water.surfaceY);
+    this.steam.setAmount(this._steamOverride ?? steamAmt);
+    this.steam.update(dt);
+    if ((this._steamOverride ?? steamAmt) > 0.55 && this.rand() < dt * 2.2) {
+      ctx.fx?.burst?.('steam', this._world(
+        this.bowl, (this.rand() - 0.5) * HALF_X, this.water.surfaceY + 0.03, (this.rand() - 0.5) * HALF_Z), 2);
+    }
+
+    /* --- gauge --------------------------------------------------------- */
+    this.knobHot.scale.lerp(_v.set(1, 1, 1), Math.min(1, dt * 7));
+    this.knobCold.scale.lerp(_v.set(1, 1, 1), Math.min(1, dt * 7));
+    if (this.gaugeBead) {
+      const gx = 0.09 + (this.temp - 0.5) * 0.104;
+      this.gaugeBead.position.set(gx, 0.1605, 0.2985);
+      const good = this.temp >= TEMP_OK_MIN && this.temp <= TEMP_OK_MAX;
+      this.gaugeBead.scale.setScalar(good ? 1.0 + Math.sin(this.time * 6) * 0.08 : 1.0);
+    }
+    if (this._pumpPress > 0) {
+      this._pumpPress = Math.max(0, this._pumpPress - dt * 5);
+      this.pump.position.y = 0.186 - this._pumpPress * 0.014;
+    }
+
+    /* --- hop into the tub ---------------------------------------------- */
+    if (this._hopT >= 0) {
+      this._hopT = Math.min(1, this._hopT + dt * 1.5);
+      const k = this._hopT;
+      const b = ctx.baby;
+      if (b?.group) {
+        b.group.position.lerpVectors(this._hopFrom, this._hopTo, k * k * (3 - 2 * k));
+        b.group.position.y += Math.sin(k * Math.PI) * 0.22;
+        b.group.rotation.y = THREE.MathUtils.lerp(
+          this.tub.rotation.y + 0.30, this.tub.rotation.y + 0.16, k);
+      }
+      if (k >= 1) this._finishHop();
+    }
+
+    /* --- clothes flying to the basket ---------------------------------- */
+    for (let i = this._flying.length - 1; i >= 0; i--) {
+      const f = this._flying[i];
+      f.t = Math.min(1, f.t + dt * 1.3);
+      const k = f.t;
+      f.obj.position.lerpVectors(f.from, f.to, k * k);
+      f.obj.position.y += Math.sin(k * Math.PI) * 0.34 * (1 - k * 0.4);
+      f.obj.rotation.x += f.spin.x * dt;
+      f.obj.rotation.y += f.spin.y * dt;
+      f.obj.rotation.z += f.spin.z * dt;
+      if (k >= 1) {
+        ctx.fx?.burst?.('dust', f.to, 4);
+        this._sfx('pofu');
+        f.obj.visible = false;
+        this._flying.splice(i, 1);
+      }
+    }
+
+    /* --- floating toys ride the real heightfield ----------------------- */
+    const submerged = this.water.level > 0.06;
+    for (const f of this.floaters) {
+      if (!f.obj.visible) continue;
+      const surf = this.water.heightAt(f.x, f.z);
+      const rest = surf - f.buoy;
+      if (f.vy !== 0 || Math.abs(f.obj.position.y - rest) > 0.0005) {
+        f.vy -= 5.6 * dt;
+        f.obj.position.y += f.vy * dt;
+        if (f.obj.position.y <= rest) {
+          f.obj.position.y = rest;
+          f.vy = Math.abs(f.vy) > 0.12 ? -f.vy * 0.32 : 0;
+          if (Math.abs(f.vy) > 0.15) {
+            this.water.disturb(f.x, f.z, 0.05, 0.006);
+            this.ctx.fx?.burst?.('splash', f.obj.getWorldPosition(_v3), 3);
+          }
+        }
+      } else {
+        f.obj.position.y = rest;
+      }
+      // slow drift + tilt with the slope of the water
+      f.x += Math.sin(this.time * 0.23 + f.driftPhase) * dt * 0.012;
+      f.z += Math.cos(this.time * 0.19 + f.driftPhase) * dt * 0.009;
+      f.x = THREE.MathUtils.clamp(f.x, -HALF_X * 0.72, HALF_X * 0.72);
+      f.z = THREE.MathUtils.clamp(f.z, -HALF_Z * 0.66, HALF_Z * 0.66);
+      f.obj.position.x = f.x;
+      f.obj.position.z = f.z;
+      const s = this.water.slopeAt(f.x, f.z);
+      f.obj.rotation.x = THREE.MathUtils.lerp(f.obj.rotation.x, -s.y * 2.6, 0.2);
+      f.obj.rotation.z = THREE.MathUtils.lerp(f.obj.rotation.z, s.x * 2.6, 0.2);
+      f.ry += (f.spin + (f.spinKick || 0)) * dt * 0.25;
+      f.spinKick = (f.spinKick || 0) * Math.max(0, 1 - dt * 3);
+      f.obj.rotation.y = f.ry;
+      f.obj.visible = submerged || this.phase === 'wash';
+    }
+
+    /* --- sustained splash (harness + big entries) ----------------------- */
+    if (this._splashPulse > 0) {
+      this._splashPulse -= dt;
+      if (this.rand() < dt * 26) {
+        const c = this._world(this.bowl,
+          (this.rand() - 0.5) * HALF_X * 1.2, this.water.surfaceY + 0.02,
+          (this.rand() - 0.5) * HALF_Z * 1.2);
+        ctx.fx?.burst?.('splash', c, 4);
+        const l = this.bowl.worldToLocal(c.clone());
+        this.water.disturb(l.x, l.z, 0.05, 0.009);
+      }
+    }
+
+    /* --- foam ---------------------------------------------------------- */
+    this.foam.update(dt, ctx);
+    if (this._scrubStrokeUp > 0) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp - dt * 0.7);
+
+    /* --- waterlines ---------------------------------------------------- */
+    this._updateWaterlines(dt);
+
+    /* --- shower / hose ------------------------------------------------- */
+    this._updateHose();
+    this.sprayUniforms.uTime.value = this.time;
+    if (this.phase === 'rinse') this._rinseStep(dt);
+
+    /* --- droplets & the sneeze ----------------------------------------- */
+    this.droplets.update(dt, this.time);
+    if (this.phase === 'dry' && this.droplets.count > 0) {
+      this.sneezeTimer -= dt;
+      if (this.sneezeTimer <= 0) {
+        this.sneezeTimer = 7;
+        this._sfx('sneeze');
+        ctx.baby?.setMood?.('surprised');
+        ctx.baby?.gesture?.('shiver');
+        ctx.fx?.burst?.('splash', this._babyPoint('mouth'), 6);
+        this._toast('ハックション！ ふきのこしが あるよ');
+        this._moodResetSoon();
+      }
+    }
+
+    /* --- hairdryer blast ----------------------------------------------- */
+    if (this.dryerBlast > 0) {
+      this.dryerBlast -= dt;
+      const head = this._babyPoint('head');
+      if (this.rand() < dt * 14) {
+        ctx.fx?.burst?.('sparkle', head, 1);
+        ctx.fx?.burst?.('dust', head, 1);
+      }
+      this.wetStrands.rotation.z = Math.sin(this.time * 22) * 0.28;
+      const w = Math.max(0, this.dryerBlast / 1.6);
+      this._applyWetSkin(w * 0.9);
+      ctx.baby?.setWet?.(w * 0.9);
+      if (this.wetStrands.visible && w < 0.25) this.wetStrands.visible = false;
+    }
+
+    /* --- wet strands follow the head ----------------------------------- */
+    if (this.wetStrands.visible) {
+      const a = this.anchors.get('head');
+      this.wetStrands.position.copy(a.position);
+      this.wetStrands.quaternion.copy(a.quaternion);
+      this.wetStrands.scale.setScalar(this.foam.headRadius / 0.068);
+    }
+
+    /* --- sponge returns home ------------------------------------------- */
+    if (this._drag !== 'scrub' && this.sponge.parent === this.tub) {
+      const home = this.tub.worldToLocal(
+        this.caddy.localToWorld(this.spongeHome.clone()));
+      this.sponge.position.lerp(home, Math.min(1, dt * 3));
+      if (this.sponge.position.distanceTo(home) < 0.02) {
+        this.caddy.attach(this.sponge);
+        this.sponge.position.copy(this.spongeHome);
+        this.sponge.rotation.copy(this.spongeRot);
+      }
+    }
+
+    /* --- towel returns to the rail ------------------------------------- */
+    if (this._drag !== 'towel' && this.towel.parent === this.root && this.phase !== 'dry') {
+      this.towelParent.attach(this.towel);
+      this.towel.position.set(-0.02, 0.655, 0);
+      this.towel.rotation.set(0, 0, 0);
+    }
+
+    /* --- attention cue ------------------------------------------------- */
+    if (this.cue.visible) {
+      this._cueT = (this._cueT || 0) + dt;
+      const b = Math.sin(this._cueT * 3.2);
+      this.cue.rotation.y += dt * 0.9;
+      this.cueChevron.position.y = 0.075 + b * 0.016;
+      this.cueMat.opacity = 0.45 + 0.35 * (0.5 + b * 0.5);
+    }
+  }
+
+  _syncAnchors() {
+    const b = this.ctx.baby;
+    const q = b?.group?.quaternion;
+    const set = (id, pos) => {
+      const a = this.anchors.get(id);
+      if (!a || !pos) return;
+      a.position.copy(pos);
+      if (q) a.quaternion.copy(q);
+      a.updateMatrixWorld();
+    };
+    set('head', this._babyPoint('head'));
+    set('body', this._babyPoint('body'));
+    set('handL', this._babyPoint('handL'));
+    set('handR', this._babyPoint('handR'));
+    const w = this.anchors.get('water');
+    if (w) {
+      this.bowl.updateMatrixWorld();
+      w.position.copy(this._world(this.bowl, 0, this.water.surfaceY, 0));
+      w.quaternion.copy(this.tub.quaternion);
+      w.updateMatrixWorld();
+    }
+  }
+
+  _updateWaterlines(dt) {
+    const wet = this.inTub && this.water.level > 0.08;
+    const foam = Math.min(1, this.foam.total() * 1.6 + 0.2);
+    const pts = [
+      this._babyPoint('body'),
+      this._babyPoint('handL'),
+      this._babyPoint('handR')
+    ];
+    const radii = [0.115, 0.048, 0.048];
+    for (let i = 0; i < this.rings.length; i++) {
+      const r = this.rings[i];
+      if (!wet) { r.set(_v.set(0, -10, 0), 0.1, 0, 0, this.time); continue; }
+      const p = pts[i];
+      const local = this.bowl.worldToLocal(p.clone());
+      const h = this.water.heightAt(local.x, local.z);
+      const surf = this._world(this.bowl, local.x, h, local.z);
+      // only ring a limb that actually breaks the surface
+      const depth = surf.y - (p.y - radii[i] * 1.4);
+      const vis = THREE.MathUtils.clamp(depth / 0.05, 0, 1)
+                * THREE.MathUtils.clamp((p.y + radii[i] * 1.4 - surf.y) / 0.05, 0, 1);
+      r.set(_v3.set(p.x, surf.y + 0.0015, p.z), radii[i], vis * 0.95, foam, this.time);
+    }
+  }
+
+  _updateHose() {
+    const head = this.showerHead;
+    head.updateMatrixWorld();
+    const a = _v.set(-0.47, 0.055, -0.43);                    // wall inlet, tub space
+    const d = _v2.set(head.position.x, head.position.y + 0.11, head.position.z);
+    const slack = 0.18 + d.distanceTo(a) * 0.12;
+    this.hose.update((t, out) => {
+      // a hanging hose: catenary-ish sag plus a lazy sideways bow
+      out.lerpVectors(a, d, t);
+      const bow = Math.sin(t * Math.PI);
+      out.y -= bow * slack;
+      out.z -= bow * 0.06;
+      out.x -= bow * 0.05;
+    });
+  }
+
+  /* =========================================================== harness == */
+
+  /**
+   * Screenshot / critic control surface.
+   * Keys: water 0..1, foam 0..1, bubbles bool, steam bool, splash bool,
+   *       wet 0..1, temp 0..1, phase string.
+   */
+  onState(patch) {
+    if (!patch || !this.root) return;
+    const ctx = this.ctx;
+
+    if (patch.temp !== undefined) {
+      this.temp = THREE.MathUtils.clamp(patch.temp, 0, 1);
+      this.water.setTemperature(this.temp);
+    }
+
+    if (patch.water !== undefined) {
+      const v = THREE.MathUtils.clamp(patch.water, 0, 1);
+      this.water.setLevel(v, true);
+      this.filling = v > 0.04 && v < 0.96;
+      this.stream.setFlow(this.filling ? 1 : 0);
+      if (v >= 0.5) {
+        this._placeBabyInTub();
+        for (const f of this.floaters) { f.obj.visible = true; f.obj.position.y = this.water.heightAt(f.x, f.z) - f.buoy; }
+        if (this.phase === 'undress' || this.phase === 'fill' || this.phase === 'temper' || this.phase === 'test') {
+          this.phase = 'wash';
+          this._cueHide();
+        }
+      } else {
+        for (const f of this.floaters) f.obj.visible = v > 0.06;
+        if (v < 0.05 && this.inTub) this._placeBabyOnMat();
+      }
+      if (this.temp < 0.3 && patch.steam) { this.temp = 0.82; this.water.setTemperature(this.temp); }
+    }
+
+    if (patch.foam !== undefined) {
+      const v = THREE.MathUtils.clamp(patch.foam, 0, 1);
+      this.shampooUsed = v > 0;
+      this.foam.setHeadRadius(this._estimateHeadRadius());
+      this._syncAnchors();
+      this.foam.setAmount(v);
+      this.foam.update(0.016, ctx);
+      ctx.baby?.setFoam?.('hair', Math.min(1, v));
+      ctx.baby?.setFoam?.('body', Math.min(1, v * 0.6));
+      if (v > 0.05) this.phase = 'wash';
+    }
+
+    if (patch.bubbles !== undefined) {
+      this.foam.setBubbleRate(patch.bubbles ? (this.tier >= 1 ? 7 : 3) : 0);
+      if (patch.bubbles) {
+        const c = this._world(this.bowl, 0, this.water.surfaceY + 0.02, 0);
+        for (let i = 0; i < (this.tier >= 1 ? 20 : 8); i++) {
+          this.foam.spawnBubbles(c, 1, 0.16);
+          const b = this.foam.bubbles[this.foam.bubbles.length - 1];
+          if (b) { b.life = this.rand() * b.maxLife * 0.7; b.p.y += this.rand() * 0.22; }
         }
       }
-    },
-
-    exit: function () {
-      var G = AX.G;
-      AX.removeAll(this.objects);
-      G.baby.clearDirt();
-      // のこった泡・しずくはかたづける（データ上はwetのまま＝ふきのこし痕跡）
-      var i;
-      for (i = 0; i < this.foamMeshes.length; i++) {
-        if (this.foamMeshes[i].parent) this.foamMeshes[i].parent.remove(this.foamMeshes[i]);
-      }
-      for (i = 0; i < this.sudsMeshes.length; i++) {
-        if (this.sudsMeshes[i].parent) this.sudsMeshes[i].parent.remove(this.sudsMeshes[i]);
-      }
-      // しずくはのこす（ふきのこしはへやでもポタポタ）→ ただし多すぎないよう2つまで
-      for (i = this.dropMeshes.length - 1; i >= 2; i--) {
-        if (this.dropMeshes[i].parent) this.dropMeshes[i].parent.remove(this.dropMeshes[i]);
-        this.dropMeshes.splice(i, 1);
-      }
-      this.foamMeshes = [];
-      this.sudsMeshes = [];
-      this.duck = null;
-      this.water = null;
-      G.baby.shadow.visible = true;
-      if (G.baby.pose !== 'stand') G.baby.setPose('stand');
     }
-  };
 
-  window.ACTIVITIES.bath = bath;
-})();
+    if (patch.steam !== undefined) {
+      this._steamOverride = patch.steam ? 0.9 : null;
+      if (patch.steam) {
+        this.temp = Math.max(this.temp, 0.86);
+        this.water.setTemperature(this.temp);
+        this.steam.setAmount(0.9);
+        for (let i = 0; i < 6; i++) this.steam.update(0.25);
+        ctx.fx?.burst?.('steam', this._world(this.bowl, 0, this.water.surfaceY + 0.05, 0), 12);
+      } else {
+        this.steam.setAmount(0);
+      }
+    }
+
+    if (patch.splash) {
+      const c = this._world(this.bowl, 0.05, this.water.surfaceY, 0.06);
+      this.water.disturb(0.05, 0.06, 0.14, 0.020);
+      this.water.stir(0.05, 0.06, 0.10, 0.012);
+      ctx.fx?.burst?.('splash', c, 26);
+      this.foam.spawnBubbles(c, 8, 0.12);
+      this.droplets.fill(this.anchors, 0.55);
+      this.wet = Math.max(this.wet, 0.7);
+      ctx.baby?.setWet?.(0.85);
+      this._applyWetSkin(0.85);
+      this._splashPulse = 1.2;
+      this._sfx('splash');
+    }
+
+    if (patch.wet !== undefined) {
+      const v = THREE.MathUtils.clamp(patch.wet, 0, 1);
+      this.wet = v;
+      ctx.baby?.setWet?.(v);
+      this._applyWetSkin(v);
+      this.wetStrands.visible = v > 0.35;
+      this._syncAnchors();
+      if (v > 0.05) {
+        this.droplets.fill(this.anchors, v);
+        if (this.water.levelTarget < 0.2) {
+          this._placeBabyOnMat();
+          this.phase = 'dry';
+          if (this.towel.parent !== this.root) {
+            this.root.attach(this.towel);
+            const b = this._babyPoint('body');
+            this.towel.position.set(b.x + 0.16, b.y + 0.06, b.z + 0.20);
+            this.towel.rotation.set(0.2, -0.3, 0.15);
+          }
+          this._cueHide();
+        }
+      } else {
+        this.droplets.clear();
+      }
+    }
+
+    if (patch.phase) this._setPhase(patch.phase);
+  }
+}
+
+export default BathActivity;

@@ -207,7 +207,7 @@ export class Synth {
       // Percussive: one long decay that lands exactly at the release point.
       p.exponentialRampToValueAtTime(EPS, when + Math.max(a + d, hold + r));
     }
-    const end = when + hold + r + 0.01;
+    const end = when + Math.max(hold + r, a + d) + 0.01;
     p.linearRampToValueAtTime(0, end);
     g.end = end;
     return g;
@@ -482,12 +482,13 @@ export class Synth {
     }
 
     input.connect(dl); input.connect(dr);
-    // cross-feedback: left tail feeds right delay and vice-versa
+    // shared, filtered feedback path — both taps feed both delays back, which
+    // smears the repeats across the stereo field instead of ping-ponging
     dl.connect(lp); dr.connect(lp);
     lp.connect(hp); hp.connect(fb);
     fb.connect(dr); fb.connect(dl);
-    (pl ? (dl.connect(pl), pl) : dl).connect(output);
-    (pr ? (dr.connect(pr), pr) : dr).connect(output);
+    if (pl) { dl.connect(pl); pl.connect(output); } else { dl.connect(output); }
+    if (pr) { dr.connect(pr); pr.connect(output); } else { dr.connect(output); }
 
     return { input, output, delayL: dl, delayR: dr, feedback: fb, filter: lp };
   }

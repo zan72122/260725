@@ -58,6 +58,10 @@
   --track: #f0e5ee;
   --track-in: rgba(88, 58, 84, .22);
 
+  /* — chunky button faces ——————————————————————————————————— */
+  --face-1: #ffffff;
+  --face-2: var(--brand-soft);
+
   /* — depth ————————————————————————————————————————————————— */
   --sh-1: 0 2px 6px rgba(92, 52, 84, .12);
   --sh-2: 0 8px 20px rgba(92, 52, 84, .16);
@@ -81,6 +85,8 @@
   /* — metrics ——————————————————————————————————————————————— */
   --touch: 50px;
   --u: clamp(9px, 1.85vmin, 15px);
+  --bar-h: clamp(72px, 17.5vmin, 142px);   /* activity bar + labels */
+  --tray-h: 0px;                            /* grows when tools are shown */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -95,12 +101,14 @@ body[data-mood='golden'] {
   --sky-1: #ffe0c2; --sky-2: #fff0dc; --sky-3: #ffe6cf; --sky-4: #ffd0a8;
   --panel: rgba(255, 251, 244, .9);
   --brand: #ff9269; --brand-2: #ffb894; --brand-deep: #d9683c; --brand-soft: #ffe9db;
+  --face-1: #fffdfa; --face-2: #ffe9db;
   --ink: #6a4433;
 }
 body[data-mood='evening'] {
   --sky-1: #d9c2ff; --sky-2: #ecdfff; --sky-3: #ffd9ea; --sky-4: #b8c6ff;
   --panel: rgba(255, 250, 255, .88);
   --brand: #a78bfa; --brand-2: #c4b0ff; --brand-deep: #6d4fd1; --brand-soft: #ede5ff;
+  --face-1: #fffdff; --face-2: #ede5ff;
   --ink: #4b3a70;
 }
 body[data-mood='night'] {
@@ -114,6 +122,8 @@ body[data-mood='night'] {
   --track: rgba(20, 24, 52, .5);
   --track-in: rgba(0, 0, 0, .45);
   --brand: #8fa4ff; --brand-2: #b3c0ff; --brand-deep: #4a5bb5; --brand-soft: #3a4380;
+  --face-1: #f2f4ff; --face-2: #ccd4f7;
+  --rise: rgba(40, 48, 96, .75);
   --sh-1: 0 2px 6px rgba(10, 12, 34, .4);
   --sh-2: 0 8px 20px rgba(10, 12, 34, .45);
   --sh-3: 0 20px 44px rgba(8, 10, 30, .55);
@@ -285,28 +295,30 @@ button {
   from { transform: translateY(-14%) scale(.86); opacity: 0; }
   to   { transform: none; opacity: 1; }
 }
+/* Base layer = chunky stroked outline; ::after paints the gradient fill on
+   top of it (an absolutely positioned pseudo-element always draws above the
+   element's own text, which a negative z-index layer would not). */
 .logo__line {
   position: relative;
   display: block;
   font-weight: 900;
   letter-spacing: .04em;
-  color: #fff;
-  background: linear-gradient(180deg, #fff 6%, var(--brand-soft) 52%, var(--brand-2) 100%);
+  color: var(--brand-deep);
+  -webkit-text-stroke: calc(var(--u) * .5) var(--brand-deep);
+  filter: drop-shadow(0 3px 0 var(--brand-deep)) drop-shadow(0 12px 16px rgba(217, 75, 133, .35));
+}
+.logo__line::after {
+  content: attr(data-t);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  -webkit-text-stroke: 0;
+  background: linear-gradient(180deg, #fff 4%, #ffeef6 40%, var(--brand-2) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 3px 0 var(--brand-deep)) drop-shadow(0 12px 16px rgba(217, 75, 133, .35));
-}
-/* stroked ghost behind the gradient fill = clean chunky outline */
-.logo__line::before {
-  content: attr(data-t);
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  -webkit-text-fill-color: var(--brand-deep);
-  color: var(--brand-deep);
-  -webkit-text-stroke: calc(var(--u) * .55) var(--brand-deep);
-  paint-order: stroke fill;
+  color: transparent;
 }
 .logo__l1 { font-size: clamp(30px, 8.4vmin, 76px); }
 .logo__l2 { font-size: clamp(36px, 10.2vmin, 94px); }
@@ -402,8 +414,26 @@ button {
   transition: opacity var(--t-slow) var(--ease), visibility var(--t-slow);
 }
 #hud.is-on { opacity: 1; visibility: visible; }
+/* Belt and braces: the harness only hides the title screen, so reveal the HUD
+   from the DOM order too (title screen is the previous sibling of #hud). */
+#title-screen.hidden ~ #hud { opacity: 1; visibility: visible; }
 #hud.harness-hidden { display: none !important; }
 #hud > * { pointer-events: none; }
+/* Interactive children still need events (the `#hud >` rule out-specifies
+   plain class selectors, so re-enable them explicitly). */
+#hud .star-box,
+#hud .round-btn,
+#hud .act,
+#hud .ctx-btn,
+#hud .album.is-open { pointer-events: auto; }
+
+/* Full-bleed overlay layers (world labels, flying stars, praise). */
+.fx-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 
 .hud-top {
   position: absolute;
@@ -456,7 +486,9 @@ button {
   height: clamp(20px, 3.6vmin, 34px);
   filter: drop-shadow(0 1px 1px rgba(92, 52, 84, .22));
 }
-.meter__body { min-width: 0; flex: 1 1 auto; }
+/* min-width keeps the capsule readable when the label is hidden — without it
+   the track (which only contains absolutely-positioned children) collapses. */
+.meter__body { flex: 1 1 auto; min-width: clamp(34px, 8vmin, 96px); }
 .meter__label {
   display: block;
   font-size: clamp(8px, 1.5vmin, 12px);
@@ -484,10 +516,9 @@ button {
   width: calc(var(--v) * 100%);
   min-width: 6%;
   border-radius: var(--r-pill);
-  background: linear-gradient(180deg,
-      color-mix(in srgb, var(--fill-a) 88%, #fff) 0%,
-      var(--fill-a) 34%,
-      var(--fill-b) 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .55) 0%, rgba(255, 255, 255, 0) 46%),
+    linear-gradient(180deg, var(--fill-a) 0%, var(--fill-b) 100%);
   box-shadow: inset 0 -.2vmin .3vmin rgba(0, 0, 0, .12);
   transition: width .55s var(--ease);
 }
@@ -513,11 +544,11 @@ button {
   0%, 55% { transform: translateX(-140%); }
   85%, 100% { transform: translateX(340%); }
 }
-/* liquid meniscus that wobbles at the fill edge */
+/* liquid meniscus that wobbles at the fill edge (child of .meter__fill) */
 .meter__wobble {
   position: absolute;
   top: -12%;
-  right: calc(var(--v) * 0px - 0.55vmin);
+  right: -0.55vmin;
   width: 1.5vmin;
   min-width: 7px;
   height: 124%;
@@ -606,7 +637,7 @@ button {
   place-items: center;
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
-.round-btn > .ic, .round-btn > span {
+.round-btn > .ic, .round-btn > [data-icon] {
   width: 56%;
   height: 56%;
   display: block;
@@ -667,8 +698,8 @@ button {
   width: 100%;
   aspect-ratio: 1;
   min-height: var(--touch);
-  border-radius: var(--r-xl);
-  background: linear-gradient(180deg, #fff 0%, #fff 38%, var(--brand-soft) 100%);
+  border-radius: 26%;   /* squircle that keeps its proportion at every size */
+  background: linear-gradient(180deg, var(--face-1) 0%, var(--face-1) 38%, var(--face-2) 100%);
   box-shadow:
     inset 0 .35vmin 0 rgba(255, 255, 255, .9),
     inset 0 -.6vmin 0 rgba(155, 100, 140, .16),
@@ -743,11 +774,13 @@ button {
 
 /* ————————————————————————————————————————————— contextual tool tray —— */
 
+#hud.has-tools { --tray-h: clamp(58px, 11.5vmin, 88px); }
+
 .ctx-tray {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--safe-b) + var(--u) * .8 + clamp(70px, 17.5vmin, 140px));
+  bottom: calc(var(--safe-b) + var(--u) * .8 + var(--bar-h));
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -760,7 +793,7 @@ button {
   width: max(var(--touch), clamp(50px, 10vmin, 76px));
   height: max(var(--touch), clamp(50px, 10vmin, 76px));
   border-radius: 50%;
-  background: linear-gradient(180deg, #fff, var(--brand-soft));
+  background: linear-gradient(180deg, var(--face-1), var(--face-2));
   box-shadow: 0 .6vmin 0 var(--rise), 0 1.2vmin 1.8vmin rgba(92, 52, 84, .22);
   display: grid;
   place-items: center;
@@ -780,7 +813,7 @@ button {
 .prompt {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--safe-b) + var(--u) * .8 + clamp(74px, 18.5vmin, 148px));
+  bottom: calc(var(--safe-b) + var(--u) * 1.4 + var(--bar-h) + var(--tray-h));
   transform: translate(-50%, 130%);
   display: flex;
   align-items: center;
@@ -1116,16 +1149,22 @@ button {
   }
   @keyframes barIn { from { transform: translate(60%, -50%); opacity: 0; } to { transform: translateY(-50%); opacity: 1; } }
   .act { width: clamp(52px, 12vmin, 84px); flex-direction: row; gap: 0; }
+  .act__face { border-radius: var(--r-l); }
   .act__label { display: none; }
+  /* the care buttons no longer sit above the bottom edge */
+  :root { --bar-h: 4px; }
   .ctx-tray {
     left: calc(var(--safe-l) + var(--u));
     right: auto;
     transform: none;
-    bottom: calc(var(--safe-b) + var(--u));
     max-width: 62vw;
     justify-content: flex-start;
   }
-  .prompt { bottom: calc(var(--safe-b) + var(--u) * .8 + clamp(58px, 12vmin, 100px)); max-width: 62vw; }
+  .prompt { max-width: 62vw; }
+}
+
+/* Wide enough for the whole sticker sheet in one spread. */
+@media (min-width: 700px) {
   .album__pages { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
 

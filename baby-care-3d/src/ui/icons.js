@@ -144,17 +144,21 @@ export function balloon(o) {
 
 /** ねんね — crescent moon. */
 export function moon(o) {
-  const g = uid('mn'), s = uid('sh');
+  const g = uid('mn'), s = uid('sh'), m = uid('mk');
   const face = T('a', '#ffe9a8');
   return svg('moon', `<defs>
     ${lg(g, [[0, '#fff6d6'], [1, face]], 0.2, 0, 0.9, 1)}
     ${sheen(s, 0.3, 0.2, 0.6)}
+    <mask id="${m}">
+      <rect x="0" y="0" width="64" height="64" fill="#fff"/>
+      <circle cx="45" cy="22" r="21.5" fill="#000"/>
+    </mask>
   </defs>
-  <g transform="rotate(-18 32 33)">
-    <path d="M32 8a25 25 0 1 0 0 50 20 20 0 1 1 0-50Z" fill="url(#${g})"/>
-    <path d="M32 8a25 25 0 1 0 0 50 20 20 0 1 1 0-50Z" fill="url(#${s})"/>
-    <ellipse cx="17" cy="26" rx="4.2" ry="3.4" fill="#f2cf7e" opacity=".55"/>
-    <ellipse cx="22" cy="42" rx="3" ry="2.4" fill="#f2cf7e" opacity=".45"/>
+  <g transform="rotate(-8 32 33)">
+    <circle cx="31" cy="33" r="24" fill="url(#${g})" mask="url(#${m})"/>
+    <circle cx="31" cy="33" r="24" fill="url(#${s})" mask="url(#${m})"/>
+    <ellipse cx="20" cy="26" rx="4.2" ry="3.4" fill="#f2cf7e" opacity=".5" mask="url(#${m})"/>
+    <ellipse cx="24" cy="43" rx="3" ry="2.4" fill="#f2cf7e" opacity=".42" mask="url(#${m})"/>
   </g>
   <path d="M50 12.5 51.4 16l3.6 1.4-3.6 1.4L50 22.4l-1.4-3.6L45 17.4l3.6-1.4Z" fill="${T('b', '#ffd76e')}"/>
   <path d="M45.5 33.5 46.4 36l2.6 1-2.6 1-.9 2.6-1-2.6-2.5-1 2.5-1Z" fill="${T('b', '#ffd76e')}" opacity=".8"/>`, o);
@@ -197,8 +201,9 @@ export function book(o) {
     ${lg(g, [[0, '#c2e8ff'], [1, cover]])}
     ${sheen(s, 0.3, 0.2, 0.7)}
   </defs>
-  <path d="M18 9h30a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H18Z" fill="#fffdf6"/>
-  <path d="M20 12h26a4 4 0 0 1 4 4v32a4 4 0 0 1-4 4H20Z" fill="#f0e6d6" opacity=".65"/>
+  <path d="M18 9h32a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H18Z" fill="#fffdf6"/>
+  <path d="M18 9h32a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H18Z" fill="none" stroke="#e3d3bd" stroke-width="1.6"/>
+  <path d="M50 17H30M50 25H30M50 33H30" stroke="#e8dbc6" stroke-width="2.4" stroke-linecap="round"/>
   <path d="M10 12a4 4 0 0 1 4-4h32a5 5 0 0 1 5 5v38a5 5 0 0 1-5 5H14a4 4 0 0 1-4-4Z" fill="url(#${g})"/>
   <path d="M10 12a4 4 0 0 1 4-4h5v48h-5a4 4 0 0 1-4-4Z" fill="#000" opacity=".12"/>
   <path d="M32.5 20 36 27.4l8 1.1-5.8 5.5 1.4 8-7.1-3.9-7.1 3.9 1.4-8L21 28.5l8-1.1Z" fill="#fff" opacity=".92"/>

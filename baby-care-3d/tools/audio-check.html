@@ -1,0 +1,356 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>audio check</title>
+<script type="module">
+import { Audio, SOUNDS, SOUND_NAMES, LOOPS, ALIASES } from '/src/engine/audio.js';
+import { Music, TRACKS, TRACK_NAMES, compileTrack } from '/src/engine/music.js';
+import { Synth, SPACES } from '/src/engine/synth.js';
+
+const SR = 44100;
+
+function analyse(buf) {
+  let peak = 0, sum = 0, n = 0, lastAudible = 0;
+  const chans = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+  for (let i = 0; i < buf.length; i++) {
+    let m = 0;
+    for (const d of chans) { const a = Math.abs(d[i]); if (a > m) m = a; }
+    if (m > peak) peak = m;
+    if (m > 0.0015) lastAudible = i;
+    sum += m * m; n++;
+  }
+  // channel energy for pan checks
+  const energy = chans.map(d => {
+    let s = 0; for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+    return Math.sqrt(s / d.length);
+  });
+  return { peak, rms: Math.sqrt(sum / n), audibleFor: lastAudible / buf.sampleRate, energy };
+}
+
+async function render(seconds, fn) {
+  const ctx = new OfflineAudioContext(2, Math.ceil(SR * seconds), SR);
+  const audio = new Audio({ context: ctx, volume: 0.8 });
+  const r = fn(audio, ctx) || {};
+  const buf = await ctx.startRendering();
+  return { ...analyse(buf), extra: r, audio };
+}
+
+window.__run = async function () {
+  const out = { sfx: [], loops: [], music: [], checks: [], fail: 0, globalPeak: 0 };
+  const fail = (name, detail) => { out.fail++; out.checks.push({ ok: false, name, detail }); };
+  const pass = (name, detail) => out.checks.push({ ok: true, name, detail });
+
+  /* ---------------------------------------------------- every sound --- */
+  for (const name of SOUND_NAMES) {
+    let rec;
+    try {
+      rec = await render(3.2, (audio) => {
+        const v = audio.play(name, {});
+        return { v };
+      });
+    } catch (e) {
+      out.sfx.push({ name, status: 'THREW: ' + e.message, leaked: -1 });
+      out.fail++;
+      continue;
+    }
+    const v = rec.extra.v;
+    const leaked = v ? v._nodes.length : -1;   // autoClean empties this
+    let status = 'ok';
+    if (!v) { status = 'NO VOICE'; out.fail++; }
+    else if (!(rec.peak > 0.0008)) { status = 'SILENT'; out.fail++; }
+    else if (rec.peak >= 1.0) { status = 'CLIPS'; out.fail++; }
+    else if (leaked > 0) { status = 'NODES LEAKED'; out.fail++; }
+    out.globalPeak = Math.max(out.globalPeak, rec.peak);
+    out.sfx.push({
+      name, peak: rec.peak, rms: rec.rms, audibleFor: rec.audibleFor,
+      leaked: Math.max(0, leaked), status
+    });
+  }
+
+  /* -------------------------------------------------------- aliases --- */
+  {
+    const bad = Object.entries(ALIASES).filter(([, target]) => !SOUNDS[target]).map(([k]) => k);
+    bad.length ? fail('aliases resolve', bad.join(',')) : pass('aliases resolve', Object.keys(ALIASES).length + ' aliases');
+  }
+
+  /* ---------------------------------------------------------- loops --- */
+  for (const name of Object.keys(LOOPS)) {
+    try {
+      const rec = await render(2.0, (audio) => {
+        const h = audio.loop(name, {});
+        return { h };
+      });
+      const ok = rec.peak > 0.0008 && rec.peak < 1.0;
+      if (!ok) out.fail++;
+      out.globalPeak = Math.max(out.globalPeak, rec.peak);
+      out.loops.push({ name, peak: rec.peak, rms: rec.rms, status: ok ? 'ok' : (rec.peak >= 1 ? 'CLIPS' : 'SILENT') });
+    } catch (e) {
+      out.loops.push({ name, status: 'THREW: ' + e.message });
+      out.fail++;
+    }
+  }
+  // loop handle contract
+  try {
+    const ctx = new OfflineAudioContext(2, SR, SR);
+    const a = new Audio({ context: ctx });
+    const h = a.loop('bath.shower', {});
+    const shaped = typeof h.stop === 'function' && typeof h.gain === 'function';
+    h.gain(0.4); h.stop(0.1);
+    shaped ? pass('loop() returns { stop, gain }') : fail('loop() returns { stop, gain }');
+  } catch (e) { fail('loop() handle', e.message); }
+
+  /* ---------------------------------------------------------- music --- */
+  for (const name of TRACK_NAMES) {
+    const score = compileTrack(TRACKS[name]);
+    const byLayer = {};
+    for (const e of score.events) byLayer[e.layer] = (byLayer[e.layer] || 0) + 1;
+
+    const beatDur = 60 / score.bpm;
+    const loopLen = beatDur * score.bpb * score.bars;
+
+    /* --- (1) audio render: does it actually sound? ------------------- */
+    const seconds = 8;
+    const ctx = new OfflineAudioContext(2, SR * seconds, SR);
+    const audio = new Audio({ context: ctx, volume: 0.8 });
+    const music = audio.music;
+    const log = [];
+    const voice = music._voice.bind(music);
+    const perc = music._perc.bind(music);
+    const layerOf = (dest) => {
+      for (const inst of music.instances) for (const L in inst.layers) if (inst.layers[L] === dest) return L;
+      return '?';
+    };
+    music._voice = (inst, midi, t, dur, vel, dest) => {
+      log.push({ t, inst, midi, dur, vel, layer: layerOf(dest) });
+      return voice(inst, midi, t, dur, vel, dest);
+    };
+    music._perc = (kind, t, vel, dest) => { log.push({ t, inst: kind, layer: layerOf(dest) }); return perc(kind, t, vel, dest); };
+
+    audio.bgm(name, { fade: 0.4 });
+    const moodBefore = Object.fromEntries(score.layers.map(L => [L, +music._layerTarget(score, L).toFixed(2)]));
+    music.setMood({ energy: 0.15, sleepy: 0.95 });
+    const moodAfter = Object.fromEntries(score.layers.map(L => [L, +music._layerTarget(score, L).toFixed(2)]));
+    music.setMood({ energy: 0.6, sleepy: 0 });
+
+    const buf = await ctx.startRendering();
+    const an = analyse(buf);
+    out.globalPeak = Math.max(out.globalPeak, an.peak);
+
+    const renderedLayers = {};
+    for (const e of log) renderedLayers[e.layer] = (renderedLayers[e.layer] || 0) + 1;
+
+    /* --- (2) scheduler pass over 2+ loops (no rendering) ------------- */
+    const ctx2 = new OfflineAudioContext(2, SR, SR);
+    const a2 = new Audio({ context: ctx2, volume: 0.8 });
+    const m2 = a2.music;
+    const beats = [];
+    const sched = m2._scheduleBeat.bind(m2);
+    m2._scheduleBeat = (inst, bar, beat, when, bd) => { beats.push({ bar, beat, when, bd }); return sched(inst, bar, beat, when, bd); };
+    a2.bgm(name, { fade: 0.1 });
+    m2._renderOffline(loopLen * 2.25);
+
+    let monotonic = true, dtMin = Infinity, dtMax = 0, gridOk = true, seqOk = true;
+    for (let i = 1; i < beats.length; i++) {
+      const dt = beats[i].when - beats[i - 1].when;
+      if (dt <= 0) monotonic = false;
+      dtMin = Math.min(dtMin, dt); dtMax = Math.max(dtMax, dt);
+      if (Math.abs(dt - beatDur) > 1e-6) gridOk = false;
+      // beat/bar counters must advance and wrap cleanly
+      const prev = beats[i - 1];
+      const expBeat = (prev.beat + 1) % score.bpb;
+      const expBar = expBeat === 0 ? (prev.bar + 1) % score.bars : prev.bar;
+      if (beats[i].beat !== expBeat || beats[i].bar !== expBar) seqOk = false;
+    }
+    const loops = beats.length / (score.bpb * score.bars);
+    const loopSeam = loops >= 2 && seqOk && gridOk;
+
+    if (!(an.peak > 0.002)) out.fail++;
+    if (an.peak >= 1.0) out.fail++;
+    if (!monotonic || !loopSeam) out.fail++;
+
+    out.music.push({
+      name, title: TRACKS[name].title, bpm: score.bpm, bpb: score.bpb, bars: score.bars,
+      eventCount: score.events.length, byLayer, scheduled: log.length, renderedLayers,
+      first: log.slice(0, 8).map(e => ({ t: e.t, layer: e.layer, inst: e.inst, midi: e.midi })),
+      dtMin: isFinite(dtMin) ? dtMin : null, dtMax, monotonic, loopSeam,
+      beats: beats.length, loopsCovered: +loops.toFixed(2), gridOk, seqOk,
+      peak: an.peak, rms: an.rms, moodBefore, moodAfter
+    });
+  }
+
+  // crossfade
+  try {
+    const ctx = new OfflineAudioContext(2, SR * 6, SR);
+    const a = new Audio({ context: ctx });
+    a.bgm('day', { fade: 0.5 });
+    a.bgm('lullaby', { fade: 1.0 });
+    const n = a.music.instances.length;
+    const buf = await ctx.startRendering();
+    const an = analyse(buf);
+    (n === 2 && an.peak > 0.002 && an.peak < 1)
+      ? pass('bgm crossfade', `${n} instances, peak ${an.peak.toFixed(3)}`)
+      : fail('bgm crossfade', `instances=${n} peak=${an.peak.toFixed(3)}`);
+  } catch (e) { fail('bgm crossfade', e.message); }
+
+  // aliases for tracks
+  try {
+    const ctx = new OfflineAudioContext(2, SR, SR);
+    const a = new Audio({ context: ctx });
+    const ok = ['sleep', 'play', 'explore', 'bathtime'].every(n => !!Music.resolve(n));
+    ok ? pass('bgm name aliases') : fail('bgm name aliases');
+  } catch (e) { fail('bgm name aliases', e.message); }
+
+  /* ----------------------------------------------------- behaviour --- */
+
+  // mute
+  {
+    const rec = await render(1.2, (audio) => { audio.setMuted(true); audio.play('ui.star'); });
+    rec.peak < 0.0005 ? pass('setMuted(true) silences', 'peak ' + rec.peak.toExponential(1))
+                      : fail('setMuted(true) silences', 'peak ' + rec.peak);
+  }
+  {
+    const rec = await render(1.2, (audio) => { audio.setMuted(true); audio.setMuted(false); audio.play('ui.star', { when: 0.3 }); });
+    rec.peak > 0.005 ? pass('setMuted(false) restores') : fail('setMuted(false) restores', 'peak ' + rec.peak);
+  }
+
+  // panning / positional
+  {
+    const L = await render(1.5, (a) => a.playAt('play.bounce', [-2.2, 0.2, 2.0]));
+    const R = await render(1.5, (a) => a.playAt('play.bounce', [2.2, 0.2, 2.0]));
+    const okL = L.energy[0] > L.energy[1] * 1.15;
+    const okR = R.energy[1] > R.energy[0] * 1.15;
+    (okL && okR) ? pass('positional pan', `L ${L.energy[0].toFixed(4)}/${L.energy[1].toFixed(4)} R ${R.energy[0].toFixed(4)}/${R.energy[1].toFixed(4)}`)
+                 : fail('positional pan', `L ${L.energy[0].toFixed(4)}/${L.energy[1].toFixed(4)} R ${R.energy[0].toFixed(4)}/${R.energy[1].toFixed(4)}`);
+    const near = await render(1.5, (a) => a.playAt('play.bounce', [0, 0.2, 3.0]));
+    const far = await render(1.5, (a) => a.playAt('play.bounce', [0, 0.2, -6.0]));
+    near.rms > far.rms ? pass('distance attenuation', `near ${near.rms.toFixed(4)} > far ${far.rms.toFixed(4)}`)
+                       : fail('distance attenuation', `near ${near.rms.toFixed(4)} far ${far.rms.toFixed(4)}`);
+  }
+
+  // per-trigger variation: same sound twice must not be sample-identical
+  {
+    const ctx = new OfflineAudioContext(2, SR * 3, SR);
+    const a = new Audio({ context: ctx });
+    a.play('play.bounce', { when: 0.0, minGap: 0 });
+    a.play('play.bounce', { when: 1.2, minGap: 0 });
+    const buf = await ctx.startRendering();
+    const d = buf.getChannelData(0);
+    const off = Math.floor(1.2 * SR);
+    let diff = 0, n = 0;
+    for (let i = 0; i < SR * 0.5; i++) { diff += Math.abs(d[i] - d[i + off]); n++; }
+    (diff / n > 1e-4) ? pass('per-trigger variation', 'mean |Δ| ' + (diff / n).toExponential(2))
+                      : fail('per-trigger variation', 'identical renders');
+  }
+
+  // reverb spaces really differ (tail length)
+  {
+    const tails = {};
+    for (const sp of Object.keys(SPACES)) {
+      const rec = await render(4.0, (a) => { a.setSpace(sp); a.play('ui.tap', { gain: 1 }); });
+      tails[sp] = +rec.audibleFor.toFixed(3);
+    }
+    (tails.dream > tails.bathroom && tails.bathroom > tails.nursery)
+      ? pass('reverb spaces distinct', JSON.stringify(tails))
+      : fail('reverb spaces distinct', JSON.stringify(tails));
+  }
+
+  // impulse responses are the advertised length & stereo-decorrelated
+  {
+    const ctx = new OfflineAudioContext(2, SR, SR);
+    const s = new Synth(ctx);
+    const det = {};
+    let ok = true;
+    for (const [name, spec] of Object.entries(SPACES)) {
+      const ir = s.impulse(name);
+      const l = ir.getChannelData(0), r = ir.getChannelData(1);
+      let dot = 0, ll = 0, rr = 0;
+      for (let i = 0; i < ir.length; i++) { dot += l[i] * r[i]; ll += l[i] * l[i]; rr += r[i] * r[i]; }
+      const corr = dot / Math.sqrt(ll * rr);
+      det[name] = { sec: +ir.duration.toFixed(2), corr: +corr.toFixed(3), ch: ir.numberOfChannels };
+      if (Math.abs(ir.duration - spec.seconds) > 0.02 || Math.abs(corr) > 0.35) ok = false;
+    }
+    ok ? pass('procedural IRs (length + L/R decorrelation)', JSON.stringify(det))
+       : fail('procedural IRs', JSON.stringify(det));
+  }
+
+  // unknown name must not throw
+  {
+    const ctx = new OfflineAudioContext(2, SR, SR);
+    const a = new Audio({ context: ctx });
+    try { a.play('does.not.exist'); pass('unknown sound is a no-op'); }
+    catch (e) { fail('unknown sound is a no-op', e.message); }
+  }
+
+  // API surface per CONTRACTS.md
+  {
+    const a = new Audio({ context: new OfflineAudioContext(2, SR, SR) });
+    const missing = ['unlock', 'play', 'loop', 'bgm', 'setMuted'].filter(m => typeof a[m] !== 'function');
+    missing.length ? fail('CONTRACTS API', 'missing ' + missing) : pass('CONTRACTS API', 'unlock/play/loop/bgm/setMuted');
+  }
+
+  // ducking when a vocal plays: measure the music, not the flag
+  {
+    const musicOnly = async (withVocal) => {
+      const ctx = new OfflineAudioContext(2, SR * 3, SR);
+      const a = new Audio({ context: ctx });
+      a.bgm('day', { fade: 0.2 });
+      if (withVocal) a.play('baby.cry');
+      // Sever the master chain and tap the music bus directly, so neither the
+      // vocal nor its reverb tail contaminates the measurement.
+      a.master.input.disconnect();
+      a.music.duckGain.disconnect();
+      a.music.duckGain.connect(ctx.destination);
+      const buf = await ctx.startRendering();
+      const d = buf.getChannelData(0);
+      let s = 0, n = 0;
+      for (let i = Math.floor(SR * 0.6); i < Math.floor(SR * 1.6); i++) { s += d[i] * d[i]; n++; }
+      return Math.sqrt(s / n);
+    };
+    const dry = await musicOnly(false);
+    const ducked = await musicOnly(true);
+    ducked < dry * 0.8
+      ? pass('music ducks under vocals', `rms ${dry.toFixed(4)} → ${ducked.toFixed(4)}`)
+      : fail('music ducks under vocals', `rms ${dry.toFixed(4)} → ${ducked.toFixed(4)}`);
+  }
+
+  /* ------------------------------------- realtime smoke test ---------- */
+  /* The offline path never runs the setInterval scheduler or the loop
+   * re-trigger timers, so exercise them against a live AudioContext.      */
+  {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      const a = new Audio({ volume: 0.7 });
+      const okUnlock = await a.unlock();
+      const state = a.ctx.state;
+
+      a.bgm('day', { fade: 0.4 });
+      const h = a.loop('bath.shower', { gain: 0.6 });
+      const h2 = a.loop('sleep.pat', {});          // re-trigger style loop
+      a.play('baby.giggle');
+      a.play('play.xylo', { note: 3 });
+      await sleep(1400);
+
+      const beats1 = a.music.instances[0].beat;
+      const t1 = a.ctx.currentTime;
+      a.setMuted(true); a.setMuted(false);
+      a.setMusicMood({ energy: 0.2, sleepy: 0.9 });
+      a.bgm('lullaby', { fade: 0.5 });
+      await sleep(1400);
+      const beats2 = a.music.instances[a.music.instances.length - 1].beat;
+      const insts = a.music.instances.length;
+      h.stop(); h2.stop();
+      await sleep(300);
+      const loopsLeft = a._loops.size;
+      a.dispose();
+
+      const good = okUnlock && state === 'running' && beats1 > 0 && beats2 > 0
+        && insts === 1 && loopsLeft === 0;
+      good ? pass('realtime: unlock + scheduler + loops + crossfade',
+                  `state=${state} beats=${beats1}→${beats2} instances=${insts} loops=${loopsLeft} elapsed=${(a.ctx.currentTime - t1).toFixed(2)}s`)
+           : fail('realtime smoke', `unlock=${okUnlock} state=${state} beats=${beats1}/${beats2} inst=${insts} loops=${loopsLeft}`);
+    } catch (e) { fail('realtime smoke', e.message); }
+  }
+
+  return out;
+};
+</script>

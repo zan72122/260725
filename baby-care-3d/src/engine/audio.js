@@ -100,7 +100,11 @@ class Voice {
     this.dest = opts.dest || A.sfxBus;
     this.out.connect(this.dest);
 
-    this._space = opts.space || A.space;
+    // Reverb/echo sends tap the signal *after* any positional processing, so
+    // a sound across the room is quieter and off to one side in the room
+    // tail as well as in the dry signal.
+    this.tap = this.out;
+    this._space = opts.space || null;    // an explicit per-call override
     this._sendGain = null;
   }
 
@@ -114,13 +118,22 @@ class Voice {
   /** Mark the voice as living at least until `t` seconds after its start. */
   until(t) { this.end = Math.max(this.end, this.t + t); return this.end; }
 
-  /** Send this voice to a room. amount 0..1. */
+  /**
+   * Send this voice to a room. amount 0..1.
+   *
+   * `'nursery'` means "whatever room we are standing in" — it follows
+   * `Audio.setSpace()`, so during bath time a UI tap gets the tiles too.
+   * Naming `'bathroom'` or `'dream'` explicitly is a deliberate choice by the
+   * recipe (a splash is always tiled, a dream twinkle is always vast) and
+   * wins over the scene. A per-call `space` option beats everything.
+   */
   room(space, amount = 0.25) {
-    const bus = this.A.roomBus(space || this._space);
+    const target = this._space || (!space || space === 'nursery' ? this.A.space : space);
+    const bus = this.A.roomBus(target);
     if (!bus) return this;
     if (!this._sendGain) {
       this._sendGain = this.ctx.createGain();
-      this.out.connect(this._sendGain);
+      this.tap.connect(this._sendGain);
       this._nodes.push(this._sendGain);
     }
     this._sendGain.gain.value = amount;
@@ -135,7 +148,7 @@ class Voice {
     if (!d) return this;
     const g = this.ctx.createGain();
     g.gain.value = amount;
-    this.out.connect(g);
+    this.tap.connect(g);
     g.connect(d.input);
     this._nodes.push(g);
     return this;
@@ -438,6 +451,25 @@ class Voice {
 
 /* ============================================================ recipes ===== */
 /* Each recipe is `(v, o) => void`. `v` is the Voice, `o` the caller options.  */
+
+/**
+ * One xylophone bar. Modelled with its real inharmonic partials (roughly
+ * 1 : 3 : 6.3), a resonator swell underneath and a felt-mallet contact noise.
+ * Shared by `play.xylo` and `play.xylo-run`.
+ */
+function xyloBar(v, midi, t = 0, level = 1) {
+  const f = midiToFreq(midi);
+  v.noise({ t, dur: 0.012, kind: 'white', f: f * 4, to: f * 1.5, q: 1.1, gain: 0.09 * level, a: 0.0004, pitched: false });
+  v.noise({ t, dur: 0.03, kind: 'pink', f: 2200, to: 900, q: 1.6, gain: 0.05 * level, a: 0.001, pitched: false });
+  v.tone({ t, f, dur: 0.85, type: 'sine', gain: 0.30 * level, a: 0.0015, d: 0.8 });
+  v.tone({ t, f: f * 3.0, dur: 0.30, type: 'sine', gain: 0.12 * level, a: 0.001, d: 0.26 });
+  v.tone({ t, f: f * 6.3, dur: 0.13, type: 'sine', gain: 0.05 * level, a: 0.001, d: 0.11 });
+  v.tone({ t, f: f * 0.5, dur: 0.50, type: 'sine', gain: 0.07 * level, a: 0.02, d: 0.45 });
+}
+
+/** Pentatonic C D E G A, two octaves from C5. */
+const XYLO_SCALE = [0, 2, 4, 7, 9];
+const xyloMidi = i => 72 + Math.floor(clamp(i, 0, 9) / 5) * 12 + XYLO_SCALE[clamp(Math.round(i), 0, 9) % 5];
 
 const SOUNDS = {
 
@@ -1006,38 +1038,22 @@ const SOUNDS = {
    * short resonator swell and a felt-mallet click.
    */
   'play.xylo': (v, o) => {
-    const SCALE = [0, 2, 4, 7, 9];
-    let midi;
-    if (o.midi != null) midi = o.midi;
-    else {
-      const i = clamp(Math.round(o.note != null ? o.note : 0), 0, 9);
-      midi = 72 + Math.floor(i / 5) * 12 + SCALE[i % 5];
-    }
-    const f = midiToFreq(midi);
-    const g = o.gain != null ? 1 : 1;
-    // mallet contact
-    v.noise({ dur: 0.012, kind: 'white', f: f * 4, to: f * 1.5, q: 1.1, gain: 0.09 * g, a: 0.0004, pitched: false });
-    v.noise({ dur: 0.03, kind: 'pink', f: 2200, to: 900, q: 1.6, gain: 0.05 * g, a: 0.001, pitched: false });
-    // bar modes
-    v.tone({ f, dur: 0.85, type: 'sine', gain: 0.3 * g, a: 0.0015, d: 0.8 });
-    v.tone({ f: f * 3.0, dur: 0.3, type: 'sine', gain: 0.12 * g, a: 0.001, d: 0.26 });
-    v.tone({ f: f * 6.3, dur: 0.13, type: 'sine', gain: 0.05 * g, a: 0.001, d: 0.11 });
-    // resonator tube: a soft swell under the fundamental
-    v.tone({ f: f * 0.5, dur: 0.5, type: 'sine', gain: 0.07 * g, a: 0.02, d: 0.45 });
+    const midi = o.midi != null ? o.midi : xyloMidi(o.note != null ? o.note : 0);
+    xyloBar(v, midi, 0, 1);
     v.room('nursery', 0.3);
   },
 
   /** A little run up the pentatonic — used for rewards on the xylophone. */
   'play.xylo-run': (v, o) => {
     const up = o.down !== true;
-    for (let i = 0; i < 5; i++) {
-      const idx = up ? i : 4 - i;
-      SOUNDS['play.xylo'](
-        Object.assign(Object.create(Object.getPrototypeOf(v)), v, { t: v.t + i * 0.085 }),
-        { note: idx }
-      );
+    const n = o.count || 5;
+    const gap = o.gap || 0.085;
+    for (let i = 0; i < n; i++) {
+      const idx = up ? i : (n - 1 - i);
+      xyloBar(v, xyloMidi((o.from || 0) + idx), i * gap, 0.9 - i * 0.04);
     }
-    v.until(0.085 * 5 + 0.9);
+    v.until(n * gap + 0.9);
+    v.room('nursery', 0.3);
   },
 
   /** Toy drum — a taut membrane and a wooden shell. */
@@ -1570,6 +1586,28 @@ const RETRIGGER = {
   'play.bounce': 0.6, 'bath.splash': 0.8
 };
 
+/* ------------------------------------------------------------ mix pass --- */
+/*
+ * A real mix, not just whatever each recipe happened to sum to. Quiet foley
+ * gets lifted so it is still audible on a tablet speaker in a noisy room, and
+ * the emotional peaks (a cry, a squeal, the star fanfare) get pulled back so
+ * that "loud" in this game still means comfortable at arm's length.
+ * Anything not listed sits at 1.0.
+ */
+const LEVEL = {
+  // — lift: soft foley that would otherwise disappear
+  'ui.swipe': 2.6, 'sleep.page': 2.6, 'dress.rustle': 1.9, 'feed.crumple': 2.2,
+  'sleep.toothbrush': 1.8, 'feed.chew': 1.6, 'feed.bite': 1.4, 'feed.peel': 1.5,
+  'feed.squish': 1.5, 'feed.crumble': 1.4, 'feed.wipe': 1.5, 'bath.towel': 1.3,
+  'sleep.curtain': 1.4, 'sleep.switch': 1.25, 'play.rattle': 1.3, 'sleep.pat': 1.3,
+  'bath.lather': 1.2, 'dress.velcro': 1.1, 'play.roll': 1.2, 'sleep.lamp': 1.15,
+  // — trim: the biggest moments, kept short of startling
+  'baby.cry': 0.82, 'baby.squeal': 0.88, 'baby.sneeze': 0.88, 'baby.laugh': 0.9,
+  'play.xylo-run': 0.85, 'sleep.musicbox': 0.88, 'bath.fill': 0.88, 'ui.star': 0.92,
+  'play.collapse': 0.9, 'play.peekaboo-baa': 0.9, 'bath.splash-big': 0.9,
+  'bath.drain': 0.9, 'play.chime': 0.9, 'sleep.shooting-star': 0.9
+};
+
 export const SOUND_NAMES = Object.keys(SOUNDS);
 
 /* ============================================================== Audio ===== */
@@ -1596,7 +1634,13 @@ export class Audio {
     this._lastPlay = new Map();
     this._unlockBound = null;
 
-    if (opts.context) this._boot(opts.context);
+    if (opts.context) {
+      this._boot(opts.context);
+    } else if (opts.autoUnlock !== false) {
+      // Safety net for iOS: even if nothing ever calls unlock() explicitly,
+      // the first real gesture anywhere on the page starts the engine.
+      this._armGestureFallback(true);
+    }
   }
 
   /* ------------------------------------------------------------ boot --- */
@@ -1714,7 +1758,10 @@ export class Audio {
    */
   play(name, opts = {}) {
     if (!this.ready || this.muted) return null;
-    if (this.ctx.state === 'suspended') return null;
+    // A suspended realtime context would just queue everything up for the
+    // moment it resumes — drop it instead. (Offline contexts are "suspended"
+    // until they render, so they are exempt.)
+    if (!this.synth.offline && this.ctx.state === 'suspended') return null;
 
     const key = this.resolve(name);
     const recipe = SOUNDS[key];
@@ -1725,7 +1772,7 @@ export class Audio {
 
     // Voice-limit identical sounds so a held finger can't machine-gun.
     const now = this.ctx.currentTime;
-    const last = this._lastPlay.get(key) || 0;
+    const last = this._lastPlay.has(key) ? this._lastPlay.get(key) : -1e9;
     const minGap = opts.minGap != null ? opts.minGap : 0.028;
     if (now - last < minGap) return null;
     this._lastPlay.set(key, now);
@@ -1737,7 +1784,7 @@ export class Audio {
       when: o.when != null ? (o.when > 1e6 ? o.when : now + o.when) : now + 0.004,
       rate: o.rate != null ? o.rate : 1,
       speed: o.speed != null ? o.speed : 1,
-      gain: (o.gain != null ? o.gain : 1) * (isVocal ? 1.0 : 1.0),
+      gain: (o.gain != null ? o.gain : 1) * (LEVEL[key] != null ? LEVEL[key] : 1),
       pan: o.pan || 0,
       space: o.space || this.space,
       dest: o.dest || (isVocal ? this.voiceBus : this.sfxBus)
@@ -1748,12 +1795,17 @@ export class Audio {
     const v = new Voice(this, vopts);
     if (o.rate == null) v.rate *= v.vary(o.varyCents != null ? o.varyCents : (isVocal ? 70 : 32));
 
-    // Positional playback.
+    // Positional playback: splice a pan/distance stage in after the voice
+    // bus, and move the reverb tap downstream of it.
     if (o.position) {
-      const s = this.synth.spatial({ position: o.position, listener: this.listener });
+      const s = this.synth.spatial({
+        position: o.position, listener: this.listener,
+        rolloff: o.rolloff, min: o.minDistanceGain
+      });
       v.out.disconnect();
       v.out.connect(s.input);
       s.output.connect(vopts.dest);
+      v.tap = s.output;
       v._nodes.push(s.input);
       if (s.panner) v._nodes.push(s.panner);
     }
@@ -1896,8 +1948,10 @@ export class Audio {
 
   dispose() {
     this.stopLoops(0);
-    if (this.music) this.music.stop(0);
+    this._armGestureFallback(false);
+    if (this.music) this.music.dispose();
     if (this.ctx && this.ctx.close && !this.opts.context) this.ctx.close();
+    this.ready = false;
   }
 }
 
