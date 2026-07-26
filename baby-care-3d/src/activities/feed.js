@@ -1928,6 +1928,7 @@ export class FeedActivity {
       const g = new THREE.SphereGeometry(0.0028, 8, 6);
       g.scale(1, 0.62, 0.68);
       const m = new THREE.Mesh(this.trash.geo(g), this.mat.rice);
+      m.castShadow = true;
       m.userData.pickId = 'grain';
       m.add(S.hitProxy(0.022, 'grain-hit'));
       const a = (this._rand() - 0.5) * 1.5;
