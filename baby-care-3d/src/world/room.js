@@ -135,7 +135,7 @@ export class Room {
 
     // left wall: authored along world z, then yawed so its back cap faces +x
     const left = wallShape(RD, [{
-      a: WIN.z - RD / 2 - (Z0 + RD / 2) + RD / 2 - WIN.w / 2, b: WIN.sill, w: WIN.w, h: WIN.h
+      a: WIN.z - (Z0 + RD / 2) - WIN.w / 2, b: WIN.sill, w: WIN.w, h: WIN.h
     }]);
     left.rotateY(-Math.PI / 2);
     left.translate(X0, 0, Z0 + RD / 2);
@@ -176,11 +176,13 @@ export class Room {
     coveShape.lineTo(0, 0.10);
     coveShape.quadraticCurveTo(0.03, 0.03, 0.085, 0);
     coveShape.closePath();
+    // each basis is (profile-out, up, run) and is kept right-handed so the
+    // extrusion's normals stay outward
     const coveRuns = [
-      { len: RW, basis: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], pos: [-RW / 2, RH, Z0 + inset] },
-      { len: RW, basis: [[-1, 0, 0], [0, 1, 0], [0, 0, -1]], pos: [RW / 2, RH, Z1 - inset] },
-      { len: RD, basis: [[0, 0, -1], [0, 1, 0], [1, 0, 0]], pos: [X0 + inset, RH, Z1] },
-      { len: RD, basis: [[0, 0, 1], [0, 1, 0], [-1, 0, 0]], pos: [X1 - inset, RH, Z0] }
+      { len: RW, basis: [[0, 0, 1], [0, 1, 0], [-1, 0, 0]], pos: [X1, RH, Z0 + inset] },
+      { len: RW, basis: [[0, 0, -1], [0, 1, 0], [1, 0, 0]], pos: [X0, RH, Z1 - inset] },
+      { len: RD, basis: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], pos: [X0 + inset, RH, Z0] },
+      { len: RD, basis: [[-1, 0, 0], [0, 1, 0], [0, 0, -1]], pos: [X1 - inset, RH, Z1] }
     ];
     const coves = [];
     for (const r of coveRuns) {

@@ -608,19 +608,17 @@ export class PhysicsWorld {
 
     // 4 — velocity iterations (the "real" impulses).
     //
-    // Sweeps alternate direction (symmetric Gauss–Seidel). A one-way sweep
-    // systematically favours whichever contact it visits last, and on a
-    // four-point box manifold that bias is a torque: the block develops a
-    // permanent lean. Alternating cancels the bias to first order.
+    // Always swept bottom-up, never alternating: a symmetric (back-and-forth)
+    // sweep is the textbook cure for Gauss–Seidel's ordering bias, but here the
+    // downward half-sweep throws away the support-propagation the ordering was
+    // chosen for, and stacks measurably lose stability. Measured, not assumed.
     for (let it = 0; it < this.velIterations; it++) {
-      if ((it & 1) === 0) for (let i = 0; i < nc; i++) this._solveVelocity(order[i]);
-      else for (let i = nc - 1; i >= 0; i--) this._solveVelocity(order[i]);
+      for (let i = 0; i < nc; i++) this._solveVelocity(order[i]);
     }
 
     // 5 — position iterations against pseudo-velocities only.
     for (let it = 0; it < this.posIterations; it++) {
-      if ((it & 1) === 0) for (let i = 0; i < nc; i++) this._solvePosition(order[i]);
-      else for (let i = nc - 1; i >= 0; i--) this._solvePosition(order[i]);
+      for (let i = 0; i < nc; i++) this._solvePosition(order[i]);
     }
 
     // 6 — store impulses for next step's warm start.

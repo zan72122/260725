@@ -244,6 +244,11 @@ export class UI {
   /** A care button was pressed. */
   pickActivity(name) {
     this._sfx('tap');
+    /* Clear the previous scene's chrome *before* the switch, so whatever the
+       incoming activity sets up in enter() survives. */
+    this.clearTools();
+    this.hidePrompt();
+    this.clearLabels();
     this.setActivity(name);
     const p = this.app.setActivity?.(name);
     if (p && typeof p.catch === 'function') p.catch((err) => console.error('[ui] activity failed', err));
