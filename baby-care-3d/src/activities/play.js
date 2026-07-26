@@ -134,10 +134,13 @@ export class PlayActivity {
     for (let i = 0; i < BLOCK_COUNT; i++) {
       const mesh = set.blocks[i];
       const a = (i / BLOCK_COUNT) * Math.PI * 2 + 0.7;
+      // The un-stacked blocks live on the far side of the baby from the
+      // tower. Ringed beside it they lined up in the same screen column and
+      // read as extra courses, which is why `stack: 5` looked like six.
       const p = home.clone().add(new THREE.Vector3(
-        0.50 + Math.cos(a) * 0.085,
+        -0.22 + Math.cos(a) * 0.090,
         BLOCK_SIZE / 2,
-        0.30 + Math.sin(a) * 0.075
+        0.30 + Math.sin(a) * 0.080
       ));
       mesh.position.copy(p);
       mesh.rotation.y = a;
@@ -185,11 +188,11 @@ export class PlayActivity {
 
     /* --- ふうせん + ひも -------------------------------------------------- */
     this.balloon = makeBalloon(res, { radius: 0.112, color: 0xff8fae });
-    // Kept off the baby's face: parked in front of the chest it filled the
-    // left third of every `face` and `closeup` portrait with a pink blob. It
-    // now floats up and behind the near shoulder, where it reads as a balloon
-    // in the room rather than an obstruction.
-    this.balloonPos = home.clone().add(new THREE.Vector3(-0.34, 0.72, -0.30));
+    // Kept off the baby: parked in front of the chest it filled the left third
+    // of every `face` and `closeup` portrait with a pink blob, and directly
+    // behind the head it read as a growth. Out to the far side and high, it
+    // sits in the top-left of the `floor` shot and clears every portrait.
+    this.balloonPos = home.clone().add(new THREE.Vector3(-0.62, 0.78, 0.10));
     this.balloonVel = new THREE.Vector3();
     this.balloon.group.position.copy(this.balloonPos);
     this.group.add(this.balloon.group);

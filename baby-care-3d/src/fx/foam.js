@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import * as MAT from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng } from './water.js';
 
 const _m = new THREE.Matrix4();
@@ -33,9 +34,16 @@ const _IDQ = new THREE.Quaternion();
 const CAP = [90, 150, 220];
 const BUB = [10, 24, 42];
 
-/** Icosphere pushed around by a few sines — reads as a clump, not a ball. */
+/**
+ * Icosphere pushed around by a few sines — reads as a clump, not a ball.
+ *
+ * `IcosahedronGeometry` is **non-indexed**, so `computeVertexNormals()` on it
+ * produces flat per-face normals. On a 25 mm blob that read as a chip of
+ * quartz, and forty of them read as a heap of gravel on the baby's chest.
+ * Welding first is what turns the same silhouette into something soft.
+ */
 function clumpGeometry(detail) {
-  const geo = new THREE.IcosahedronGeometry(1, detail);
+  const geo = mergeVertices(new THREE.IcosahedronGeometry(1, detail), 1e-5);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
@@ -71,20 +79,32 @@ export class FoamSystem {
     fm.map = maps.map;
     fm.normalMap = maps.normalMap;
     fm.roughnessMap = maps.roughnessMap;
-    fm.normalScale.set(1.7, 1.7);
-    fm.roughness = 0.9;
+    // A blob is 20-35 mm across, so a 22-cell worley map covers each one
+    // entirely: at normalScale 1.7 the normals swung far enough that most
+    // facets pointed away from the key and the lather rendered as wet gravel.
+    fm.normalScale.set(0.22, 0.22);
+    fm.roughness = 0.82;
     fm.sheen = 1.0;
     fm.sheenRoughness = 0.55;
-    fm.transmission = this.tier >= 1 ? 0.22 : 0.0;
-    fm.thickness = 0.03;
+    // Foam is opaque white froth, not glass. With transmission on, each blob
+    // sampled the backdrop behind it — the baby's shirt, the tub in shadow —
+    // and inherited its colour, which is the other half of the gravel look.
+    fm.transmission = 0.0;
+    fm.thickness = 0.02;
     fm.ior = 1.10;
-    fm.envMapIntensity = 1.5;
+    fm.envMapIntensity = 1.7;
+    fm.color.setHex(0xffffff);
+    // Suds are a dense forward scatterer: they never go black, even in a
+    // shadowed tub. This is the cheap stand-in for that.
+    fm.emissive = new THREE.Color(0xfff4ec);
+    fm.emissiveIntensity = 0.14;
     this.material = fm;
 
     const mesh = new THREE.InstancedMesh(this.geometry, this.material, this.capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.count = 0;
-    mesh.castShadow = this.tier >= 1;
+    // Blob-on-blob shadowing is what turned a cluster into a heap of stones.
+    mesh.castShadow = false;
     mesh.receiveShadow = false;
     mesh.frustumCulled = false;
     mesh.name = 'bath-foam';
@@ -289,31 +309,52 @@ export class FoamSystem {
       const k = (i + 0.5) / nHead;
       const a = i * 2.39996;
       const rad = Math.sqrt(k) * hr * 1.05;
+      // Lay the cap on the *surface* of the skull rather than at a flat
+      // height: at the crown the blobs sit a full radius up, at the edge they
+      // drop to ear height. A flat cap sank into the head at the middle and
+      // floated off it at the sides.
       _p.set(Math.cos(a) * rad,
-             hr * 0.42 + (1 - k) * hr * 0.42 + rand() * 0.012,
+             hr * (0.30 + 0.72 * Math.sqrt(Math.max(0, 1 - k))) + rand() * 0.010,
              Math.sin(a) * rad * 0.86);
       const b = this._spawn('head', _p, 0.02, 0.034);
       b.target = 0.018 + rand() * 0.014;
       b.r = b.target;
     }
 
-    const nBody = Math.round(v * Math.min(26, this.capacity * 0.2));
-    for (let i = 0; i < nBody; i++) {
+    // Lather on skin arrives in *patches* — a few places the flannel went over
+    // twice — not as an even sprinkle of equal beads. Seeding a handful of
+    // cluster centres and packing overlapping blobs into each is what makes it
+    // read as one clinging mass instead of gravel stuck to a baby.
+    const nBody = Math.round(v * Math.min(40, this.capacity * 0.30));
+    const clusters = [];
+    for (let c = 0; c < 4; c++) {
       const a = rand() * Math.PI * 2;
-      const rad = 0.03 + rand() * 0.05;
-      _p.set(Math.cos(a) * rad, -0.02 + rand() * 0.09, Math.sin(a) * rad * 0.7 + 0.02);
+      const rad = 0.025 + rand() * 0.045;
+      clusters.push([Math.cos(a) * rad, -0.02 + rand() * 0.085, Math.sin(a) * rad * 0.7 + 0.02]);
+    }
+    for (let i = 0; i < nBody; i++) {
+      const c = clusters[i % clusters.length];
+      const a = rand() * Math.PI * 2;
+      const rad = Math.sqrt(rand()) * 0.030;
+      _p.set(c[0] + Math.cos(a) * rad,
+             c[1] + (rand() - 0.5) * 0.028,
+             c[2] + Math.sin(a) * rad * 0.8);
       const b = this._spawn('body', _p, 0.02, 0.030);
-      b.target = 0.013 + rand() * 0.012;
+      b.target = 0.016 + rand() * 0.011;
       b.r = b.target;
     }
 
-    const nWater = Math.round(v * Math.min(34, this.capacity * 0.28));
+    // Suds floating on the water: a raft, so the blobs touch.
+    const nWater = Math.round(v * Math.min(40, this.capacity * 0.30));
     for (let i = 0; i < nWater; i++) {
-      const a = rand() * Math.PI * 2;
-      const rad = Math.sqrt(rand());
-      _p.set(Math.cos(a) * rad * 0.30, 0.004 + rand() * 0.012, Math.sin(a) * rad * 0.20);
-      const b = this._spawn('water', _p, 0.02, 0.032);
-      b.target = 0.014 + rand() * 0.016;
+      const k = (i + 0.5) / nWater;
+      const a = i * 2.39996;
+      const rad = Math.sqrt(k);
+      _p.set(Math.cos(a) * rad * 0.30 + (rand() - 0.5) * 0.02,
+             0.002 + rand() * 0.010,
+             Math.sin(a) * rad * 0.20 + (rand() - 0.5) * 0.014);
+      const b = this._spawn('water', _p, 0.02, 0.034);
+      b.target = 0.017 + rand() * 0.015;
       b.r = b.target;
     }
 
@@ -372,9 +413,13 @@ export class FoamSystem {
         const k = hCount > 1 ? b.rank / (hCount - 1) : 0;
         const a = b.rank * 2.39996 + this.time * 0.12;
         const rad = this.headRadius * 0.95 * Math.pow(1 - k, 0.85);
+        // The peak starts *on* the crown and rises about eight-tenths of a head
+        // radius above it. It used to start half a radius up — inside the
+        // skull — and finish 1.7 radii above, which read as a clump of lather
+        // hanging in the air with a gap under it.
         _p.set(
           Math.cos(a) * rad + Math.sin(k * Math.PI) * this.headRadius * 0.22,
-          this.headRadius * 0.55 + k * this.headRadius * 1.7,
+          this.headRadius * (0.78 + k * 1.02),
           Math.sin(a) * rad * 0.9);
         b.local.lerpVectors(b.base, _p, this.horn);
         scaleK = 1 - this.horn * k * 0.55;

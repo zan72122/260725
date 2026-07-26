@@ -95,15 +95,30 @@ export const MOODS = {
     // The fill is the sky coming through the window on the shadow side. It was
     // at 0.43 and barely tinted anything; at 0.62 the shaded side of every prop
     // reads visibly blue against the key's cream.
-    fillColor: 0xbcd8ff, fillIntensity: 0.62, fillPos: [4.6, 2.6, 3.0],
+    //
+    // …and then the *whole shadow side of the room* went to near-silhouette:
+    // in the wide shot the crib, the dresser and the laundry basket were three
+    // brown shapes with no material readable on any of them. A key:fill ratio
+    // of 5:1 is a portrait ratio, not a room ratio — a real nursery at 4 pm has
+    // a whole wall of sky filling the side away from the sun. 0.86 puts it at
+    // ~3.5:1, which still separates the two sides but leaves the dark side lit.
+    fillColor: 0xbcd8ff, fillIntensity: 0.86, fillPos: [4.6, 2.6, 3.0],
     rimColor: 0xffe2c4, rimIntensity: 1.0024, rimPos: [1.2, 4.0, -5.0],
-    hemiSky: 0xc4dcff, hemiGround: 0xffd2bc, hemiIntensity: 0.26,
-    envIntensity: 0.30, shadowSpan: 4.2,
+    hemiSky: 0xc4dcff, hemiGround: 0xffd2bc, hemiIntensity: 0.34,
+    // Ambient is where a dark wood surface gets its *material* from — its
+    // specular response and the colour of the room reflected in its lacquer.
+    // At 0.30 the oak dresser had neither and read as a brown cutout.
+    envIntensity: 0.44, shadowSpan: 4.2,
     grade: {
-      saturation: 1.12, contrast: 1.06, warmth: 0.03, vignette: 0.26, exposure: 1.0,
-      shadowTint: [0.885, 0.955, 1.16], highTint: [1.035, 1.0, 0.955], split: 1.0
+      // Exposure was pinned at 1.0 with AgX, whose mid-grey sits low by design;
+      // the frame came out a stop under and the whole image lived in a narrow
+      // band around 55% with no clean white anywhere. Up 1/5 stop, with the
+      // contrast raised to keep the extra light out of the shadows and the
+      // vignette pulled back off the corners the furniture actually occupies.
+      saturation: 1.16, contrast: 1.115, warmth: 0.02, vignette: 0.20, exposure: 1.14,
+      shadowTint: [0.905, 0.96, 1.12], highTint: [1.035, 1.0, 0.955], split: 0.95
     },
-    fog: { color: 0xf1ecf6, density: 0.008 }
+    fog: { color: 0xf1ecf6, density: 0.005 }
   },
 
   golden: {   // late afternoon — the "play" and "feed" hero look
@@ -118,20 +133,34 @@ export const MOODS = {
     // pushed a further 1.6 m out along −X. That is the whole defect: at 25° a
     // 0.9 m prop throws a 1.9 m shadow that mostly hides under itself, at 16°
     // it throws 3.1 m of raking shadow straight across the floor toward camera.
-    keyColor: 0xffc887, keyIntensity: 3.85, keyPos: [-6.6, 2.35, 2.80],
+    // Up from 3.85. Lifting the fill enough to keep the shadow side readable
+    // costs contrast, and the only way to buy it back without crushing the
+    // shadows again is to raise the sun rather than lower the ambient — which
+    // is also what actually happens at 4 pm.
+    keyColor: 0xffb877, keyIntensity: 4.75, keyPos: [-6.6, 2.35, 2.80],
     // Fill and hemi are pulled *down* hard. Late afternoon is a high-contrast
     // hour; carrying `day`'s ambient into it is exactly what made the two moods
     // indistinguishable, because ambient is the half of the image that does not
     // change when you move the sun.
-    fillColor: 0xa8c4f0, fillIntensity: 0.235, fillPos: [4.4, 2.4, 3.2],
+    // 0.235 was a *studio* contrast ratio (16:1) dropped into a room with one
+    // sun and four bounce surfaces. Golden hour is high contrast, but the
+    // shadow side of a west-facing nursery is filled by a whole hemisphere of
+    // blue sky; at 16:1 the crib simply went black and the mood stopped reading
+    // as "late afternoon" and started reading as "underexposed".
+    fillColor: 0xa8c4f0, fillIntensity: 0.34, fillPos: [4.4, 2.4, 3.2],
     rimColor: 0xffbe80, rimIntensity: 1.85, rimPos: [0.4, 2.6, -5.2],
-    hemiSky: 0xc0d4f4, hemiGround: 0xffbe94, hemiIntensity: 0.105,
-    envIntensity: 0.235, shadowSpan: 6.2,
+    hemiSky: 0xc0d4f4, hemiGround: 0xffbe94, hemiIntensity: 0.14,
+    envIntensity: 0.30, shadowSpan: 6.2,
     grade: {
-      saturation: 1.18, contrast: 1.10, warmth: 0.11, vignette: 0.34, exposure: 1.0,
-      shadowTint: [0.82, 0.915, 1.22], highTint: [1.075, 1.0, 0.885], split: 1.15
+      // Split pulled back hard. At 1.15 with a shadow tint of [0.82, .915, 1.22]
+      // the multiplier on the blue channel was 1.25 across everything the eye
+      // reads as midtone; combined with a blue fill and a blue hemisphere it
+      // turned a golden-hour nursery lilac. The key carries the warmth now and
+      // the shadows only get the last of the sky.
+      saturation: 1.22, contrast: 1.15, warmth: 0.075, vignette: 0.30, exposure: 1.10,
+      shadowTint: [0.90, 0.955, 1.115], highTint: [1.075, 1.0, 0.875], split: 0.9
     },
-    fog: { color: 0xffd9b4, density: 0.020 }
+    fog: { color: 0xffd9b4, density: 0.009 }
   },
 
   evening: {  // bath time

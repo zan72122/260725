@@ -654,23 +654,25 @@ export class BathActivity {
     bezel.receiveShadow = true;
     g.add(bezel);
 
-    // recessed window: a shallow pocket, so the pad has depth in raking light
-    const wellGeo = roundedBox(0.074, 0.019, 0.010, 0.007, 4);
+    // Recessed window: a shallow pocket *inside* the bezel. The pocket and the
+    // pane both have to finish behind the bezel's front face (+0.006) or the
+    // "recess" protrudes and the reading disappears into its own shadow.
+    const wellGeo = roundedBox(0.076, 0.021, 0.009, 0.006, 4);
     this._disposables.push(wellGeo);
     const well = new THREE.Mesh(wellGeo, this._materials(
-      MAT.makePlastic({ color: 0x5f6b74, seed: 91, matte: 0.62 })));
-    well.position.z = 0.0035;
+      MAT.makePlastic({ color: 0x4d5760, seed: 91, matte: 0.62 })));
+    well.position.z = 0.0015;
     well.receiveShadow = true;
     g.add(well);
 
     // the thermochromic pane itself — lit plastic, one colour at a time
-    const paneGeo = roundedBox(0.062, 0.013, 0.006, 0.004, 3);
+    const paneGeo = roundedBox(0.062, 0.014, 0.005, 0.0035, 3);
     this._disposables.push(paneGeo);
     this.tempPaneMat = this._materials(MAT.makePlastic({
       color: 0x7be09a, seed: 74, matte: 0.18, clearcoat: 1
     }));
     const pane = new THREE.Mesh(paneGeo, this.tempPaneMat);
-    pane.position.z = 0.0055;
+    pane.position.z = 0.0035;      // sits in the pocket, 1 mm under the bezel
     pane.castShadow = false;
     g.add(pane);
     this.tempPane = pane;
@@ -1280,7 +1282,7 @@ export class BathActivity {
     // for a fully sculpted foam horn on a seated baby. Pulled in hard from the
     // original framing, which left the tub at a third of the frame height and
     // the bottom third empty floor.
-    add('tub', [0.30, 0.94, 0.99], [0.00, 0.55, 0.06], 34, 0.22);
+    add('tub', [0.324, 0.941, 1.064], [0.00, 0.52, 0.06], 34, 0.22);
     // over the rim, tight on a baby sitting in the water
     add('bath-face', [0.19, 0.87, 0.50], [0.02, 0.64, 0.02], 34, 0.14, 1.25);
     // the towel-and-dryer stage on the mat
@@ -1478,14 +1480,26 @@ export class BathActivity {
         });
         if (best > 0.03) return best * 0.96;
       }
+      // The character is one merged mesh with no part named "head", so the
+      // loop above finds nothing and we fall through. What the foam actually
+      // needs is not the anatomical radius but the distance from the head
+      // anchor to the crown — measure that directly off the silhouette.
       const h = b?.headWorldPos?.();
+      if (h && g) {
+        const bb = new THREE.Box3().setFromObject(g);
+        const crown = bb.max.y - h.y;
+        if (crown > 0.03 && crown < 0.18) return crown;
+      }
       const c = b?.focusPoint?.();
       if (h && c) {
         const d = h.distanceTo(c);
-        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.45, 0.045, 0.13);
+        // Head centre to chest centre on an infant is roughly 1.6 head radii;
+        // the old 0.45 factor under-read it badly enough that the whole cap of
+        // lather ended up inside the skull.
+        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.62, 0.050, 0.14);
       }
     } catch (e) { /**/ }
-    return 0.075;
+    return 0.082;
   }
 
   _babyPoint(kind) {
@@ -2466,7 +2480,7 @@ export class BathActivity {
     // A 0.6 mm breathe on the "just right" reading: enough to catch the eye at
     // closeup, invisible as motion in a still.
     const good = t >= TEMP_OK_MIN && t <= TEMP_OK_MAX;
-    pane.position.z = 0.0055 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
+    pane.position.z = 0.0035 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
   }
 
   _syncAnchors() {
@@ -2562,6 +2576,14 @@ export class BathActivity {
           this.temp = 0.58;
           this.water.setTemperature(this.temp);
         }
+        // …and nobody gets in with their clothes on. The undress step is a
+        // pointer interaction, so a harness shot that jumps straight to a full
+        // tub used to sit the baby in the water fully dressed. Unconditional
+        // on purpose: `state.naked` survives `State.reset()` while
+        // `Baby.reset()` puts the outfit back, so the flag cannot be trusted.
+        ctx.baby?.setOutfit?.({ top: null, bottom: null, socks: null,
+                                shoes: null, hat: null, bib: null });
+        ctx.state?.patch?.({ naked: true });
         this._placeBabyInTub();
         for (const f of this.floaters) { f.obj.visible = true; f.obj.position.y = this.water.heightAt(f.x, f.z) - f.buoy; }
         if (this.phase === 'undress' || this.phase === 'fill' || this.phase === 'temper' || this.phase === 'test') {

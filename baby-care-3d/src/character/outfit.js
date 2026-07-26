@@ -38,25 +38,34 @@ function segDist(p, a, b) {
 export const GARMENTS = {
   top: {
     groups: ['torso', 'armL', 'armR'],
-    inflate: 0.0058,
+    inflate: 0.0082,
     lod: 0.78,
     mask: (x, y, z) => {
-      const bodyM = band(0.2430, 0.4360, y);
+      // the collar sits low and wide, well clear of the head shell's own rim —
+      // an overlapping neckline leaves the two surfaces fighting and shows as
+      // a ring of hard flaps under the chin
+      const bodyM = band(0.2430, 0.4235, y);
       // short sleeves: a capsule around the top of each upper arm
       let sl = 0;
       for (const s of [1, -1]) {
         const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1080, 0.3640, 0.0160], s));
-        sl = Math.max(sl, 1 - sstep(0.030, 0.048, d));
+        sl = Math.max(sl, 1 - sstep(0.030, 0.052, d));
       }
       // neck hole
-      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4400) / 0.75) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.038 ** 2)));
+      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4330) / 0.72) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.042 ** 2)));
       return Math.max(bodyM, sl) * Math.max(0, neck);
     },
-    material: (c) => MAT.makeCloth({ color: c, weave: 'knit', threads: 120, repeat: 8, sheen: 0.95, seed: 21 })
+    // A knit at 120 threads × 8 repeats is a 1 mm rib: below a pixel at any
+    // sane framing, so it aliases into a shimmering moiré instead of reading
+    // as fabric. ~5 mm ribs read as knit and hold still.
+    material: (c) => MAT.makeCloth({
+      color: c, weave: 'knit', threads: 64, repeat: 3, sheen: 0.95,
+      seed: 21, normalScale: 0.5
+    })
   },
   bottom: {
     groups: ['torso', 'legL', 'legR'],
-    inflate: 0.0062,
+    inflate: 0.0072,
     lod: 0.7,
     mask: (x, y, z) => {
       const hip = band(0.2200, 0.3080, y);
@@ -67,7 +76,9 @@ export const GARMENTS = {
       }
       return Math.max(hip, leg);
     },
-    material: (c) => MAT.makeCloth({ color: c, weave: 'plain', threads: 150, repeat: 9, seed: 33 })
+    material: (c) => MAT.makeCloth({
+      color: c, weave: 'plain', threads: 70, repeat: 3.5, seed: 33, normalScale: 0.5
+    })
   },
   diaper: {
     groups: ['torso', 'legL', 'legR'],
@@ -82,16 +93,18 @@ export const GARMENTS = {
     // a nappy is non-woven and smooth; a plain weave is both truer and an
     // order of magnitude cheaper to synthesise than a terry pile
     material: () => MAT.makeCloth({
-      color: 0xfffdf8, weave: 'plain', threads: 190, repeat: 7,
-      sheen: 0.85, roughness: 0.97, seed: 45, normalScale: 0.7
+      color: 0xfffdf8, weave: 'plain', threads: 80, repeat: 3,
+      sheen: 0.85, roughness: 0.97, seed: 45, normalScale: 0.4
     })
   },
   socks: {
     groups: ['footL', 'footR', 'legL', 'legR'],
-    inflate: 0.0042,
+    inflate: 0.0048,
     lod: 0.66,
     mask: (x, y, z) => 1 - sstep(0.088, 0.112, y),
-    material: (c) => MAT.makeCloth({ color: c, weave: 'knit', threads: 90, repeat: 10, seed: 57 })
+    material: (c) => MAT.makeCloth({
+      color: c, weave: 'knit', threads: 48, repeat: 4, seed: 57, normalScale: 0.5
+    })
   },
   shoes: {
     groups: ['footL', 'footR'],

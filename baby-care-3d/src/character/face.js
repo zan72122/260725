@@ -27,11 +27,11 @@ const P = PROPORTIONS;
 /* ------------------------------------------------------------ landmarks --- */
 
 export const FACE = {
-  eye: [0.0300, 0.5320, 0.0530],   // eyeball centre (baby's left)
+  eye: [0.0298, 0.5318, 0.0498],   // eyeball centre (baby's left)
   eyeR: 0.0176,
   lidR: 0.0193,
-  brow: [0.0300, 0.5495, 0.0655],
-  browHalf: 0.0215,
+  brow: [0.0298, 0.5528, 0.0648],
+  browHalf: 0.0196,
   // the lip line, now that the lips are real volumes rather than a groove
   mouth: [0, 0.4858, 0.0740],
   mouthHalf: 0.0240,
@@ -51,6 +51,8 @@ const LID_HALF_DEG = 0.52 * 180;
 /* scratch — the face updates every frame and must not allocate */
 const _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3(), _t3 = new THREE.Vector3();
 const _t4 = new THREE.Vector3(), _t5 = new THREE.Vector3(), _t6 = new THREE.Vector3();
+const _t7 = new THREE.Vector3(), _t8 = new THREE.Vector3(), _t9 = new THREE.Vector3();
+const _t10 = new THREE.Vector3();
 const _tm = new THREE.Matrix4();
 const _FWD = new THREE.Vector3(0, 0, 1);
 
@@ -243,7 +245,7 @@ export function buildFaceMorphs(headGeometry) {
  * `irisDeg` is the angular radius the painted iris (0.34 of the canvas) ends up
  * subtending on the ball, i.e. how big the iris reads.
  */
-function eyeballGeometry(R, segs, rings, irisDeg = 41) {
+function eyeballGeometry(R, segs, rings, irisDeg = 29) {
   const g = new THREE.BufferGeometry();
   const pos = [], nor = [], uv = [], idx = [];
   const thetaRef = (0.5 / 0.34) * irisDeg * DEG;      // θ at the texture's edge
@@ -370,7 +372,7 @@ function browGeometry({ len = 0.0215, thick = 0.0052, segs = 20, bias = 0, arch 
       uv.push(t, v);
       // alpha: soft at the margins, softer still at the roots
       const edge = Math.pow(Math.max(0, 1 - a * a), 0.55);
-      col.push(1, 1, 1, edge * endFade * 0.92);
+      col.push(1, 1, 1, edge * endFade * 0.62);
     }
   }
   for (let i = 0; i < segs; i++) {
@@ -484,7 +486,7 @@ export class Face {
     this.lashMat = MAT.makeLash({ color: 0x4b3428 });
     // Infant brows are a warm haze, not a drawn line. Vertex alpha carries the
     // root fade; the material only has to agree to look at it.
-    this.browMat = MAT.makeLash({ color: 0xb08a63, opacity: 1 });
+    this.browMat = MAT.makeLash({ color: 0xc79a72, opacity: 1 });
     this.browMat.vertexColors = true;
     this.browMat.transparent = true;
     this.browMat.depthWrite = false;
@@ -550,7 +552,7 @@ export class Face {
       const left = s > 0;
       const brow = new THREE.Mesh(browGeometry({
         len: FACE.browHalf * (left ? 1.02 : 0.99),
-        thick: 0.0058,
+        thick: 0.0038,
         segs: 22,
         bias: left ? 0.10 : 0.02,
         arch: left ? 1.12 : 0.94
@@ -740,7 +742,7 @@ export class Face {
     if (worldPos) this._saccadeIn = 0;
   }
 
-  _updateGaze(dt) {
+  _updateGaze(dt, ctx) {
     const head = this._headBone;
     if (!head) return;
     // Eye pivots live in `this.group`, which is offset from the head bone by
@@ -752,19 +754,37 @@ export class Face {
     if (this.lookTarget) {
       localTarget = this.group.worldToLocal(this.lookTarget.clone());
     } else {
-      // idle wander: infants scan in short hops with long fixations
+      // Idle wander. The point has to be built in *world* space off the eye's
+      // own position: authoring it at a fixed height in the rig's frame put it
+      // 18 cm above a seated baby's eyeline, so the character spent every shot
+      // staring at the ceiling.
       this._saccadeIn -= dt;
       if (this._saccadeIn <= 0) {
         this._saccadeIn = 0.9 + Math.random() * 2.6;
+        // infants lock onto faces: most fixations go to whoever is watching
+        this._idleAtCam = Math.random() < 0.62;
         this._idlePoint.set(
-          (Math.random() - 0.5) * 0.55,
-          P.eyeY + (Math.random() - 0.35) * 0.22,
-          0.55 + Math.random() * 0.5
+          (Math.random() - 0.5) * 0.34,
+          (Math.random() - 0.42) * 0.16,
+          0.42 + Math.random() * 0.45
         );
       }
-      const w = this._rigRoot
-        ? this._rigRoot.localToWorld(this._idlePoint.clone())
-        : this.group.localToWorld(this._idlePoint.clone());
+      const eyeW = _t7.copy(this.eyes[0].pivot.position)
+        .lerp(this.eyes[1].pivot.position, 0.5);
+      this.group.localToWorld(eyeW);
+      const root = this._rigRoot || this.group;
+      const fwd = _t8.set(0, 0, 1).transformDirection(root.matrixWorld).normalize();
+      const right = _t9.set(0, 1, 0).cross(fwd).normalize();
+      const w = _t10.copy(eyeW);
+      if (this._idleAtCam && ctx?.camera) {
+        w.setFromMatrixPosition(ctx.camera.matrixWorld);
+        w.addScaledVector(right, this._idlePoint.x * 0.25);
+        w.y += this._idlePoint.y * 0.25;
+      } else {
+        w.addScaledVector(fwd, this._idlePoint.z)
+          .addScaledVector(right, this._idlePoint.x);
+        w.y += this._idlePoint.y;
+      }
       localTarget = this.group.worldToLocal(w);
     }
 
@@ -843,7 +863,7 @@ export class Face {
   update(dt, ctx) {
     this._t += dt;
     this._updateBlink(dt);
-    this._updateGaze(dt);
+    this._updateGaze(dt, ctx);
 
     // controls approach their mood targets
     const rate = 1 - Math.exp(-dt * (this._moodRate || 4));

@@ -932,9 +932,12 @@ export class SteamVeil {
       const s = p.scale * (0.55 + life * 1.5);
       p.sp.scale.set(s, s * 0.82, 1);
       p.sp.material.rotation = p.spin * life * 2.2;
-      // fade in fast, out slow; never brighter than a whisper
+      // Fade in fast, out slow. This used to peak at 0.115 × amount, which
+      // after AgX and the vignette was indistinguishable from nothing — the
+      // "steam" shot had a fully-driven veil in it and rendered no steam at
+      // all. Still a whisper, but now a visible one.
       const fade = Math.sin(Math.min(1, life) * Math.PI);
-      p.mat.opacity = fade * 0.115 * this.amount;
+      p.mat.opacity = fade * 0.28 * this.amount;
     }
     this.group.visible = this.amount > 0.01;
   }

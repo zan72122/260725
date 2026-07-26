@@ -49,7 +49,7 @@ const SKY_FRAG = /* glsl */`
   varying vec2 vUv;
   uniform vec3 uTop, uMid, uHorizon, uSun, uStarTint;
   uniform vec2 uSunPos;
-  uniform float uSunSize, uSunGlow, uStars, uHaze, uTime;
+  uniform float uSunSize, uSunGlow, uStars, uHaze, uTime, uGain;
 
   float hash(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -61,6 +61,14 @@ const SKY_FRAG = /* glsl */`
     float h = clamp(vUv.y, 0.0, 1.0);
     vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.55, h));
     col = mix(col, uTop, smoothstep(0.45, 1.0, h));
+
+    // Lateral gradient toward the sun. A real sky is not radially symmetric
+    // about the zenith — it is brightest and least saturated on the sun's side
+    // of the dome, and that single gradient is most of what tells you which way
+    // the light in the room is coming from when you can only see a 1.4 m patch
+    // of sky through a window.
+    float lat = 1.0 - clamp(abs(vUv.x - uSunPos.x) * 1.35, 0.0, 1.0);
+    col = mix(col, mix(col, uSun, 0.30), lat * lat);
 
     // stars: only the top two thirds, and never on top of the sun
     if (uStars > 0.001) {
@@ -79,7 +87,19 @@ const SKY_FRAG = /* glsl */`
 
     // ground haze lifts the horizon and hides the treeline's feet
     col = mix(col, uHorizon * 1.06, uHaze * pow(max(0.0, 1.0 - h * 2.2), 2.0));
-    gl_FragColor = vec4(col, 1.0);
+
+    /* The exterior read "washed out and flat" for one structural reason: the
+     * sky was being emitted at roughly the same linear luminance as a lit
+     * interior wall (~0.6). Outdoors is one to two stops brighter than indoors
+     * — that difference *is* the look of a window. At parity the opening reads
+     * as a pale rectangle painted on the wall; at gain the highlights roll off
+     * through AgX, the bloom threshold (1.02) finally catches the sky, the
+     * treeline drops to a silhouette against it, and the frame gains the one
+     * genuinely bright value it was missing.
+     *
+     * The gain is applied last so it multiplies the sun disc and the glow with
+     * everything else, which is what puts the sun above the bloom gate. */
+    gl_FragColor = vec4(col * uGain, 1.0);
   }`;
 
 /* ---------------------------------------------------------- shaft shader -- */
@@ -232,25 +252,38 @@ const MOTE_FRAG = /* glsl */`
 
 /* --------------------------------------------------------------- moods --- */
 
+/**
+ * `gain` is the exterior's exposure relative to the interior. `ground` is the
+ * unlit backdrop tone and `aerial` how far the far trees wash toward the
+ * horizon colour — see `_buildExterior`, where the whole backdrop was moved off
+ * the room's own lighting rig.
+ */
 const SKY = {
   day: {
-    top: 0x5f9edd, mid: 0x9fcaef, hor: 0xe2ecf3, sun: 0xfff6e2,
-    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.50,
+    // Pushed a stop of saturation back into the dome. The old mid/horizon pair
+    // was a 6% blue against near-white, which through a 1.4 m opening reads as
+    // "overcast" no matter what the room is doing.
+    top: 0x3f86d4, mid: 0x84bcec, hor: 0xd7e7f2, sun: 0xfff6e2,
+    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.38,
+    gain: 1.55, ground: 0x8aa76e, aerial: 0.44,
     shaft: 0xfff2dc, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
   },
   golden: {
-    top: 0x7ba6d8, mid: 0xefc492, hor: 0xffd7a6, sun: 0xffdaa2,
-    sunPos: [0.28, 0.40], sunSize: 0.052, glow: 0.58, stars: 0, haze: 0.78,
+    top: 0x5f92d0, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
+    sunPos: [0.28, 0.40], sunSize: 0.052, glow: 0.58, stars: 0, haze: 0.62,
+    gain: 1.70, ground: 0x9a9a5c, aerial: 0.54,
     shaft: 0xffd7a0, shaftI: 1.55, cloud: 0xffe6cc, cloudA: 0.92
   },
   evening: {
-    top: 0x3f4d84, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
-    sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.82,
+    top: 0x33417a, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
+    sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.70,
+    gain: 1.10, ground: 0x67765a, aerial: 0.48,
     shaft: 0xffc79c, shaftI: 0.72, cloud: 0xd8bfc4, cloudA: 0.85
   },
   night: {
     top: 0x101736, mid: 0x232f5c, hor: 0x3c4370, sun: 0xe2e8ff,
     sunPos: [0.66, 0.78], sunSize: 0.026, glow: 0.20, stars: 1, haze: 0.30,
+    gain: 0.62, ground: 0x2a333c, aerial: 0.55,
     shaft: 0xb0c2ff, shaftI: 0.26, cloud: 0x4a5480, cloudA: 0.7
   }
 };
@@ -564,6 +597,7 @@ export class WindowUnit {
       uSunGlow: { value: SKY.day.glow },
       uStars: { value: 0 },
       uHaze: { value: SKY.day.haze },
+      uGain: { value: SKY.day.gain },
       uTime: { value: 0 }
     };
     // Far enough back that moving the camera across the room parallaxes the
@@ -594,10 +628,24 @@ export class WindowUnit {
       this.clouds.push(plane);
     }
 
-    /* --- ground + treeline ---------------------------------------------- */
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x93a97c, roughness: 1, metalness: 0, fog: false
-    });
+    /* --- ground + treeline ----------------------------------------------
+     *
+     * Both were `MeshStandardMaterial`, i.e. lit by the *room's* rig. That is
+     * wrong twice over. Physically the rig is a stand-in for the sun aimed at
+     * the baby's chest four metres inside the house, so a tree ten metres out
+     * in the garden was being lit by a light that does not exist out there —
+     * and at keyIntensity 3.05 it came back at three times its albedo, which is
+     * precisely the "washed out and flat" read. Practically it also meant the
+     * backdrop's exposure moved whenever anything re-aimed the key.
+     *
+     * Unlit is the right model for a backdrop: the values are authored, they
+     * hold still, and they sit correctly *below* the sky's gain so the treeline
+     * reads as a silhouette against a bright sky the way it does through a real
+     * window. Aerial perspective — the far trees washing toward the horizon
+     * colour — is baked per instance from its z, which is depth cueing the lit
+     * version never had at all.
+     */
+    const groundMat = new THREE.MeshBasicMaterial({ color: 0x7d9a63, fog: false });
     // The outside ground sits at the same height as the nursery floor, so it
     // must start *behind* the wall or it lays a green sheet across the room.
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 46), groundMat);
@@ -607,9 +655,7 @@ export class WindowUnit {
     ex.add(ground);
     this.groundMat = groundMat;
 
-    const treeMat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.92, metalness: 0, fog: false
-    });
+    const treeMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
     const trunk = tint(xf(new THREE.CylinderGeometry(0.09, 0.13, 1.0, 7), [0, 0.5, 0]), 0x6b513a);
     const foliage = [];
     for (let i = 0; i < 3; i++) {
@@ -617,23 +663,75 @@ export class WindowUnit {
         [0, 1.15 + i * 0.62, 0]), 0xffffff));
     }
     const treeGeo = mergeAll([trunk, ...foliage], { colors: true });
+    /* Unlit geometry has no form. A cone with a single flat colour is a
+     * triangle, and fourteen of them are a row of triangles — which is exactly
+     * how the treeline read once it came off the room's lighting rig. So the
+     * shading is *baked into the vertex colours* from the normal: one fixed
+     * sun direction (up, and toward the window, so the lit side is the side you
+     * can actually see) plus a sky term on up-facing surfaces. It costs
+     * nothing, it never changes when the room's key moves, and it is what turns
+     * the treeline back into fourteen rounded objects. */
+    {
+      const nrm = treeGeo.attributes.normal, col = treeGeo.attributes.color;
+      const sun = new THREE.Vector3(0.52, 0.70, 0.49).normalize();
+      for (let i = 0; i < col.count; i++) {
+        const nd = nrm.getX(i) * sun.x + nrm.getY(i) * sun.y + nrm.getZ(i) * sun.z;
+        const sky = 0.5 + 0.5 * nrm.getY(i);
+        const s = 0.52 + 0.62 * Math.max(0, nd) + 0.14 * sky;
+        col.setXYZ(i, col.getX(i) * s, col.getY(i) * s, col.getZ(i) * s);
+      }
+      col.needsUpdate = true;
+    }
     const R = rng(31);
-    const greens = [0x5f8f57, 0x74a262, 0x4e7d4c, 0x86ad6a];
+    // Darker and more separated than the old set: unlit, these are the values
+    // that actually land on screen, and a treeline needs three or four clearly
+    // different greens or it reads as one green blob.
+    const greens = [0x5c8a4e, 0x74a25c, 0x4a7644, 0x84ad64];
     const trees = [];
+    this._treeBase = [];
     for (let i = 0; i < 14; i++) {
       const s = 0.85 + R() * 0.8;
+      const z = -10.5 - R() * 6.5;
       trees.push({
-        pos: [-19 + i * 2.8 + R() * 1.8, gy - 0.03, -10.5 - R() * 6.5],
+        pos: [-19 + i * 2.8 + R() * 1.8, gy - 0.03, z],
         rot: [0, R() * 3, 0],
         scale: [s * (0.85 + R() * 0.3), s, s * (0.85 + R() * 0.3)],
         color: greens[i % greens.length]
       });
+      // 0 at the nearest tree, 1 at the furthest — the aerial-perspective mix.
+      this._treeBase.push({ color: greens[i % greens.length], far: (-z - 10.5) / 6.5 });
     }
     const treeMesh = instanced(treeGeo, treeMat, trees, 'trees');
     treeMesh.castShadow = false;
     treeMesh.receiveShadow = false;
     ex.add(treeMesh);
     this.trees = treeMesh;
+    this._applyAerial(SKY.day);
+  }
+
+  /**
+   * Wash the backdrop toward the sky's horizon colour by distance. This is the
+   * only depth cue a 14-tree instanced treeline has, and without it the far
+   * trees are exactly as saturated as the near ones — the flatness the critique
+   * flagged. Re-run whenever the mood changes, because the colour it washes
+   * toward is the sky's.
+   */
+  _applyAerial(sky) {
+    if (!this._treeBase || !this.trees) return;
+    const hor = new THREE.Color(sky.hor ?? 0xd7e7f2);
+    const aerial = sky.aerial ?? 0.42;
+    const c = new THREE.Color();
+    for (let i = 0; i < this._treeBase.length; i++) {
+      const b = this._treeBase[i];
+      c.setHex(b.color).lerp(hor, aerial * (0.22 + 0.78 * b.far));
+      this.trees.setColorAt(i, c);
+    }
+    if (this.trees.instanceColor) this.trees.instanceColor.needsUpdate = true;
+    if (this.groundMat) {
+      this.groundMat.color.setHex(
+        this.weather === 'snow' ? 0xdfe6ea : (sky.ground ?? 0x7d9a63)
+      ).lerp(hor, aerial * 0.5);
+    }
   }
 
   /* ------------------------------------------------------ precipitation -- */
@@ -846,7 +944,13 @@ export class WindowUnit {
     ringGeo.rotateY(Math.PI / 2);
 
     for (const sx of [-1, 1]) {
-      const geo = drapedPanel(this.panelW, this.panelH, { cols: 52, rows: 22, thickness: 0.009 });
+      // 52 columns over 6 pleats is ~8 quads per fold: with a cosine lobe that
+      // is coarse enough that each fold reads as three flat facets catching
+      // three different specular values — the "hard-edged striped ribbon" look.
+      // 88 puts ~14 quads on a fold, which is the point at which the shading
+      // across a pleat goes continuous. It is one geometry and one draw call
+      // either way; the only cost is 3 k vertices in a 500 k-triangle frame.
+      const geo = drapedPanel(this.panelW, this.panelH, { cols: 88, rows: 30, thickness: 0.010 });
       const panel = new THREE.Mesh(geo, M.curtain);
       panel.castShadow = true;
       panel.receiveShadow = true;
@@ -997,8 +1101,16 @@ export class WindowUnit {
       cloudOpacity: Math.min(1, 0.35 + overcast * 0.6 + (w === 'clear' ? 0.25 : 0.4)),
       shaftColor: C(s.shaft).lerp(C(0xcfd8e6), overcast * 0.6),
       // overcast light is diffuse: the beam does not vanish, it goes soft
-      shaftI: s.shaftI * (w === 'rain' ? 0.28 : w === 'snow' ? 0.5 : 1)
+      shaftI: s.shaftI * (w === 'rain' ? 0.28 : w === 'snow' ? 0.5 : 1),
+      // An overcast sky is *dimmer* than a clear one but the cloud deck is
+      // still far brighter than the room, so the gain drops rather than dies.
+      gain: (s.gain ?? 1) * (1 - overcast * 0.34)
     };
+    this._applyAerial({
+      hor: this.tgt.hor.getHex(),
+      ground: s.ground,
+      aerial: (s.aerial ?? 0.42) + overcast * 0.2
+    });
   }
 
   setMood(name, instant = false) {
@@ -1039,6 +1151,7 @@ export class WindowUnit {
     U.uSunGlow.value = T.glow;
     U.uStars.value = T.stars;
     U.uHaze.value = T.haze;
+    U.uGain.value = T.gain ?? 1;
     for (const c of this.clouds) {
       c.material.color.copy(T.cloudColor);
       c.material.opacity = T.cloudOpacity * (c.userData.speed > 0.008 ? 0.8 : 1);
@@ -1047,7 +1160,6 @@ export class WindowUnit {
     this.poolU.uColor.value.copy(T.shaftColor);
     this.moteU.uColor.value.copy(T.shaftColor).lerp(new THREE.Color(0xffffff), 0.35);
     this._writeShaftIntensity(T.shaftI);
-    this.groundMat.color.set(this.weather === 'snow' ? 0xdfe6ea : 0x93a97c);
   }
 
   _writeShaftIntensity(i) {
@@ -1090,6 +1202,7 @@ export class WindowUnit {
     U.uSunGlow.value += (T.glow - U.uSunGlow.value) * k;
     U.uStars.value += (T.stars - U.uStars.value) * k;
     U.uHaze.value += (T.haze - U.uHaze.value) * k;
+    U.uGain.value += ((T.gain ?? 1) - U.uGain.value) * k;
     this._shaftI = (this._shaftI ?? T.shaftI) + (T.shaftI - (this._shaftI ?? T.shaftI)) * k;
     this._writeShaftIntensity(this._shaftI);
     this.shaftU.uColor.value.lerp(T.shaftColor, k);

@@ -308,19 +308,54 @@ export function wood({
      * clamped to something the texture — and the eye at floor distance — can
      * actually carry: roughly 3–9 growth rings across the width of one plank.
      */
+    /* Third pass (D22 continued). The floor still showed *regular horizontal
+     * banding* — straight dark lines marching across the planks, reading as a
+     * moiré rather than as plank seams. Three separate features were below the
+     * Nyquist limit of the 512² map and every one of them beat against the
+     * screen grid:
+     *
+     *   1. `streak = ridged2(u, v, 24, 260, 3, …)`. Three octaves starting at
+     *      260 periods in v means the last octave ran at 1040 periods — half a
+     *      texel per feature. The normal map's own streak term was worse
+     *      (320 → 640). Both are now capped so the finest octave still gets ~6
+     *      texels, which is the point at which a mip chain can actually carry
+     *      it down to the far end of the floor.
+     *   2. The seam was `1 - d·rows·4.5`, i.e. a hard-edged line 2.3 texels
+     *      wide. A 2-texel black line tiled 2.4× across a floor seen at a
+     *      grazing angle is the textbook recipe for banding. It is now ~7
+     *      texels with a smoothstep falloff, and only ~⅔ as dark.
+     *   3. 7 growth rings per plank × 7 planks × 2.4 repeats put 118 ring
+     *      cycles down the depth of the floor, which is roughly one cycle per
+     *      two screen pixels in the mid-ground. Capped at 5 per plank.
+     *
+     * None of this removes detail from a plank seen close up — it removes
+     * detail the display could never have resolved and which was therefore
+     * only ever visible as an artefact.
+     */
     const rows = Math.max(1, Math.round(planks));
     const perPlank = planks
-      ? Math.max(3, Math.min(9, Math.round((ringScale / rows) * 0.45)))
-      : Math.max(4, Math.min(40, Math.round(ringScale * 0.42)));
+      ? Math.max(3, Math.min(5, Math.round((ringScale / rows) * 0.45)))
+      : Math.max(4, Math.min(28, Math.round(ringScale * 0.42)));
     const ringFreq = planks ? perPlank * rows : perPlank;   // integer ⇒ tiles in v
+    // Grain fibres run *along* the board (long in u, narrow in v). "Narrow"
+    // still has to mean several texels: size/8 is the finest octave a 512² map
+    // can hand to a mip chain without it turning into hash noise.
+    const fibreV = Math.max(8, Math.min(48, Math.round(size / 12)));
+    const fibreU = Math.max(4, Math.round(fibreV / 3));
 
     const rings = (u, v) => {
       const row = planks ? Math.floor(v * rows) % rows : 0;
       const off = planks ? hash2(row, 0, seed + 17) : 0;
       // Long, low-frequency figure stretched down the board (period 4 in u,
       // 11 in v) plus a slower second lobe. Together well under one ring pitch.
-      const warp = (fbm2(u, v, 4, 11, 3, seed + row * 13) - 0.5) * 0.86
-                 + (fbm2(u, v, 2, 5, 2, seed + 61 + row) - 0.5) * 0.34;
+      // Cathedral figure. Amplitude is now nearly a full ring pitch and the
+      // two lobes run at different rates *per plank*, because at ±0.6 of a
+      // pitch every board had the same gentle wave and the floor read as
+      // machine-printed laminate — regular parallel arcs, no two boards ever
+      // disagreeing about where the heart of the log was.
+      const warp = (fbm2(u, v, 3, 9, 3, seed + row * 13) - 0.5) * (1.05 + off * 0.5)
+                 + (fbm2(u, v, 2, 4, 2, seed + 61 + row) - 0.5) * 0.52
+                 + (fbm2(u, v, 7, 23, 2, seed + 131 + row * 7) - 0.5) * 0.16;
       const g = (v + off) * ringFreq + warp;
       let r = g - Math.floor(g);
       r = Math.abs(r * 2 - 1);
@@ -328,15 +363,21 @@ export function wood({
       // symmetric triangle wave.
       r = Math.pow(r, 1.45);
       // fine fibre streaks running *along* the grain
-      const streak = ridged2(u, v, 24, 260, 3, seed + 31);
-      return Math.min(1, r * 0.70 + streak * 0.30);
+      // 0.30 of a *ridged* field at a single dominant frequency gave the floor
+      // a corduroy read — dead-parallel fine ribs running the whole length of
+      // every board. Fibre should be a whisper on top of the figure, not a
+      // second pattern competing with it.
+      const streak = ridged2(u, v, fibreU, fibreV, 2, seed + 31);
+      return Math.min(1, r * 0.83 + streak * 0.17);
     };
 
+    // A joint between two boards: soft-shouldered rather than a hard line, so
+    // the mip chain has something to average instead of a 2-texel spike.
     const seam = (v) => {
       if (!planks) return 0;
       const f = v * rows;
-      const d = Math.abs(f - Math.round(f));
-      return Math.max(0, 1 - d * rows * 4.5);
+      const d = Math.abs(f - Math.round(f)) * rows;     // 0 at the joint
+      return smooth(Math.max(0, 1 - Math.min(1, d * 1.55)));
     };
 
     // Boards are cut from different logs: a floor with every plank the same
@@ -348,15 +389,19 @@ export function wood({
       // knots
       const w = worley(u, v, 5, seed + 41);
       if (w.f1 < 0.10 && w.id > 0.78) t = Math.min(1, t + (0.10 - w.f1) * 5.5);
-      const c = mixHex(light, dark, t * 0.72);
-      const s = (1 - seam(v) * 0.62) * (1 + plankTone(v) * 0.15);
+      // 0.72 made the growth rings the loudest thing on the board; on a floor
+      // seen from 4 m that reads as stripes, not as timber. The plank-to-plank
+      // tone step (below) is what should carry the pattern at that distance.
+      const c = mixHex(light, dark, t * 0.52);
+      const s = (1 - seam(v) * 0.44) * (1 + plankTone(v) * 0.20);
       out[0] = c[0] * s; out[1] = c[1] * s; out[2] = c[2] * s;
     });
 
     // Grain sits almost flush on a finished board; the plank joint is the only
     // real groove, so the seam carries most of the relief.
     const normal = normalFromHeight(size, 1.15, (u, v) =>
-      rings(u, v) * 0.22 + seam(v) * 1.05 + ridged2(u, v, 30, 320, 2, seed + 60) * 0.16);
+      rings(u, v) * 0.22 + seam(v) * 1.05
+      + ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085);
 
     const rough = generate(size, (u, v, out) => {
       const t = rings(u, v);
@@ -384,12 +429,36 @@ export function fabric({
   color = 0xffffff, seed = 7, size = 512, weave = 'plain',
   threads = 128, fuzz = 0.5
 } = {}) {
+  /* Nyquist guard (D-moiré). Callers were asking for 120–200 threads across a
+   * 512² tile — 2.5 to 4 texels per thread — and then tiling that 8 to 10 times
+   * across a garment. The result on the baby's top was not "fine knit", it was
+   * a full-screen interference pattern: the weave's period beat against the
+   * pixel grid and produced metre-wide dark diagonal bands that swam when the
+   * camera moved. It is the single most obvious artefact in the closeups.
+   *
+   * A thread needs several texels for its over/under to have a *shape* that a
+   * mip chain can average down gracefully, so that is the floor. This is not a
+   * loss of detail: 57 threads per tile at repeat 9 is still 500 threads across
+   * a baby's chest — finer than real jersey. What is thrown away is only the
+   * part the display was aliasing on.
+   *
+   * Calibrated at size/9 (≈57 on a 512² tile). size/12 killed the moiré
+   * outright but swung too far the other way: the top read as a hand-crocheted
+   * string vest, because a stitch twelve texels across tiled eight times is a
+   * 2 cm stitch on a 20 cm chest.
+   */
+  threads = Math.max(6, Math.min(threads, Math.floor(size / 9)));
   return cached(`fab:${color}:${seed}:${weave}:${threads}:${fuzz}`, () => {
+    // The slub/fuzz octaves have to stay resolvable too: `fbm(…, threads*2, 3)`
+    // ran its last octave at 4× the thread pitch (1024 periods on a 512 map),
+    // which is hash noise, not fibre — and hash noise in a *normal* map is what
+    // makes cloth sparkle and then moiré when it is minified.
+    const detail = Math.max(8, Math.min(Math.round(threads * 1.3), Math.floor(size / 6)));
     const height = (u, v) => {
       if (weave === 'terry') {
-        const w = worley(u, v, threads * 0.42, seed);
+        const w = worley(u, v, Math.max(6, Math.round(threads * 0.42)), seed);
         const loops = Math.pow(1 - w.f1, 2.2);
-        return loops * 0.85 + fbm(u, v, threads, 3, seed + 2) * 0.15;
+        return loops * 0.85 + fbm(u, v, detail, 2, seed + 2) * 0.15;
       }
       if (weave === 'knit') {
         // interlocking V-stitches: offset every other row
@@ -399,14 +468,14 @@ export function fabric({
         const sx = ((u * rows + off) % 1);
         const sy = ((v * rows) % 1);
         const vshape = 1 - Math.abs(Math.abs(sx * 2 - 1) - sy) * 1.1;
-        return Math.max(0, vshape) * 0.8 + fbm(u, v, threads * 2, 3, seed + 4) * 0.2;
+        return Math.max(0, vshape) * 0.8 + fbm(u, v, detail, 2, seed + 4) * 0.2;
       }
       // plain weave: over-under of warp and weft
       const warp = Math.sin(u * threads * Math.PI * 2) * 0.5 + 0.5;
       const weft = Math.sin(v * threads * Math.PI * 2) * 0.5 + 0.5;
       const cell = (Math.floor(u * threads) + Math.floor(v * threads)) & 1;
       const base = cell ? warp : weft;
-      return base * 0.7 + fbm(u, v, threads * 2, 3, seed + 6) * 0.3;
+      return base * 0.7 + fbm(u, v, detail, 2, seed + 6) * 0.3;
     };
 
     const map = generate(size, (u, v, out) => {
@@ -423,7 +492,7 @@ export function fabric({
     const rough = generate(size, (u, v, out) => {
       const h = height(u, v);
       // fuzzy fibres scatter: high roughness, slightly lower on tight threads
-      const r = 0.94 - h * 0.10 * (1 - fuzz) + fbm(u, v, 64, 2, seed + 12) * 0.05;
+      const r = 0.94 - h * 0.10 * (1 - fuzz) + fbm(u, v, Math.min(64, detail), 2, seed + 12) * 0.05;
       out[0] = out[1] = out[2] = Math.min(1, r);
     });
 
@@ -477,8 +546,21 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
      * that only resolves in the closeups. Same texel budget, three scales of
      * structure instead of one.
      */
-    const cells = Math.max(8, Math.min(Math.round(density * 0.28), Math.floor(size / 10)));
-    const fineCells = Math.min(Math.round(cells * 2.4), Math.floor(size / 4));
+    /* Third pass. The rug still read as sandpaper in the face closeups, and the
+     * reason was the *second* Worley octave, not the first: `cells * 2.4`
+     * capped at size/4 gave 115 cells across a 512² map — 4.4 texels per fine
+     * tuft — and that octave went into the normal map at full strength. Four
+     * texels of cellular noise in a normal map is not fibre, it is per-pixel
+     * glitter, and once the rug is minified in the wide shot it turns into the
+     * salt-and-pepper stipple the critique keeps flagging.
+     *
+     * Both octaves are now held to a floor of ~10 texels per feature, and the
+     * fine one is weighted down. What the rug loses in per-tuft speckle it gets
+     * back in `lay` and `drift`, which are the octaves that actually survive to
+     * the screen at any distance.
+     */
+    const cells = Math.max(8, Math.min(Math.round(density * 0.28), Math.floor(size / 13)));
+    const fineCells = Math.min(Math.round(cells * 1.9), Math.floor(size / 10));
     // The pile lies in a direction: long, soft bands (the "vacuum stripe")
     // stretched across the rug, which is most of what sells a cut pile.
     const lay = (u, v) => fbm2(u, v, 5, 14, 3, seed + 5);
@@ -488,7 +570,7 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
       const w = worley(u, v, cells, seed);
       const tuft = Math.pow(1 - w.f1, 1.35);
       const f = Math.pow(1 - worley(u, v, fineCells, seed + 23).f1, 2.0);
-      return tuft * 0.50 + f * 0.16 + lay(u, v) * 0.34;
+      return tuft * 0.54 + f * 0.09 + lay(u, v) * 0.37;
     };
     const map = generate(size, (u, v, out) => {
       const w = worley(u, v, cells, seed);

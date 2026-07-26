@@ -81,14 +81,18 @@ const KINDS = {
     fadeIn: 0.08, fadeOut: 0.18, alpha: 1, palette: PAL.bubble, soft: 0.05
   },
   steam: {
-    mode: 'billboard', shape: 'SOFT', blending: 'normal', lit: false,
+    // Additive, not alpha. White vapour at 0.4 alpha over a white enamel tub
+    // has no contrast with it and simply did not read — a fully-driven steam
+    // shot rendered with no steam in it. Vapour is visible because it *scatters
+    // light back*, so lifting the value is both truer and legible.
+    mode: 'billboard', shape: 'SOFT', blending: 'additive', lit: false,
     capacity: 200, life: [1.6, 3.2], size: [0.035, 0.075],
     speed: [0.05, 0.18], spread: 0.65, dir: [0, 1, 0],
     gravity: 0, rise: 0.24, drag: 0.9, curl: 0.28, grow: 3.4,
     spin: [-0.5, 0.5], sprite: () => TEX.radialSprite({ size: 128, power: 1.5 }),
     // `soft` is a *world* distance. A bath tub is 0.6 m across, so a 0.28 m
     // fade band dissolved every puff into the water it was rising off.
-    fadeIn: 0.22, fadeOut: 0.62, alpha: 0.30, palette: PAL.steam, soft: 0.07
+    fadeIn: 0.22, fadeOut: 0.62, alpha: 0.30, palette: PAL.steam, soft: 0.05
   },
   splash: {
     mode: 'stretch', shape: 'SOFT', blending: 'normal', lit: false,
@@ -125,11 +129,11 @@ const KINDS = {
     // The motes drifting in the window shaft. Long-lived, nearly still, and
     // the single cheapest thing that makes a room read as photographed.
     mode: 'billboard', shape: 'SOFT', blending: 'additive', lit: false,
-    capacity: 420, life: [7, 15], size: [0.0055, 0.0135],
+    capacity: 420, life: [7, 15], size: [0.0065, 0.0165],
     speed: [0.004, 0.020], spread: Math.PI, dir: [0, 1, 0],
     gravity: -0.004, drag: 0.25, curl: 0.010, twinkle: 1.1,
     sprite: () => TEX.radialSprite({ size: 64, power: 2.6 }),
-    fadeIn: 0.16, fadeOut: 0.40, alpha: 0.62, palette: PAL.dust, soft: 0.16
+    fadeIn: 0.16, fadeOut: 0.40, alpha: 0.78, palette: PAL.dust, soft: 0.16
   },
   star: {
     mode: 'billboard', shape: 'STAR5', blending: 'additive', lit: false,

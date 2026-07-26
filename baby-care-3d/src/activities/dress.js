@@ -286,7 +286,7 @@ export class DressActivity {
     // wardrobe and the hanging outfits reading behind.
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [0.62, 0.74, 1.44], target: [0.02, 0.36, 0.34],
+      pos: [0.665, 0.708, 1.522], target: [0.02, 0.30, 0.34],
       fov: 34, focusRange: 0.22, dof: 1.10, handheld: 0.80, roll: 0.7
     });
     rig.overridePreset('face', {

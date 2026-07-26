@@ -100,6 +100,16 @@ function m(p, side) { return [p[0] * side, p[1], p[2]]; }
  * The implicit volumes. `g` is the owning patch group, `prio` decides which
  * shell stays on the surface where two parts overlap (lower wins).
  */
+/**
+ * Which shell stays on the surface where two parts overlap — lower wins.
+ *
+ * The head outranks the torso because the *neck* belongs to the head group:
+ * with it the other way round the torso patch's top cap sat on the surface all
+ * the way up to the jaw, interleaving with the head shell into a ring of hard
+ * triangular flaps under the chin.
+ */
+const PRIO = { head: 0, torso: 1, limb: 2, end: 3 };
+
 export function bodySpec() {
   const prims = [];
   const cone = (g, prio, a, b, r1, r2, sharp) =>
@@ -107,26 +117,26 @@ export function bodySpec() {
   const ell = (g, prio, c, r, sharp) => prims.push({ g, prio, t: 1, c, r, sharp });
 
   /* -- torso: pelvis → belly → chest, plus buttocks and the shoulder girdle */
-  ell('torso', 0, [0, 0.2680, 0.0000], [0.0800, 0.0550, 0.0700]);      // pelvis
-  ell('torso', 0, [0, 0.3220, 0.0080], [0.0840, 0.0600, 0.0780]);      // belly
-  ell('torso', 0, [0, 0.3780, 0.0040], [0.0790, 0.0520, 0.0700]);      // ribcage
-  cone('torso', 0, [-0.0540, 0.4040, 0.0020], [0.0540, 0.4040, 0.0020], 0.0400, 0.0400); // clavicle bar
-  cone('torso', 0, [-0.0250, 0.2560, 0.0000], [0.0250, 0.2560, 0.0000], 0.0430, 0.0430); // crotch
+  ell('torso', PRIO.torso, [0, 0.2680, 0.0000], [0.0800, 0.0550, 0.0700]);      // pelvis
+  ell('torso', PRIO.torso, [0, 0.3220, 0.0080], [0.0840, 0.0600, 0.0780]);      // belly
+  ell('torso', PRIO.torso, [0, 0.3780, 0.0040], [0.0790, 0.0520, 0.0700]);      // ribcage
+  cone('torso', PRIO.torso, [-0.0540, 0.4040, 0.0020], [0.0540, 0.4040, 0.0020], 0.0400, 0.0400); // clavicle bar
+  cone('torso', PRIO.torso, [-0.0250, 0.2560, 0.0000], [0.0250, 0.2560, 0.0000], 0.0430, 0.0430); // crotch
   for (const s of [1, -1]) {
-    ell('torso', 0, m([0.0655, 0.4010, 0.0020], s), [0.0345, 0.0355, 0.0350]); // deltoid
-    ell('torso', 0, m([0.0400, 0.2580, -0.0400], s), [0.0450, 0.0420, 0.0450]); // buttock
+    ell('torso', PRIO.torso, m([0.0655, 0.4010, 0.0020], s), [0.0345, 0.0355, 0.0350]); // deltoid
+    ell('torso', PRIO.torso, m([0.0400, 0.2580, -0.0400], s), [0.0450, 0.0420, 0.0450]); // buttock
   }
 
   /* -- head: big cranium, small jaw, fat cheeks, button nose, soft ears ---- */
-  ell('head', 1, [0, 0.5470, -0.0025], [0.0700, 0.0755, 0.0690]);      // cranium
-  ell('head', 1, [0, 0.5010, 0.0090], [0.0575, 0.0455, 0.0530]);       // jaw mass
-  ell('head', 1, [0, 0.4945, 0.0400], [0.0295, 0.0235, 0.0235]);       // muzzle
-  ell('head', 1, [0, 0.4735, 0.0290], [0.0250, 0.0195, 0.0235]);       // chin mass
-  cone('head', 1, [-0.0310, 0.5430, 0.0440], [0.0310, 0.5430, 0.0440], 0.0155, 0.0155); // brow ridge
-  cone('head', 1, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
+  ell('head', PRIO.head, [0, 0.5470, -0.0025], [0.0700, 0.0755, 0.0690]);      // cranium
+  ell('head', PRIO.head, [0, 0.5010, 0.0090], [0.0575, 0.0455, 0.0530]);       // jaw mass
+  ell('head', PRIO.head, [0, 0.4945, 0.0400], [0.0295, 0.0235, 0.0235]);       // muzzle
+  ell('head', PRIO.head, [0, 0.4735, 0.0290], [0.0250, 0.0195, 0.0235]);       // chin mass
+  cone('head', PRIO.head, [-0.0310, 0.5430, 0.0440], [0.0310, 0.5430, 0.0440], 0.0155, 0.0155); // brow ridge
+  cone('head', PRIO.head, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
   for (const s of [1, -1]) {
-    ell('head', 1, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
-    ell('head', 1, m([0.0740, 0.5285, -0.0070], s), [0.0080, 0.0235, 0.0180]); // ear
+    ell('head', PRIO.head, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
+    ell('head', PRIO.head, m([0.0740, 0.5285, -0.0070], s), [0.0080, 0.0235, 0.0180]); // ear
   }
 
   /* -- the face proper -----------------------------------------------------
@@ -134,60 +144,63 @@ export function bodySpec() {
    * fillet is ~10 mm — the same order as a whole infant nose — so anything
    * facial added at that sharpness dissolves into the skull and the character
    * ends up with a smooth pink blank where its face should be. Each of these
-   * joins the head with a 1.6–5 mm fillet instead, which is what makes a nose
-   * a nose and a lip line a lip line.                                       */
-  cone('head', 1, [0, 0.5320, 0.0575], [0, 0.5095, 0.0640], 0.0060, 0.0090, 230); // nasal bridge
-  ell('head', 1, [0, 0.5052, 0.0706], [0.0120, 0.0108, 0.0116], 300);             // nose tip
-  ell('head', 1, [0, 0.4915, 0.0678], [0.0232, 0.0060, 0.0076], 620);             // upper lip
-  ell('head', 1, [0, 0.4798, 0.0672], [0.0206, 0.0080, 0.0084], 620);             // lower lip
-  ell('head', 1, [0, 0.4665, 0.0555], [0.0190, 0.0135, 0.0115], 200);             // chin button
+   * joins the head with a 2–8 mm fillet instead.
+   *
+   * Everything here is sized off infant proportion, not adult: a *short*
+   * philtrum, a small centred mouth, a chin that recedes rather than juts, and
+   * no cheek/nose crease of any kind. Adult landmarks on a baby head is what
+   * turns a face into a goblin.                                             */
+  cone('head', PRIO.head, [0, 0.5320, 0.0580], [0, 0.5110, 0.0650], 0.0058, 0.0086, 210); // nasal bridge
+  ell('head', PRIO.head, [0, 0.5062, 0.0702], [0.0112, 0.0100, 0.0108], 280);             // nose tip
+  ell('head', PRIO.head, [0, 0.4930, 0.0676], [0.0202, 0.0054, 0.0074], 480);             // upper lip
+  ell('head', PRIO.head, [0, 0.4846, 0.0672], [0.0184, 0.0068, 0.0086], 480);             // lower lip
+  ell('head', PRIO.head, [0, 0.4700, 0.0500], [0.0175, 0.0125, 0.0092], 120);             // soft chin
   for (const s of [1, -1]) {
-    ell('head', 1, m([0.0112, 0.5013, 0.0652], s), [0.0068, 0.0058, 0.0074], 320); // ala
-    ell('head', 1, m([0.0292, 0.4975, 0.0540], s), [0.0155, 0.0140, 0.0145], 160); // cheek apple
+    ell('head', PRIO.head, m([0.0102, 0.5022, 0.0648], s), [0.0062, 0.0052, 0.0068], 300); // ala
   }
 
   /* -- limbs --------------------------------------------------------------- */
   for (const s of [1, -1]) {
     const side = s > 0 ? 'L' : 'R';
     // upper arm tapers into a real elbow, forearm narrows into a real wrist
-    cone('arm' + side, 2, m(A.arm, s), m(A.forearm, s), 0.0360, 0.0272);
-    cone('arm' + side, 2, m(A.forearm, s), m([0.1500, 0.3090, 0.0390], s), 0.0300, 0.0196);
+    cone('arm' + side, PRIO.limb, m(A.arm, s), m(A.forearm, s), 0.0360, 0.0272);
+    cone('arm' + side, PRIO.limb, m(A.forearm, s), m([0.1500, 0.3090, 0.0390], s), 0.0300, 0.0196);
     // olecranon: the little knob behind the elbow that stops the arm reading
     // as a length of hosepipe
-    ell('arm' + side, 2, m([0.1300, 0.3495, 0.0060], s), [0.0128, 0.0150, 0.0110], 240);
+    ell('arm' + side, PRIO.limb, m([0.1300, 0.3495, 0.0060], s), [0.0128, 0.0150, 0.0110], 240);
     // wrist bone
-    ell('arm' + side, 2, m([0.1508, 0.3078, 0.0392], s), [0.0140, 0.0138, 0.0128], 300);
+    ell('arm' + side, PRIO.limb, m([0.1508, 0.3078, 0.0392], s), [0.0140, 0.0138, 0.0128], 300);
 
-    ell('hand' + side, 3, m([0.1640, 0.2830, 0.0460], s), [0.0215, 0.0235, 0.0155]); // palm
-    ell('hand' + side, 3, m([0.1700, 0.2660, 0.0520], s), [0.0180, 0.0140, 0.0130]); // knuckle pad
+    ell('hand' + side, PRIO.end, m([0.1640, 0.2830, 0.0460], s), [0.0215, 0.0235, 0.0155]); // palm
+    ell('hand' + side, PRIO.end, m([0.1700, 0.2660, 0.0520], s), [0.0180, 0.0140, 0.0130]); // knuckle pad
     // four little sausages. `d` fans them apart; each is a sharp round cone so
     // the smooth union leaves the webbing between them instead of a mitten.
     for (let f = 0; f < 4; f++) {
       const u = (f - 1.5) / 1.5;                     // -1 … +1, index → little
       const bx = 0.1690 + u * 0.0110, by = 0.2665 - Math.abs(u) * 0.0016;
       const tipLen = 0.0182 - Math.abs(u) * 0.0038;
-      cone('hand' + side, 3,
+      cone('hand' + side, PRIO.end,
         m([bx, by, 0.0520 + u * 0.0016], s),
         m([bx + u * 0.0052, by - tipLen, 0.0560 + u * 0.0030], s),
         0.0058 - Math.abs(u) * 0.0006, 0.0046 - Math.abs(u) * 0.0006, 500);
     }
     // thumb, set well apart and slightly opposed
-    cone('hand' + side, 3, m([0.1530, 0.2800, 0.0470], s), m([0.1408, 0.2686, 0.0596], s),
+    cone('hand' + side, PRIO.end, m([0.1530, 0.2800, 0.0470], s), m([0.1408, 0.2686, 0.0596], s),
       0.0086, 0.0062, 420);
 
-    cone('leg' + side, 2, m(A.thigh, s), m(A.shin, s), 0.0520, 0.0364);
-    cone('leg' + side, 2, m(A.shin, s), m(A.foot, s), 0.0382, 0.0232);
-    ell('leg' + side, 2, m([0.0516, 0.1732, -0.0072], s), [0.0170, 0.0180, 0.0130], 210); // kneecap
-    ell('leg' + side, 2, m([0.0548, 0.0742, 0.0000], s), [0.0210, 0.0180, 0.0186], 300); // ankle
-    ell('foot' + side, 3, m([0.0560, 0.0320, -0.0060], s), [0.0240, 0.0260, 0.0240]);
-    ell('foot' + side, 3, m([0.0570, 0.0255, 0.0230], s), [0.0225, 0.0185, 0.0270]);
+    cone('leg' + side, PRIO.limb, m(A.thigh, s), m(A.shin, s), 0.0520, 0.0364);
+    cone('leg' + side, PRIO.limb, m(A.shin, s), m(A.foot, s), 0.0382, 0.0232);
+    ell('leg' + side, PRIO.limb, m([0.0516, 0.1732, -0.0072], s), [0.0170, 0.0180, 0.0130], 210); // kneecap
+    ell('leg' + side, PRIO.limb, m([0.0548, 0.0742, 0.0000], s), [0.0210, 0.0180, 0.0186], 300); // ankle
+    ell('foot' + side, PRIO.end, m([0.0560, 0.0320, -0.0060], s), [0.0240, 0.0260, 0.0240]);
+    ell('foot' + side, PRIO.end, m([0.0570, 0.0255, 0.0230], s), [0.0225, 0.0185, 0.0270]);
     // five toes. Baby toes are tiny stubs — but their absence is exactly what
     // makes a CG foot read as a flipper.
     for (let f = 0; f < 5; f++) {
       const u = (f - 2) / 2;
       const tx = 0.0570 + u * 0.0128;
       const r = 0.0062 - Math.abs(u) * 0.0018;
-      cone('foot' + side, 3,
+      cone('foot' + side, PRIO.end,
         m([tx, 0.0212, 0.0400], s),
         m([tx + u * 0.0024, 0.0196, 0.0470 - Math.abs(u) * 0.0044], s),
         r, r * 0.88, 620);
@@ -453,15 +466,14 @@ export function buildDetail() {
     // ear concha
     dimple(m([0.0700, 0.5290, 0.0040], s), 0.0105, 0.0042, 0.0016);
     // eye socket: a shallow anisotropic scoop so the eyeball sits *in* the face
-    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0285, 0.0205, 0.0330], 0.0135);
+    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0300, 0.0215, 0.0340], 0.0172);
     // the little pad under the eye that makes infants look sleepy-sweet
     blob(m([P.eyeX, P.eyeY - 0.0180, P.eyeZ + 0.004], s), [0.0210, 0.0075, 0.0240], -0.0022);
-    // nostril — deep enough to read as a hole at closeup, not a smudge
-    dimple(m([0.0066, 0.4988, 0.0712], s), 0.0040, 0.0044);
-    // the crease where the ala meets the cheek (the top of the nasolabial fold)
-    dimple(m([0.0146, 0.5008, 0.0620], s), 0.0052, 0.0022);
-    // dimple at the corner of the mouth
-    dimple(m([0.0232, 0.4868, 0.0630], s), 0.0072, 0.0030);
+    // nostril — tucked under the tip, where an infant's actually are
+    dimple(m([0.0058, 0.5002, 0.0700], s), 0.0034, 0.0038);
+    // the faintest hint of a corner to the mouth. Anything deeper here reads
+    // as a smirk, and a smirking baby is a goblin.
+    dimple(m([0.0196, 0.4888, 0.0622], s), 0.0092, 0.0013);
   }
 
   // neck crease (the "double chin" fold) with the roll below it
@@ -473,25 +485,18 @@ export function buildDetail() {
   // spine groove — very subtle, but it stops the back reading as a balloon
   curve([[0, 0.4100, -0.0640], [0, 0.3600, -0.0720], [0, 0.3100, -0.0750], [0, 0.2850, -0.0700]],
     0.0130, 0.0020, 0.040);
-  // philtrum — the vertical gutter from the nose to the middle of the top lip
-  curve([[0, 0.4972, 0.0788], [0, 0.4938, 0.0764]], 0.0038, 0.0032, 0.014);
-  // the lip line: an arc across the muzzle, with a slight upward flick at the
-  // corners so the resting face is faintly, permanently pleased. The two lip
-  // volumes already leave a ~2 mm valley here; this cuts the seam itself so it
-  // survives a matte SSS shader at portrait distance.
+  // philtrum — barely 4 mm on an infant, and shallow. A long one instantly
+  // ages the face by twenty years.
+  curve([[0, 0.4982, 0.0762], [0, 0.4956, 0.0752]], 0.0032, 0.0020, 0.011);
+  // the lip line: a short, nearly level arc. The two lip volumes already leave
+  // a valley here; this cuts the seam so it survives a matte SSS shader at
+  // portrait distance. No upward flick — a permanent smile is a smirk.
   const lip = [];
   for (let i = 0; i <= 14; i++) {
     const u = (i / 14) * 2 - 1;
-    lip.push([u * 0.0238, 0.4862 + u * u * 0.0036, 0.0742 - u * u * 0.0092]);
+    lip.push([u * 0.0198, 0.4888 + u * u * 0.0014, 0.0722 - u * u * 0.0086]);
   }
-  curve(lip, 0.0040, 0.0044, 0.026);
-  // mentolabial sulcus — the shallow shelf between the lower lip and the chin
-  const sulcus = [];
-  for (let i = 0; i <= 8; i++) {
-    const u = (i / 8) * 2 - 1;
-    sulcus.push([u * 0.0180, 0.4712 - u * u * 0.0016, 0.0660 - u * u * 0.0110]);
-  }
-  curve(sulcus, 0.0058, 0.0022, 0.024);
+  curve(lip, 0.0034, 0.0036, 0.022);
 
   /* -- evaluator ---------------------------------------------------------- */
   return function detail(x, y, z) {
@@ -786,12 +791,16 @@ export function buildPatch(field, opts) {
 
       if (collapse) {
         // Bottom of a star patch: rather than let the shell tear its way out
-        // through a neighbour, funnel it to a point safely inside the body.
+        // through a neighbour, funnel it inside the body. The radial shrink
+        // runs ahead of the vertical one so the last rings tuck *down the
+        // neck* as a narrowing tube; pulling straight at a point instead
+        // splays them into a ring of triangular flaps over the collarbone.
         const cw = smoothstep(collapse.from, 1.0, star ? warp(j / R, wT[0], wT[1]) : j / R);
         if (cw > 0) {
-          px += (collapse.to[0] - px) * cw;
-          py += (collapse.to[1] - py) * cw;
-          pz += (collapse.to[2] - pz) * cw;
+          const keep = 1 - cw;
+          px = collapse.to[0] + (px - collapse.to[0]) * keep;
+          pz = collapse.to[2] + (pz - collapse.to[2]) * keep;
+          py += (collapse.to[1] - py) * cw * cw;
         }
       }
       pos[vi * 3] = px; pos[vi * 3 + 1] = py; pos[vi * 3 + 2] = pz;
@@ -979,8 +988,8 @@ export function buildAnatomy({ tier = 2, uvRepeat = 7 } = {}) {
     ...common, group: 'head', star: true,
     center: [0, 0.5330, 0.0060],
     segs: lod.head[0], rings: lod.head[1], tMax: 0.20,
-    focus: HEAD_FOCUS,
-    collapse: { from: 0.86, to: [0, 0.4400, 0.0040] }
+    focus: HEAD_FOCUS, sinkDepth: 0.010,
+    collapse: { from: 0.928, to: [0, 0.4250, 0.0020] }
   });
 
   const bodyPatches = [

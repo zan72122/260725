@@ -391,14 +391,20 @@ export function palette() {
   // surface is the same generator with a different repeat and colour. That
   // matters twice over — a 512² procedural PBR set costs real milliseconds to
   // synthesise at boot, and re-using one keeps VRAM flat.
-  const WOOD = { seed: 3, ringScale: 74, satin: 0.42 };
+  // `ringScale` is a fineness hint that materials.js remaps to growth rings
+  // per texture tile. At 74 a beech tile carried ~31 rings; with the boxUV
+  // scale these props use that is a ring every 15 mm, which at gameplay
+  // distance stops reading as grain and starts reading as corduroy. 36 gives
+  // a ring every ~32 mm — still clearly timber, no longer a stripe pattern.
+  const WOOD = { seed: 3, ringScale: 22, satin: 0.34 };
   const PAINT = { seed: 43, gloss: 0.3 };
 
   P.wall = MAT.makeWall({ base: 0xf7ece3, tint: 0xe4d3c6, repeat: 0.8, seed: 11 });
   P.floor = MAT.makeWood({
-    light: 0xdfba90, dark: 0xa5723f, planks: 7, repeat: 2.4, seed: 5,
-    ringScale: 108, clearcoat: 0.26, satin: 0.5
+    light: 0xe8c79c, dark: 0xb0824f, planks: 7, repeat: 2.4, seed: 5,
+    ringScale: 84, clearcoat: 0.26, satin: 0.44, jointEvery: 0.55
   });
+  P.floor.normalScale.set(0.42, 0.42);
 
   P.trim = unshare(MAT.makePaint({ color: 0xfffaf4, ...PAINT }), 1.1, { clearcoat: 0.45 });
   P.ceiling = unshare(MAT.makePaint({ color: 0xfff8f1, ...PAINT }), 0.5, { clearcoat: 0.08 });
@@ -410,11 +416,23 @@ export function palette() {
 
   // Pale beech for the baby furniture, warmer oak for the big case goods, and
   // a hand-worn version for everything fingers actually touch.
-  P.beech = unshare(MAT.makeWood({ light: 0xe7c79c, dark: 0xbb8d5c, ...WOOD, clearcoat: 0.4 }), 1.4);
-  P.oak = unshare(MAT.makeWood({ light: 0xcb9a68, dark: 0x855628, ...WOOD, clearcoat: 0.28 }), 1.1);
+  //
+  // These albedos were a stop darker and the chest of drawers — the largest
+  // wooden mass in the frame — collapsed into a brown slab with no readable
+  // material on the shadow side of the room. Nursery furniture is pale; the
+  // value range should come from the light, not from the paint.
+  P.beech = unshare(MAT.makeWood({ light: 0xf3ddbc, dark: 0xd2ab7e, ...WOOD, clearcoat: 0.4 }), 0.72);
+  P.oak = unshare(MAT.makeWood({ light: 0xf4d0a0, dark: 0xc9955c, ...WOOD, clearcoat: 0.3 }), 0.55);
   // Knobs, cot rails, the toy-box pull: rougher, darker, the lacquer gone.
-  P.worn = unshare(MAT.makeWood({ light: 0xc79a6d, dark: 0x7d5528, ...WOOD, clearcoat: 0.04 }), 3.0,
+  P.worn = unshare(MAT.makeWood({ light: 0xdcb489, dark: 0xa87c4c, ...WOOD, clearcoat: 0.05 }), 1.6,
     { roughness: 1.0, clearcoatRoughness: 0.8 });
+  // The grain normal ran at 0.7 on every wooden surface. Combined with a ring
+  // pitch of ~15 mm that turned the chest of drawers — the largest wooden mass
+  // in the frame — into corrugated cardboard. Timber is smooth to the hand:
+  // the grain belongs in the albedo, not in the relief.
+  P.beech.normalScale.set(0.13, 0.13);
+  P.oak.normalScale.set(0.11, 0.11);
+  P.worn.normalScale.set(0.22, 0.22);
 
   P.metal = MAT.makeMetal({ color: 0xcfc8bf, roughness: 0.34 });
   P.brass = MAT.makeMetal({ color: 0xceac78, roughness: 0.3 });
@@ -452,6 +470,17 @@ export function palette() {
   P.shade.side = THREE.DoubleSide;
   P.shade.emissive = new THREE.Color(0xffc98a);
   P.shade.emissiveIntensity = 0;
+
+  /* The room's key comes from one window at frame-left, so every surface that
+   * faces the camera — the whole chest-of-drawers wall — is lit only by fill
+   * and by the PMREM environment. At the stock 0.9 those surfaces sank into a
+   * flat brown murk with no readable material. Lifting the indirect term picks
+   * the shadow side back up out of silhouette without touching the light rig
+   * or flattening anything the key already hits. */
+  for (const k of ['beech', 'oak', 'worn', 'floor', 'trim', 'paintedWhite',
+    'paintedMint', 'quilt', 'plush', 'cloth', 'plastic', 'ceramic', 'blockWood']) {
+    if (P[k]) P[k].envMapIntensity = 1.45;
+  }
 
   P.bulb = new THREE.MeshStandardMaterial({
     color: 0x3a3128, emissive: new THREE.Color(0xffd9a0), emissiveIntensity: 0, roughness: 0.5
@@ -647,8 +676,9 @@ export function buildMobile(M) {
   for (const a of [0, Math.PI / 2]) {
     strings.push(xf(new THREE.CylinderGeometry(0.005, 0.005, 0.28, 6), [0, -0.012, 0], [Math.PI / 2, 0, a]));
   }
-  spin.add(mesh(mergeAll([hub, ...strings.map(s => tint(s, 0xf2e2d4))], { colors: true }), M.plastic, 'mobileHub'));
-  spin.add(mesh(mergeAll(shapes, { colors: true }), M.plastic, 'mobileCharms'));
+  spin.add(mesh(mergeAll(
+    [hub, ...strings.map(s => tint(s, 0xf2e2d4)), ...shapes], { colors: true }),
+  M.plastic, 'mobileHub'));
 
   g.userData.spin = spin;
   g.userData.pick = [spin];
@@ -729,8 +759,6 @@ export function buildDresser(M) {
   }
   // overhanging top with a generous eased edge
   carcass.push(rbox(W + 0.045, 0.042, D + 0.03, [0, H - 0.02, 0], [0, 0, 0], 0.0198, 1.2));
-  g.add(mesh(mergeAll(carcass), M.oak, 'dresserCarcass'));
-
   /* --- drawer fronts (the middle one not pushed home) ------------------ */
   const proud = [0, 0.032, 0];
   const fronts = [];
@@ -745,7 +773,9 @@ export function buildDresser(M) {
     fronts.push(rbox(W - 0.075, i === 2 ? 0.185 : 0.205, 0.022, [0, y, z], [0, 0, 0], 0.0104, 1.4));
     for (const sx of [-1, 1]) knobs.push({ pos: [sx * 0.235, y, z + 0.012] });
   });
-  g.add(mesh(mergeAll(fronts), M.oak, 'dresserDrawers'));
+
+  // carcass and drawer fronts are one material in one group: one draw call
+  g.add(mesh(mergeAll([...carcass, ...fronts]), M.oak, 'dresserCarcass'));
   // Knobs get the worn material: this is where hands actually touch.
   g.add(instanced(knobGeo, M.worn, knobs, 'dresserKnobs'));
 
@@ -794,10 +824,11 @@ export function buildShelf(M) {
   carcass.push(rbox(W, 0.05, 0.014, [0, 0.14, -D / 2 + 0.007], [0, 0, 0], 0.004, 1.6));
   g.add(mesh(mergeAll(carcass), M.paintedWhite, 'shelfCarcass'));
 
-  const books = buildBooks(M, { n: 9, y: 0.012, x0: -0.42, z: 0.01, lean: 5 });
+  const books = buildBookRows(M, [
+    { n: 9, y: 0.012, x0: -0.42, z: 0.01, lean: 5 },
+    { n: 5, y: 0.342, x0: 0.10, z: 0.01, lean: -1, seed: 44 }
+  ]);
   g.add(books.covers, books.pages);
-  const books2 = buildBooks(M, { n: 5, y: 0.342, x0: 0.10, z: 0.01, lean: -1, seed: 44 });
-  g.add(books2.covers, books2.pages);
 
   const teddy = buildTeddy(M, 0.13);
   teddy.position.set(-0.26, 0.345, 0.0);
@@ -818,10 +849,30 @@ export function buildShelf(M) {
 }
 
 /** A row of books: covers and page blocks are two instanced meshes. */
-export function buildBooks(M, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 12, h = 0.19 } = {}) {
+export function buildBooks(M, opts = {}) {
+  return buildBookRows(M, [opts]);
+}
+
+/**
+ * Every row of books on a piece of furniture, as exactly two instanced meshes
+ * (covers and page blocks) however many rows there are.
+ */
+export function buildBookRows(M, rows) {
+  const covers = [], pages = [];
+  for (const row of rows) bookRow(covers, pages, row);
+  const unit = roundedBox(1, 1, 1, 0.055, 2);
+  boxUV(unit, 1);
+  const unitPages = roundedBox(1, 1, 1, 0.02, 2);
+  boxUV(unitPages, 1);
+  return {
+    covers: instanced(unit, M.paper, covers, 'books'),
+    pages: instanced(unitPages, M.paper, pages, 'bookPages')
+  };
+}
+
+function bookRow(covers, pages, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 12, h = 0.19 } = {}) {
   const R = rng(seed);
   const cols = [0xe4746a, 0xf0b45a, 0x6fa8b8, 0xd88fae, 0x8fb87a, 0xefe0c8, 0x9a86c4];
-  const covers = [], pages = [];
 
   /* Nobody's shelf is a row of identical spines. Three height classes (board
      book, picture book, slim), a gap where one has been taken out, a small
@@ -872,16 +923,7 @@ export function buildBooks(M, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 1
       scale: [ft * 0.8, fh * 0.94, fd * 0.94], color: 0xf6ecdc
     });
   }
-
-  const unit = roundedBox(1, 1, 1, 0.055, 2);
-  boxUV(unit, 1);
-  const unitPages = roundedBox(1, 1, 1, 0.02, 2);
-  boxUV(unitPages, 1);
-  return {
-    covers: instanced(unit, M.paper, covers, 'books'),
-    pages: instanced(unitPages, M.paper, pages, 'bookPages'),
-    width: x - x0
-  };
+  return x - x0;
 }
 
 /** Stacking-ring toy: peg on a rocker base, five graded tori, one off-axis. */
@@ -1104,7 +1146,7 @@ export function buildWardrobe(M) {
  */
 export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
-  const base = new THREE.Color(0xe6adba);
+  const base = new THREE.Color(0xdf9dae);
   const band = new THREE.Color(0xfdf4e7);
   const edge = new THREE.Color(0xc57e92);
   const bind = new THREE.Color(0xb87286);          // the woven binding tape
@@ -1112,7 +1154,7 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   const c = new THREE.Color();
 
   const liftAngle = 2.35;
-  const PILE = 0.0165;
+  const PILE = 0.021;
 
   // The pattern is *not* concentric with the outline. A hand-tufted rug is
   // drawn on a stretched backing, so the medallion sits proud of centre and
@@ -1163,9 +1205,10 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
       const pd = Math.hypot(x - OX, z - OZ) / radius;
       const wob = Math.sin(a * 5 + 1.1) * 0.018 + Math.sin(a * 9) * 0.008;
       if (rr > 0.955) c.copy(edge).lerp(bind, 0.35);
-      else if (pd > 0.90 + wob) c.copy(edge);
-      else if (pd > 0.60 + wob && pd < 0.725 + wob) c.copy(band);
-      else if (pd < 0.235 + wob * 0.35) c.copy(band);
+      else if (pd > 0.885 + wob) c.copy(edge);
+      else if (pd > 0.795 + wob && pd < 0.835 + wob) c.copy(band);   // pin stripe
+      else if (pd > 0.545 + wob && pd < 0.720 + wob) c.copy(band);
+      else if (pd < 0.300 + wob * 0.35) c.copy(band);                // medallion
       else c.copy(base);
       // wear: the trodden line and the very outer edge are faded and greyed.
       // Kept deliberately narrow — a wash over the whole rug just kills the
@@ -1179,11 +1222,18 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   }
 
   /* --- bound edge: a rolled hem with real thickness -------------------- */
+  /* The bead of binding around the edge is the whole reason a rug reads as an
+     object lying on a floor rather than a decal printed on it, so it is
+     modelled as a real rolled section: the tape crests at full pile height,
+     bulges ~15 mm proud of the pile, turns down, and tucks back underneath.
+     Seen at gameplay distance that is a 20 mm lit-and-shaded bead all the way
+     round the silhouette. */
   const rimRows = [
-    { rs: 1.012, ys: 0.86, tint: bind, shade: 1.0 },     // the tape rolls out
-    { rs: 1.016, ys: 0.42, tint: bind, shade: 0.82 },    // and turns down
-    { rs: 1.004, ys: 0.10, tint: under, shade: 0.7 },
-    { rs: 0.972, ys: 0.005, tint: under, shade: 0.5 }    // tucked under, on the floor
+    { rs: 1.013, ys: 1.00, tint: bind, shade: 1.06 },    // crest of the bead
+    { rs: 1.028, ys: 0.66, tint: bind, shade: 0.94 },    // widest point
+    { rs: 1.031, ys: 0.26, tint: bind, shade: 0.74 },    // turning under
+    { rs: 1.012, ys: 0.03, tint: under, shade: 0.52 },
+    { rs: 0.962, ys: 0.004, tint: under, shade: 0.40 }   // tucked under, on the floor
   ];
   for (const row of rimRows) {
     for (let j = 0; j <= segs; j++) {
@@ -1234,7 +1284,6 @@ export function buildPouffe(M) {
     [0.285, 0.22], [0.225, 0.285], [0.115, 0.318], [0.00, 0.325]
   ];
   const body = tint(lathe(prof, 28), 0xe7d3c0);
-  g.add(mesh(body, M.cloth, 'pouffeBody'));
 
   // six panel seams, sampled from the same profile so they hug the surface
   const seams = [];
@@ -1245,7 +1294,9 @@ export function buildPouffe(M) {
     seams.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.0045, 5, false));
   }
   seams.push(lathe([[0, 0.318], [0.032, 0.322], [0.030, 0.334], [0.012, 0.340], [0, 0.338]], 14));
-  g.add(mesh(tint(mergeAll(seams), 0xcbb09b), M.cloth, 'pouffeSeams'));
+  // body and piping are one cloth material, so they are one draw call
+  g.add(mesh(mergeAll([body, tint(mergeAll(seams), 0xcbb09b)], { colors: true }),
+    M.cloth, 'pouffeBody'));
   return g;
 }
 
@@ -1509,11 +1560,24 @@ export function buildPictures(M, list) {
   g.name = 'pictures';
   const frames = [];
   const arts = [];
+  const panes = [];
   const tex = nurseryArt();
+  /* Each entry may carry its own `place` — a wall position and yaw — which is
+     baked into the geometry. That lets every framed picture in the room, on
+     whichever wall, share one merged frame mesh, one art mesh and one pane of
+     glazing: three draw calls for the lot instead of three per wall. */
+  const _pm = new THREE.Matrix4();
+  const seat = (geo, place) => {
+    if (!place) return geo;
+    _pm.makeRotationY(place.ry || 0);
+    _pm.setPosition(place.pos[0], place.pos[1], place.pos[2]);
+    geo.applyMatrix4(_pm);
+    return geo;
+  };
   for (const p of list) {
     const t = p.tilt || 0;
     const cos = Math.cos(t), sin = Math.sin(t);
-    const push = (geo) => frames.push(xf(geo, [p.x, p.y, 0], [0, 0, t]));
+    const push = (geo) => frames.push(seat(xf(geo, [p.x, p.y, 0], [0, 0, t]), p.place));
     const w = p.w, h = p.h, b = 0.028;
     push(rbox(w + b * 2, b, 0.032, [0, h / 2 + b / 2, 0], [0, 0, 0], 0.0088, 2));
     push(rbox(w + b * 2, b, 0.032, [0, -h / 2 - b / 2, 0], [0, 0, 0], 0.0088, 2));
@@ -1525,26 +1589,21 @@ export function buildPictures(M, list) {
     const uv = plane.attributes.uv;
     const ox = (p.art % 2) * 0.5, oy = p.art < 2 ? 0.5 : 0;   // canvas y is flipped
     for (let i = 0; i < uv.count; i++) uv.setXY(i, ox + uv.getX(i) * 0.5, oy + uv.getY(i) * 0.5);
-    arts.push(xf(plane, [p.x + sin * 0, p.y, 0.006], [0, 0, t]));
+    arts.push(seat(xf(plane, [p.x + sin * 0, p.y, 0.006], [0, 0, t]), p.place));
+
+    const pane = new THREE.PlaneGeometry(p.w * 0.995, p.h * 0.995);
+    panes.push(seat(xf(pane, [p.x, p.y, 0.0092], [0, 0, t]), p.place));
   }
   g.add(mesh(mergeAll(frames), M.beech, 'pictureFrames'));
-  const artMat = new THREE.MeshPhysicalMaterial({
-    map: tex, roughness: 0.72, metalness: 0, clearcoat: 0.3, clearcoatRoughness: 0.35
-  });
+  const artMat = pictureArtMaterial(tex);
   const artMesh = mesh(mergeAll(arts), artMat, 'pictureArt');
   artMesh.castShadow = false;
   g.add(artMesh);
 
   /* --- glazing -------------------------------------------------------------
    * A framed picture without glass is the tell that it was modelled and not
-   * observed. One additive pane per group carries a soft angled reflection of
-   * the window across every frame on the wall — one draw call for the lot. */
-  const panes = [];
-  for (const p of list) {
-    const t = p.tilt || 0;
-    const pane = new THREE.PlaneGeometry(p.w * 0.995, p.h * 0.995);
-    panes.push(xf(pane, [p.x, p.y, 0.0092], [0, 0, t]));
-  }
+   * observed. One additive pane carries a soft angled reflection of the window
+   * across every frame in the room — one draw call for the lot. */
   const glassMesh = new THREE.Mesh(mergeAll(panes), glazingMaterial());
   glassMesh.name = 'pictureGlass';
   glassMesh.castShadow = false;
@@ -1554,6 +1613,18 @@ export function buildPictures(M, list) {
 
   g.userData.pick = [artMesh];
   return g;
+}
+
+let _artMat = null;
+/** Shared material for the painted canvases — memoised so every wall's
+ *  pictures merge into a single mesh. */
+export function pictureArtMaterial(tex) {
+  if (!_artMat) {
+    _artMat = new THREE.MeshPhysicalMaterial({
+      map: tex, roughness: 0.72, metalness: 0, clearcoat: 0.3, clearcoatRoughness: 0.35
+    });
+  }
+  return _artMat;
 }
 
 let _glazingMat = null;
@@ -2150,6 +2221,11 @@ export function buildClutter(M, spots, { seed = 77 } = {}) {
 
   const write = () => {
     let bi = 0, si = 0, sh = 0;
+    // Four draw calls for toys nobody can see is four draw calls wasted: the
+    // meshes are frustumCulled = false, so a zero scale still costs a submit.
+    let any = false;
+    for (const t of toys) if (t.v > 0.001) { any = true; break; }
+    group.visible = any;
     for (const t of toys) {
       const v = t.v;
       const lift = Math.sin(Math.min(1, v) * Math.PI) * 0.06;      // little hop

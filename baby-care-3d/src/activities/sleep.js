@@ -234,8 +234,11 @@ export class SleepActivity {
    *   face       the same framing, so a `goTo('face')` from anywhere lands here
    *   crib       wider "checking on the baby" angle taking in the quilt
    *
-   * The pivot carries the baby's yaw, so +Z is the direction the crown points
-   * and the offsets stay readable regardless of which way the cot is turned.
+   * The pivot carries the baby's yaw, so in these offsets +Z runs from the
+   * head down toward the feet, +X is the far side of the cot and -X is the
+   * room side you actually stand on. Every camera therefore sits on the near
+   * rail, above rail height, angled back along the body — which is what makes
+   * the shot read as "over the cot rail" rather than "inside the cot".
    * `restorePresets()` in app.setActivity puts the defaults back on exit.
    */
   _buildShots() {
@@ -249,24 +252,22 @@ export class SleepActivity {
     const rig = ctx.cameraRig;
     if (!rig?.overridePreset) return;
     rig.setSubject?.(this.shotPivot);
-    rig.overridePreset('crib-face', {
+    const faceShot = {
       space: 'subject',
-      pos: [0.20, 0.34, -0.26], target: [0.00, -0.02, 0.03],
+      pos: [-0.45, 0.40, 0.22], target: [0.02, -0.02, 0.03],
       fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
-    });
-    rig.overridePreset('face', {
-      space: 'subject',
-      pos: [0.20, 0.34, -0.26], target: [0.00, -0.02, 0.03],
-      fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
-    });
+    };
+    rig.overridePreset('crib-face', faceShot);
+    // so a goTo('face') from anywhere in this scene lands on the cot portrait
+    rig.overridePreset('face', faceShot);
     rig.overridePreset('crib', {
       space: 'subject',
-      pos: [0.34, 0.50, -0.42], target: [0.02, -0.06, -0.06],
+      pos: [-0.62, 0.62, 0.34], target: [0.04, -0.10, 0.02],
       fov: 36, focusRange: 0.18, dof: 1.15, handheld: 0.50, roll: 0.5
     });
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [0.28, 0.42, -0.34], target: [0.01, -0.04, -0.02],
+      pos: [-0.54, 0.52, 0.30], target: [0.03, -0.06, 0.02],
       fov: 34, focusRange: 0.15, dof: 1.20, handheld: 0.55, roll: 0.5
     });
   }
@@ -281,12 +282,12 @@ export class SleepActivity {
     let head = null;
     try { head = b?.headWorldPos?.(); } catch (e) { head = null; }
     if (!head || !Number.isFinite(head.x)) {
-      head = this._v.set(this.cribPos.x - 0.09, this.surfaceY + 0.062, this.cribPos.z);
+      head = this._v.set(this.cribPos.x - 0.28, this.surfaceY + 0.11, this.cribPos.z);
     }
     // The pivot lives under this.group, which is at the identity — world and
     // local coincide, so a straight copy is correct and stays correct.
     this.shotPivot.position.copy(head);
-    this.shotPivot.rotation.set(0, this.ctx.baby?.group?.rotation.y ?? -Math.PI / 2, 0);
+    this.shotPivot.rotation.set(0, this.ctx.baby?.group?.rotation.y ?? Math.PI / 2, 0);
     this.shotPivot.updateMatrixWorld(true);
   }
 
@@ -950,9 +951,13 @@ export class SleepActivity {
 
     if (b?.group) {
       this._babyRestore = { pos: b.group.position.clone(), rot: b.group.rotation.clone() };
-      b.group.position.set(this.cribPos.x + 0.02, this.surfaceY, this.cribPos.z);
-      // head toward the pillow at -X
-      b.group.rotation.set(0, -Math.PI / 2, 0);
+      // Head toward the pillow at -X. The `lie` pose runs the body along the
+      // rig's local -Z, so this yaw is +90°, not -90° — the old sign laid the
+      // baby down head-first over the *foot* rail, which is what put the
+      // `51-sleep-asleep` camera into an empty corner of the mattress.
+      // 0.09 forward of the anchor puts the crown on the pillow, not past it.
+      b.group.position.set(this.cribPos.x + 0.09, this.surfaceY, this.cribPos.z);
+      b.group.rotation.set(0, Math.PI / 2, 0);
     }
     b?.playPose?.('lie', { seconds: 0.8 });
     b?.setMood?.('neutral');

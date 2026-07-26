@@ -212,8 +212,15 @@ const GradeShader = {
       // The two ranges deliberately overlap around mid grey: a hard crossover
       // produces a visible band on any smooth gradient (a wall, a cheek).
       float sl = dot(col, vec3(0.2126, 0.7152, 0.0722));
-      float shadowW = 1.0 - smoothstep(0.015, 0.52, sl);
-      float highW = smoothstep(0.38, 0.95, sl);
+      // The shadow band used to reach up to display luminance 0.52 — which on
+      // this palette is *most of the room*. A warm cream wall lit by a 3.85
+      // golden key sits around 0.45–0.60, so the blue shadow tint was landing
+      // on it at half strength and the entire nursery came out lilac: the
+      // `golden` mood was chromatically indistinguishable from `day`, and both
+      // read cool. A split tone has to touch the shadows only; above ~0.30 the
+      // eye is reading local colour, not shadow colour.
+      float shadowW = 1.0 - smoothstep(0.010, 0.30, sl);
+      float highW = smoothstep(0.45, 0.98, sl);
       col *= mix(vec3(1.0), uShadowTint, shadowW * uSplit);
       col *= mix(vec3(1.0), uHighTint, highW * uSplit);
 

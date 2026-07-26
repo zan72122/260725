@@ -459,9 +459,12 @@ export class Room {
     this.group.add(this.rug);
     // the rug's own soft occlusion, wider and much fainter than a prop's …
     S.add(0.05, 0.35, 1.30, 1.30, { opacity: 0.14, softness: 2.4, y: 0.002 });
-    // … plus the dark line right under its bound edge, which is what makes a
-    // rug sit *on* a floor instead of being printed on it
-    S.ring(0.05, 0.35, 1.33, 1.33, 0.885, { opacity: 0.40, softness: 2.6, y: 0.0022 });
+    // … plus the dark halo at its bound edge, which is what makes a rug sit
+    // *on* a floor instead of being printed on it. The ring has to peak just
+    // OUTSIDE the rug's own silhouette — peaked under it, the rug hides the
+    // one thing it is there to do.
+    S.ring(0.05, 0.35, 1.44, 1.44, 0.855, { opacity: 0.52, softness: 1.7, y: 0.0022 });
+    S.ring(0.05, 0.35, 1.30, 1.30, 0.935, { opacity: 0.34, softness: 3.4, y: 0.0024 });
 
     /* --- where the walls meet the floor ----------------------------------- */
     // A skirting board with no shadow line at its foot is the tell. One soft
@@ -477,24 +480,23 @@ export class Room {
     const M = this.M;
     const wallZ = Z0 + 0.022;
 
-    // Pictures over the cot. The whole point of this group is that it is *not*
-    // level: the big one hangs 3.2° down to the left (the nail has turned), the
-    // small ones a degree either way, and the spacing between them is uneven
-    // because they were hung one at a time by eye.
+    // Pictures over the cot plus the one on the right-hand wall, all in one
+    // group so the frames, the canvases and the glazing are three draw calls
+    // for the whole room rather than three per wall. The whole point of this
+    // group is that it is *not* level: the big one hangs 3.2° down to the left
+    // (the nail has turned), the small ones a degree either way, and the
+    // spacing between them is uneven because they were hung one at a time by
+    // eye.
+    const overCot = { pos: [-1.42, 1.52, wallZ], ry: 0 };
+    const onRight = { pos: [X1 - 0.022, 1.603, 0.362], ry: -Math.PI / 2 };
     this.pictures = P.buildPictures(M, [
-      { x: -0.405, y: 0.055, w: 0.44, h: 0.34, art: 0, tilt: 0.031 },
-      { x: 0.115, y: 0.212, w: 0.30, h: 0.38, art: 3, tilt: -0.056 },
-      { x: 0.098, y: -0.232, w: 0.34, h: 0.26, art: 2, tilt: 0.017 }
+      { x: -0.405, y: 0.055, w: 0.44, h: 0.34, art: 0, tilt: 0.031, place: overCot },
+      { x: 0.115, y: 0.212, w: 0.30, h: 0.38, art: 3, tilt: -0.056, place: overCot },
+      { x: 0.098, y: -0.232, w: 0.34, h: 0.26, art: 2, tilt: 0.017, place: overCot },
+      { x: 0, y: 0, w: 0.34, h: 0.42, art: 1, tilt: -0.038, place: onRight }
     ]);
-    this.pictures.position.set(-1.42, 1.52, wallZ);
     this.group.add(this.pictures);
     this._pick.push(...(this.pictures.userData.pick || []));
-
-    // a fourth picture on the right-hand wall, seen edge-on from the camera
-    this.picture2 = P.buildPictures(M, [{ x: 0, y: 0, w: 0.34, h: 0.42, art: 1, tilt: -0.038 }]);
-    this.picture2.position.set(X1 - 0.022, 1.603, 0.362);
-    this.picture2.rotation.y = -Math.PI / 2;
-    this.group.add(this.picture2);
 
     this.clock = P.buildClock(M, { r: 0.125 });
     this.clock.position.set(1.026, 1.658, wallZ + 0.01);
