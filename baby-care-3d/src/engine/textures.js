@@ -459,6 +459,159 @@ export function waterNormal({ seed = 53, size = 256, scale = 7 } = {}) {
   });
 }
 
+/* --------------------------------------------------------- bath surfaces -- */
+
+/**
+ * Soap-lather surface. Where `plastic()` gives an even matte, real lather is a
+ * *cluster of bubbles* — two octaves of Worley cells with a very high normal
+ * gain, plus a faint cool tint down in the crevices where light can't reach.
+ * Used by the foam blobs in `src/fx/foam.js`.
+ */
+export function foamSurface({ color = 0xfffdfa, seed = 77, size = 256, cells = 22 } = {}) {
+  return cached(`foamsurf:${color}:${seed}:${cells}`, () => {
+    const height = (u, v) => {
+      const a = Math.pow(1 - worley(u, v, cells, seed).f1, 1.7);
+      const b = Math.pow(1 - worley(u, v, Math.round(cells * 2.2), seed + 13).f1, 2.3);
+      const fine = fbm(u, v, cells * 5, 2, seed + 5);
+      return Math.min(1, a * 0.7 + b * 0.34 + fine * 0.12);
+    };
+    const map = generate(size, (u, v, out) => {
+      const h = height(u, v);
+      // bubbles are near-white on top and pick up a cool bounce in the pits
+      const shade = 0.80 + h * 0.22;
+      const pit = (1 - h) * 0.06;
+      const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
+      out[0] = Math.min(1, r * shade - pit * 0.7);
+      out[1] = Math.min(1, g * shade - pit * 0.25);
+      out[2] = Math.min(1, b * shade + pit * 0.35);
+    });
+    const normal = normalFromHeight(size, 3.0, height);
+    const rough = generate(size, (u, v, out) => {
+      // wet froth: the domes catch a little specular, the pits are pure scatter
+      out[0] = out[1] = out[2] = Math.min(1, 0.96 - height(u, v) * 0.20);
+    });
+    return {
+      map: toTexture(map, { srgb: true }),
+      normalMap: toTexture(normal),
+      roughnessMap: toTexture(rough)
+    };
+  });
+}
+
+/* Cheap periodic sine — the caustic field is re-evaluated every few frames on
+ * the CPU, and Math.sin dominates that loop. A 2048-entry table is visually
+ * indistinguishable here and roughly 4× faster. */
+const _SIN_N = 2048;
+const _SIN_TAB = new Float32Array(_SIN_N + 1);
+for (let i = 0; i <= _SIN_N; i++) _SIN_TAB[i] = Math.sin((i / _SIN_N) * Math.PI * 2);
+const _INV_TAU = 1 / (Math.PI * 2);
+function fastSin(x) {
+  let t = x * _INV_TAU;
+  t -= Math.floor(t);
+  return _SIN_TAB[(t * _SIN_N) | 0];
+}
+
+/**
+ * Animated underwater caustic field.
+ *
+ * Caustics are the *folds* of a refracted wavefront, so the pattern is built
+ * the way the physics builds it: a warped coordinate field, four interfering
+ * travelling waves, and then `pow(1 - |sum|, n)` to isolate the razor-thin
+ * zero crossings where rays pile up. Two octaves give the characteristic
+ * big-cell / small-filament mix, and a per-channel gain fakes the dispersion
+ * that makes real caustic edges faintly coloured.
+ *
+ * The result is not tileable and not memoised — it is meant to be handed to a
+ * `SpotLight.map` and projected, and it is animated by re-running `update(t)`.
+ *
+ * @returns {{ texture: THREE.Texture, update: (t:number, strength?:number) => void, dispose: () => void }}
+ */
+export function causticField({
+  size = 96, seed = 5, cells = 3.2, base = 0.12, gain = 0.68
+} = {}) {
+  const c = canvas(size);
+  const g2d = c.getContext('2d', { willReadFrequently: true });
+  const img = g2d.createImageData(size, size);
+  const data = img.data;
+
+  // A static low-frequency jitter breaks the tell-tale regularity of pure
+  // sine interference without costing anything at runtime.
+  const jitter = new Float32Array(size * size * 2);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size, v = (y + 0.5) / size;
+      const j = (y * size + x) * 2;
+      jitter[j] = (fbm(u, v, 6, 3, seed) - 0.5) * 1.6;
+      jitter[j + 1] = (fbm(u, v, 6, 3, seed + 37) - 0.5) * 1.6;
+    }
+  }
+
+  const neutral = base + gain * 0.22;
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;      // it multiplies light, not albedo
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+
+  function update(t, strength = 1) {
+    const S = fastSin;
+    for (let y = 0; y < size; y++) {
+      const v = (y + 0.5) / size;
+      const fy = Math.min(v, 1 - v);
+      for (let x = 0; x < size; x++) {
+        const u = (x + 0.5) / size;
+        const idx = y * size + x;
+        const j = idx * 2;
+
+        const px = u * cells + jitter[j] * 0.24;
+        const py = v * cells + jitter[j + 1] * 0.24;
+
+        // domain warp — this is what turns a grid of waves into a caustic web
+        const wx = px + 0.34 * S(py * 1.7 + t * 0.55) + 0.16 * S(px * 2.6 - t * 0.31);
+        const wy = py + 0.34 * S(px * 1.9 - t * 0.47) + 0.16 * S(py * 2.3 + t * 0.37);
+
+        let n = S(wx * 2.9 + t * 0.90) + S(wy * 3.3 - t * 0.80)
+              + S((wx + wy) * 2.1 + t * 0.60) + S((wx - wy) * 2.7 - t * 0.50);
+        n *= 0.25;
+        let q = 1 - (n < 0 ? -n : n);
+        const q2 = q * q, q4 = q2 * q2;
+        const r1 = q4 * q2 * q;                       // q^7 — thin bright ridge
+
+        let m = (S(wx * 5.9 - t * 1.30) + S(wy * 6.3 + t * 1.10)) * 0.5;
+        let p = 1 - (m < 0 ? -m : m);
+        const p2 = p * p, p4 = p2 * p2;
+        const r2 = p4 * p4;                           // p^8 — fine filaments
+
+        const cv = r1 * 0.92 + r2 * 0.44;
+        const lvl = base + gain * cv * strength;
+
+        // soften toward a neutral level at the border of the projection so the
+        // edge of the spotlight frustum never shows as a hard square
+        let e = Math.min(fy, Math.min(u, 1 - u)) / 0.16;
+        if (e > 1) e = 1;
+        e = e * e * (3 - 2 * e);
+
+        const R = neutral + (base + (lvl - base) * 1.12 - neutral) * e;
+        const G = neutral + (lvl - neutral) * e;
+        const B = neutral + (base + (lvl - base) * 0.88 - neutral) * e;
+
+        const o = idx * 4;
+        data[o] = R > 1 ? 255 : (R * 255) | 0;
+        data[o + 1] = G > 1 ? 255 : (G * 255) | 0;
+        data[o + 2] = B > 1 ? 255 : (B * 255) | 0;
+        data[o + 3] = 255;
+      }
+    }
+    g2d.putImageData(img, 0, 0);
+    tex.needsUpdate = true;
+  }
+
+  update(0, 1);
+  return { texture: tex, update, dispose() { tex.dispose(); } };
+}
+
 /* --------------------------------------------------------------- misc ---- */
 
 /** 1×N vertical gradient, handy for skies, gradients on cards and ramps. */

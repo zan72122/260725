@@ -351,3 +351,260 @@ export function palette() {
   P.oak = MAT.makeWood({ light: 0xd3a271, dark: 0x8a5a30, repeat: 1.2, seed: 13, ringScale: 22, clearcoat: 0.3 });
   // Hand-worn wood: knobs, crib rails, the toy-box lid edge. Rougher, darker,
   // no lacquer left — this is where the room stops looking brand new.
+  P.worn = MAT.makeWood({
+    light: 0xd6ab7d, dark: 0x8f6337, repeat: 3.0, seed: 9,
+    ringScale: 18, clearcoat: 0.05, satin: 0.74
+  });
+  P.paintedWhite = MAT.makePaint({ color: 0xfdf5ef, repeat: 1.5, seed: 51, gloss: 0.5 });
+  P.paintedMint = MAT.makePaint({ color: 0xd9e9df, repeat: 1.5, seed: 53, gloss: 0.45 });
+  P.metal = MAT.makeMetal({ color: 0xcfc8bf, roughness: 0.34 });
+  P.brass = MAT.makeMetal({ color: 0xceac78, roughness: 0.3 });
+  P.ceramic = MAT.makeCeramic({ color: 0xf3e9dd, repeat: 1.5, seed: 31 });
+  P.glass = MAT.makeWindowGlass();
+  P.quilt = MAT.makeQuilt({ color: 0xfff5ef, cells: 6, repeat: 2.4, seed: 13 });
+
+  // Vertex-coloured variants. One material then serves every merged set and
+  // every InstancedMesh in its family, which is where the draw calls are won.
+  P.plastic = MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 37, matte: 0.4 });
+  P.plush = MAT.makeCloth({ color: 0xffffff, weave: 'knit', threads: 96, repeat: 6, seed: 17, normalScale: 1.2 });
+  P.cloth = MAT.makeCloth({ color: 0xffffff, weave: 'plain', threads: 120, repeat: 5, seed: 7 });
+  P.paper = MAT.makePaint({ color: 0xffffff, repeat: 3, seed: 57, gloss: 0.06 });
+  P.carpet = MAT.makeCarpet({ color: 0xffffff, repeat: 5, seed: 19, density: 170 });
+  P.leaf = MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 39, matte: 0.62, clearcoat: 0.18 });
+  P.leaf.side = THREE.DoubleSide;
+  for (const k of ['plastic', 'plush', 'cloth', 'paper', 'carpet', 'leaf']) P[k].vertexColors = true;
+
+  P.curtain = MAT.makeCloth({
+    color: 0xf8e2e4, weave: 'plain', threads: 150, repeat: 3, seed: 23,
+    sheen: 1.0, roughness: 0.96, normalScale: 0.7
+  });
+  P.curtain.side = THREE.DoubleSide;
+
+  P.shade = MAT.makeCloth({ color: 0xfff2e4, threads: 150, repeat: 2, seed: 61, sheen: 0.5 });
+  P.shade.side = THREE.DoubleSide;
+  P.shade.emissive = new THREE.Color(0xffc98a);
+  P.shade.emissiveIntensity = 0;
+
+  P.bulb = new THREE.MeshStandardMaterial({
+    color: 0x3a3128, emissive: new THREE.Color(0xffd9a0), emissiveIntensity: 0, roughness: 0.5
+  });
+
+  return P;
+}
+
+/* ---------------------------------------------------------------- crib --- */
+
+/**
+ * Cot with turned spindles, a lower drop-side facing the camera (so the baby
+ * is never hidden behind bars), a quilted mattress with real piping and a
+ * blanket thrown over the foot end.
+ */
+export function buildCrib(M) {
+  const g = new THREE.Group();
+  g.name = 'crib';
+  const L = 1.26, W = 0.70, postH = 0.99, top = 0.90, dropTop = 0.71, low = 0.42;
+
+  /* --- turned corner posts ------------------------------------------- */
+  const postProfile = [
+    [0.000, 0.00], [0.034, 0.00], [0.034, 0.05], [0.027, 0.085], [0.031, 0.13],
+    [0.028, 0.60], [0.035, 0.645], [0.027, 0.69], [0.029, postH - 0.11],
+    [0.037, postH - 0.07], [0.030, postH - 0.035], [0.020, postH - 0.008], [0.000, postH]
+  ];
+  const parts = [];
+  const px = L / 2 - 0.034, pz = W / 2 - 0.034;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      parts.push(xf(lathe(postProfile, 16), [sx * px, 0, sz * pz]));
+    }
+  }
+
+  /* --- rails ---------------------------------------------------------- */
+  const railLen = L - 0.05, railW = W - 0.05;
+  // back + sides at full height, the camera-facing rail sits lower
+  parts.push(rbox(railLen, 0.052, 0.05, [0, top, -pz], [0, 0, 0], 0.018, 1.6));
+  parts.push(rbox(railLen, 0.052, 0.05, [0, dropTop, pz], [0, 0, 0], 0.018, 1.6));
+  parts.push(rbox(0.05, 0.052, railW, [-px, top - 0.09, 0], [0, 0, 0], 0.018, 1.6));
+  parts.push(rbox(0.05, 0.052, railW, [px, top - 0.09, 0], [0, 0, 0], 0.018, 1.6));
+  for (const z of [-pz, pz]) parts.push(rbox(railLen, 0.042, 0.042, [0, low, z], [0, 0, 0], 0.014, 1.6));
+  for (const x of [-px, px]) parts.push(rbox(0.042, 0.042, railW, [x, low, 0], [0, 0, 0], 0.014, 1.6));
+  // mattress base
+  parts.push(rbox(L - 0.11, 0.026, W - 0.11, [0, low + 0.03, 0], [0, 0, 0], 0.008, 1.6));
+
+  const frame = mesh(mergeAll(parts), M.beech, 'cribFrame');
+  g.add(frame);
+
+  /* --- spindles ------------------------------------------------------- */
+  const spanH = 0.44;
+  const spindle = lathe([
+    [0.010, 0.00], [0.013, 0.015], [0.0095, 0.045], [0.015, 0.08], [0.011, 0.115],
+    [0.0102, 0.30], [0.0145, 0.345], [0.0105, 0.385], [0.0118, 0.42], [0.009, spanH]
+  ], 12);
+  const items = [];
+  const backTop = top - 0.026, frontTop = dropTop - 0.026;
+  const nLong = 13;
+  for (let i = 0; i < nLong; i++) {
+    const x = -(L / 2 - 0.10) + (i / (nLong - 1)) * (L - 0.20);
+    items.push({ pos: [x, low + 0.02, -pz], scale: [1, (backTop - low - 0.02) / spanH, 1] });
+    items.push({ pos: [x, low + 0.02, pz], scale: [1, (frontTop - low - 0.02) / spanH, 1] });
+  }
+  const nShort = 6;
+  for (let i = 0; i < nShort; i++) {
+    const z = -(W / 2 - 0.10) + (i / (nShort - 1)) * (W - 0.20);
+    for (const x of [-px, px]) {
+      items.push({ pos: [x, low + 0.02, z], scale: [1, (top - 0.11 - low - 0.02) / spanH, 1] });
+    }
+  }
+  const spindles = instanced(spindle, M.beech, items, 'cribSpindles');
+  g.add(spindles);
+
+  /* --- mattress, piping, blanket -------------------------------------- */
+  const mat = mesh(rbox(L - 0.13, 0.095, W - 0.13, [0, low + 0.078, 0], [0, 0, 0], 0.03, 1.4),
+    M.quilt, 'cribMattress');
+  g.add(mat);
+
+  // Piping: the corded seam around a real cot mattress. Nothing says "made by
+  // a person" like a 8 mm cord following the edge.
+  const pipe = new THREE.TubeGeometry(
+    roundedRectCurve(L - 0.128, W - 0.128, 0.05, low + 0.078, 7), 140, 0.008, 6, true);
+  const pipeMesh = mesh(tint(pipe, 0xf3c9cd), M.cloth, 'cribPiping');
+  g.add(pipeMesh);
+
+  g.add(mesh(tint(drapedBlanket(0.66, 0.66, 0.19, 0.30), 0xf6d3da),
+    M.plush, 'cribBlanket').translateX(0.26).translateY(low + 0.13));
+
+  g.userData.pick = [frame, mat];
+  return g;
+}
+
+/**
+ * A blanket lying on a bed and folding over one edge. Built directly in XZ so
+ * it can be dropped on a mattress without a rotation that would fight the UVs.
+ */
+export function drapedBlanket(w, l, edge, hang, cols = 18, rows = 20) {
+  const g = new THREE.PlaneGeometry(w, l, cols, rows);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), t = pos.getY(i);
+    let y = 0, z = t;
+    if (t > edge) {
+      // past the mattress edge the cloth rolls over and hangs, curling inward
+      const s = Math.min(1, (t - edge) / hang);
+      const a = s * Math.PI * 0.55;
+      z = edge + Math.sin(a) * hang * 0.62;
+      y = -(1 - Math.cos(a)) * hang * 1.35;
+    }
+    // soft rolling wrinkles + a heavier fold near one corner (asymmetry)
+    y += Math.sin(x * 11 + t * 4) * 0.006 + Math.sin(x * 5.5 - 1.2) * 0.008;
+    y += Math.exp(-((x - w * 0.28) ** 2) / 0.006) * 0.012;
+    pos.setXYZ(i, x, y, z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/* -------------------------------------------------------------- mobile --- */
+
+/**
+ * Mobile on a swan-neck arm clamped to the cot rail. The danglers are one
+ * merged vertex-coloured mesh so the whole thing spins in a single draw call.
+ */
+export function buildMobile(M) {
+  const g = new THREE.Group();
+  g.name = 'mobile';
+
+  const armPts = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    // quarter-circle sweep from the clamp up and over the cot
+    armPts.push(new THREE.Vector3(
+      Math.sin(t * Math.PI * 0.52) * 0.46,
+      0.02 + t * 0.60 - Math.pow(t, 3) * 0.06,
+      0));
+  }
+  const arm = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(armPts), 24, 0.012, 8, false);
+  const clamp = rbox(0.07, 0.10, 0.075, [0, -0.02, 0], [0, 0, 0], 0.012, 2);
+  g.add(mesh(mergeAll([arm, clamp]), M.metal, 'mobileArm'));
+
+  /* --- the spinning half ---------------------------------------------- */
+  const spin = new THREE.Group();
+  spin.position.set(0.455, 0.60, 0);
+  g.add(spin);
+
+  const hub = tint(lathe([[0, 0], [0.03, -0.005], [0.032, -0.02], [0.012, -0.035], [0, -0.04]], 14), 0xf2e2d4);
+  const strings = [];
+  const shapes = [];
+  const cols = [0xffd166, 0xf4a8c0, 0xa8d8e8, 0xfff3e0];
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const r = 0.135;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const drop = 0.13 + (i % 2) * 0.045;     // uneven drops read as hand-tied
+    strings.push(xf(new THREE.CylinderGeometry(0.0015, 0.0015, drop, 4), [x, -drop / 2 - 0.01, z]));
+    const charm = i === 0 ? starGeo(0.052, 0.012)
+      : i === 1 ? moonGeo(0.05, 0.012)
+        : i === 2 ? cloudGeo(0.05)
+          : dropGeo(0.042);
+    shapes.push(tint(xf(charm, [x, -drop - 0.05, z], [0, a + 0.4, 0]), cols[i]));
+  }
+  // the little cross-arm the strings hang from
+  for (const a of [0, Math.PI / 2]) {
+    strings.push(xf(new THREE.CylinderGeometry(0.005, 0.005, 0.28, 6), [0, -0.012, 0], [Math.PI / 2, 0, a]));
+  }
+  spin.add(mesh(mergeAll([hub, ...strings.map(s => tint(s, 0xf2e2d4))], { colors: true }), M.plastic, 'mobileHub'));
+  spin.add(mesh(mergeAll(shapes, { colors: true }), M.plastic, 'mobileCharms'));
+
+  g.userData.spin = spin;
+  g.userData.pick = [spin];
+  return g;
+}
+
+/** Five-pointed star, extruded and bevelled. */
+export function starGeo(r, depth) {
+  const s = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+    const rr = i % 2 ? r * 0.46 : r;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (i === 0) s.moveTo(x, y); else s.lineTo(x, y);
+  }
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, {
+    depth, bevelEnabled: true, bevelSize: r * 0.13, bevelThickness: r * 0.13,
+    bevelSegments: 2, steps: 1, curveSegments: 2
+  });
+  g.center();
+  return boxUV(g, 4);
+}
+
+/** Crescent moon: outer arc minus an offset inner arc. */
+export function moonGeo(r, depth) {
+  const s = new THREE.Shape();
+  s.absarc(0, 0, r, -1.15, 1.15, false);
+  s.absarc(r * 0.62, 0, r * 0.82, 1.35, -1.35, true);
+  const g = new THREE.ExtrudeGeometry(s, {
+    depth, bevelEnabled: true, bevelSize: r * 0.1, bevelThickness: r * 0.1,
+    bevelSegments: 2, steps: 1, curveSegments: 8
+  });
+  g.center();
+  return boxUV(g, 4);
+}
+
+/** Puffy cloud from three overlapping spheres — real volume, not a billboard. */
+export function cloudGeo(r) {
+  const parts = [
+    xf(new THREE.SphereGeometry(r * 0.62, 12, 9), [-r * 0.52, -r * 0.04, 0]),
+    xf(new THREE.SphereGeometry(r * 0.80, 14, 10), [0, r * 0.10, 0]),
+    xf(new THREE.SphereGeometry(r * 0.56, 12, 9), [r * 0.60, -r * 0.06, 0])
+  ];
+  const g = mergeAll(parts);
+  g.scale(1, 0.82, 0.62);
+  return g;
+}
+
+/** Teardrop / raindrop charm. */
+export function dropGeo(r) {
+  return lathe([
+    [0.0, 0], [r * 0.55, r * 0.28], [r, r * 0.95], [r * 0.86, r * 1.55],
+    [r * 0.44, r * 2.0], [0, r * 2.15]
+  ], 12);
+}
