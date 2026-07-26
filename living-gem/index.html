@@ -42,6 +42,7 @@
     padding:1.6vmin 3.4vmin; font-size:3.1vmin; color:#d9e9ff; text-align:center; line-height:1.6;
     box-shadow:0 0 2.4vmin rgba(90,150,255,.35); backdrop-filter:blur(4px); transition:opacity .5s, transform .5s; white-space:nowrap; }
   #hint.gone { opacity:0; transform:translateX(-50%) translateY(-3vmin); }
+  body.pour-mode #hint { top:auto; bottom:calc(20vmin + env(safe-area-inset-bottom)); }
 
   #facet-count { position:absolute; top:calc(2vmin + env(safe-area-inset-top)); left:2.4vmin; font-size:3vmin; color:#9fd4ff;
     background:rgba(14,24,58,.7); border:1px solid rgba(140,200,255,.3); border-radius:2.6vmin; padding:1.2vmin 2.6vmin; }
@@ -200,9 +201,15 @@ uniform float uSpin;       // current spin energy 0..1
 uniform float uHeart, uSix, uTunnel, uJShadow, uGalaxy;
 uniform float uFlash;      // cut feedback flash
 uniform float uSteps;      // volume march steps
-uniform float uPour;       // pouring-in strength 0..1
-uniform vec3  uPourTint;   // color of the poured ingredient
+uniform vec3  uPourTint;   // color of the selected ingredient
 uniform float uCamShift;   // camera looks up in pour mode -> gem slides down
+// --- 3D props (bottle / funnel / stream) ---
+uniform float uPropVis, uBottleOn, uTilt, uBottleLiqY, uStreamOn, uStreamSolid, uStreamR;
+uniform vec3  uBottlePos;
+uniform vec3  uStreamPts[6];
+// --- two-phase pour: fresh (in transit) amounts + front progress per ingredient ---
+uniform vec3  uFreshA, uFrontA;   // x=blue y=pink z=gold
+uniform vec3  uFreshB, uFrontB;   // x=bub  y=star z=jelly
 
 const int MAXP = 40;
 const float IOR = 1.45;
@@ -324,6 +331,126 @@ vec3 background(vec3 ro, vec3 rd, float withCaustics){
   return col;
 }
 
+// ---------- 3D props: bottle, funnel, stream (raymarched SDFs, world space) ----------
+float sdSeg2(vec2 p, vec2 a, vec2 b){ vec2 pa=p-a, ba=b-a; float t=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*t); }
+float sdSeg3(vec3 p, vec3 a, vec3 b){ vec3 pa=p-a, ba=b-a; float t=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0); return length(pa-ba*t); }
+float sdRB2(vec2 p, vec2 b, float r){ vec2 d=abs(p)-b; return length(max(d,vec2(0.0))) + min(max(d.x,d.y),0.0) - r; }
+float smin2(float a, float b, float k){ float hh=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,hh)-k*hh*(1.0-hh); }
+
+vec3 bottleLocal(vec3 p){
+  vec3 q = p - uBottlePos;
+  float c = cos(uTilt), s = sin(uTilt);
+  q.xy = vec2(c*q.x - s*q.y, s*q.x + c*q.y);
+  return q;
+}
+float bottleSolid2(vec2 rh){   // lathe profile in (radius, height)
+  float body = sdRB2(rh - vec2(0.0,-0.06), vec2(0.10,0.20), 0.055);
+  float neck = sdRB2(rh - vec2(0.0, 0.27), vec2(0.008,0.10), 0.042);
+  return smin2(body, neck, 0.06);
+}
+float sdBottleGlass(vec3 p){
+  vec3 q = bottleLocal(p);
+  vec2 rh = vec2(length(q.xz), q.y);
+  float d = abs(bottleSolid2(rh)) - 0.012;
+  return max(d, rh.y - 0.37);            // open mouth
+}
+float sdBottleLiquid(vec3 p){
+  vec3 q = bottleLocal(p);
+  vec2 rh = vec2(length(q.xz), q.y);
+  float d = bottleSolid2(rh) + 0.032;    // interior inset (gap lets the ray re-register a hit)
+  return max(d, p.y - uBottleLiqY);      // surface stays world-horizontal
+}
+float sdFunnel(vec3 p){
+  vec2 rh = vec2(length(p.xz), p.y);
+  float cone = sdSeg2(rh, vec2(0.30,1.50), vec2(0.045,1.31)) - 0.013;
+  float tube = sdSeg2(rh, vec2(0.042,1.31), vec2(0.036,1.15)) - 0.013;
+  return min(cone, tube);
+}
+float sdStream(vec3 p){
+  float d = 1e5;
+  if(uStreamOn < 0.02) return d;
+  if(uStreamSolid < 0.5){
+    for(int i=0;i<5;i++){
+      d = min(d, sdSeg3(p, uStreamPts[i], uStreamPts[i+1]) - uStreamR*(1.0-0.35*float(i)/5.0));
+    }
+  } else {
+    for(int i=0;i<5;i++){
+      for(int k=0;k<4;k++){
+        float u = fract(uTime*1.6 + float(k)*0.25);
+        float ui = u*5.0 - float(i);
+        if(ui >= 0.0 && ui < 1.0){
+          vec3 bp = mix(uStreamPts[i], uStreamPts[i+1], ui);
+          d = min(d, length(p-bp) - uStreamR*1.5);
+        }
+      }
+    }
+  }
+  return d;
+}
+float mapProps(vec3 p, out float mat){
+  float g = sdFunnel(p);
+  float l = sdStream(p);
+  if(uBottleOn > 0.5){
+    g = min(g, sdBottleGlass(p));
+    l = min(l, sdBottleLiquid(p));
+  }
+  mat = (l < g) ? 1.0 : 0.0;
+  return min(g, l);
+}
+vec3 propNormal(vec3 p){
+  float m;
+  vec2 e = vec2(0.004, -0.004);
+  return normalize(e.xyy*mapProps(p+e.xyy,m) + e.yyx*mapProps(p+e.yyx,m)
+                 + e.yxy*mapProps(p+e.yxy,m) + e.xxx*mapProps(p+e.xxx,m));
+}
+vec4 traceProps(vec3 ro, vec3 rd){
+  vec4 acc = vec4(0.0);
+  if(uPropVis < 0.02) return acc;
+  vec3 bc = vec3(uBottlePos.x*0.5, 1.75, 0.0);        // bounding sphere
+  vec3 oc = ro - bc;
+  float b = dot(oc, rd);
+  float cc = dot(oc, oc) - 2.89;
+  float disc = b*b - cc;
+  if(disc < 0.0) return acc;
+  float sq = sqrt(disc);
+  float t = max(-b - sq, 0.0);
+  float tEnd = -b + sq;
+  float prevD = 1.0;
+  float mat;
+  for(int i=0;i<64;i++){
+    if(t > tEnd || acc.a > 0.92) break;
+    vec3 p = ro + rd*t;
+    float d = mapProps(p, mat);
+    if(d < 0.004 && prevD >= 0.004){
+      vec3 n = propNormal(p);
+      float cosi = clamp(dot(-rd, n), 0.0, 1.0);
+      float fres = 0.05 + 0.95*pow(1.0-cosi, 5.0);
+      vec3 refl = reflect(rd, n);
+      float spec = pow(max(dot(refl, uLight), 0.0), 80.0)*2.5;
+      vec3 cs; float a;
+      if(mat > 0.5){        // liquid / beads
+        cs = uPourTint*(0.6 + 0.5*max(dot(n, uLight), 0.25)) + vec3(spec) + uPourTint*0.4;
+        a = 0.8;
+        if(uStreamSolid > 0.5 && sdStream(p) < sdBottleLiquid(p)){
+          cs = uPourTint*1.6 + vec3(spec); a = 0.9;
+        }
+      } else {              // glass
+        cs = envColor(refl)*(1.0 + fres*1.2)*1.4 + vec3(1.0,0.97,0.9)*spec + vec3(0.08,0.13,0.22);
+        if(sdFunnel(p) < 0.02){   // funnel = glowing landing marker
+          cs += uPourTint*(0.22 + 0.22*sin(uTime*3.2) + uStreamOn*0.9);
+        }
+        a = clamp(0.14 + fres*1.1, 0.0, 0.85);
+      }
+      acc.rgb += (1.0-acc.a)*cs*a;
+      acc.a   += (1.0-acc.a)*a;
+    }
+    prevD = d;
+    t += (d < 0.004) ? 0.012 : max(d*0.9, 0.007);
+  }
+  acc *= uPropVis;
+  return acc;
+}
+
 // ---------- the living interior ----------
 vec3 axisA; vec3 axisU; vec3 axisB;   // world up/right/fwd expressed in local space
 
@@ -343,13 +470,59 @@ vec4 fieldSample(vec3 p){
   float h = dot(p, axisU);              // world height inside gem
   float pa = dot(p, axisA), pb = dot(p, axisB);
 
-  // falling column of freshly poured stuff (world-vertical axis through center)
-  if(uPour > 0.01){
-    float rr = length(vec2(pa, pb));
-    float fallN = 0.55 + 0.45*noise3(vec3(pa*8.0, h*5.0 - uTime*7.0, pb*8.0));
-    float colGlow = exp(-rr*rr*30.0) * uPour * fallN;
-    col += uPourTint * colGlow * 2.4;
-    den += colGlow * 0.9;
+  // ---- two-phase pour: material in transit, entering at the top ----
+  // Each ingredient descends (or floats) from the entry point with its own front,
+  // so only the region the pour has actually reached changes.
+  float freshTot = uFreshA.x+uFreshA.y+uFreshA.z+uFreshB.x+uFreshB.y+uFreshB.z;
+  if(freshTot > 0.004){
+    float rr2 = pa*pa + pb*pb;
+    float colM = exp(-rr2*22.0);
+    if(uFreshA.x > 0.004){                 // blue juice: falls, then pools
+      float tip = 1.05 - 2.3*uFrontA.x;
+      float band = smoothstep(tip-0.05, tip+0.3, h);
+      float plume = exp(-(h-tip)*(h-tip)*26.0)*exp(-rr2*7.0)*1.5;
+      float g = (colM*band + plume)*uFreshA.x;
+      float nz = 0.6 + 0.5*noise3(vec3(pa*9.0, h*5.0 - uTime*6.0, pb*9.0));
+      col += vec3(0.24,0.55,1.0)*g*nz*2.6; den += g*nz*0.9;
+    }
+    if(uFreshA.y > 0.004){                 // pink juice
+      float tip = 1.05 - 2.3*uFrontA.y;
+      float band = smoothstep(tip-0.05, tip+0.3, h);
+      float plume = exp(-(h-tip)*(h-tip)*26.0)*exp(-rr2*7.0)*1.5;
+      float g = (colM*band + plume)*uFreshA.y;
+      float nz = 0.6 + 0.5*noise3(vec3(pa*9.0+40.0, h*5.0 - uTime*6.0, pb*9.0));
+      col += vec3(1.0,0.44,0.71)*g*nz*2.6; den += g*nz*0.9;
+    }
+    if(uFreshA.z > 0.004){                 // gold flakes: sink fast, sparkling
+      float tip = 1.05 - 2.5*uFrontA.z;
+      float band = smoothstep(tip-0.05, tip+0.35, h);
+      float plume = exp(-(h-tip)*(h-tip)*22.0)*exp(-rr2*6.0)*1.2;
+      float g = (colM*band + plume)*uFreshA.z;
+      float sp = pow(0.5+0.5*sin(h*40.0 - uTime*14.0 + pa*30.0), 4.0);
+      col += vec3(1.0,0.82,0.37)*g*(0.8+2.6*sp)*2.2; den += g*0.8;
+    }
+    if(uFreshB.x > 0.004){                 // bubbles: plunge briefly, then gather UP top
+      float bandT = smoothstep(0.05, 0.55, h);
+      float g = exp(-rr2*9.0)*bandT*uFreshB.x;
+      float nz = 0.5 + 0.5*noise3(vec3(pa*11.0, h*7.0 - uTime*2.6, pb*11.0));
+      col += vec3(0.75,0.92,1.0)*g*nz*2.4; den += g*nz*0.8;
+    }
+    if(uFreshB.y > 0.004){                 // stars: drift down slowly, twinkling
+      float tip = 1.05 - 2.3*uFrontB.y;
+      float band = smoothstep(tip-0.1, tip+0.4, h);
+      float g = (colM*band + exp(-(h-tip)*(h-tip)*20.0)*exp(-rr2*6.0))*uFreshB.y;
+      float tw2 = pow(0.5+0.5*sin(uTime*5.0 + h*25.0 + pb*20.0), 3.0);
+      col += vec3(1.0,0.95,0.65)*g*(0.7+2.4*tw2)*2.2; den += g*0.7;
+    }
+    if(uFreshB.z > 0.004){                 // a little jellyfish swims down the column
+      float tip = 1.02 - 2.1*uFrontB.z;
+      vec3 c = axisU*tip;
+      vec3 q = p - c;
+      float pulse = 0.10 + 0.02*sin(uTime*5.0);
+      float d = length(q*vec3(1.0,1.3,1.0)) - pulse;
+      float glow = exp(-max(d,0.0)*30.0)*clamp(uFreshB.z*3.0, 0.0, 1.0);
+      col += vec3(0.79,0.61,1.0)*glow*2.4; den += glow*1.4;
+    }
   }
 
   // ---- liquids ----
@@ -579,6 +752,10 @@ void main(){
     col += vec3(0.05,0.08,0.16)*pow(max(1.0-length(uv-vec2(0.0,0.0))*0.9, 0.0), 2.0);
   }
 
+  // 3D props (bottle / funnel / stream) composited over the scene
+  vec4 prop = traceProps(ro, rd);
+  col = col*(1.0-prop.a) + prop.rgb;
+
   // vignette + tone
   float vig = 1.0 - 0.35*dot(vUV,vUV);
   col *= vig;
@@ -619,8 +796,11 @@ gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
 
 const U = {};
 ['uRes','uTime','uRot','uRotT','uPlanes','uPlaneCount','uLight','uBlue','uPink','uGold','uBub','uStar','uJelly',
- 'uMixAmt','uSlosh','uSpin','uHeart','uSix','uTunnel','uJShadow','uGalaxy','uFlash','uSteps','uPour','uPourTint','uCamShift']
+ 'uMixAmt','uSlosh','uSpin','uHeart','uSix','uTunnel','uJShadow','uGalaxy','uFlash','uSteps','uPourTint','uCamShift',
+ 'uPropVis','uBottleOn','uTilt','uBottleLiqY','uStreamOn','uStreamSolid','uStreamR','uBottlePos','uStreamPts',
+ 'uFreshA','uFrontA','uFreshB','uFrontB']
  .forEach(n => U[n] = gl.getUniformLocation(prog, n));
+if(!U.uStreamPts) U.uStreamPts = gl.getUniformLocation(prog, 'uStreamPts[0]');
 
 // ============================================================
 //  tiny quaternion / mat helpers
@@ -657,9 +837,12 @@ const state = {
   quat: qNorm([0.1, 0.2, 0.05, 1]),
   angVel: [0,0],           // screen-space drag velocity
   planes: [],              // {n:[x,y,z], d}
-  ing: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },        // inside the gem, 0..1
+  ing: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },        // settled inside the gem, 0..1
+  fresh: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },      // in transit inside the gem
+  front: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },      // pour-front progress 0..1
   bottles: { blue:1, pink:1, gold:1, bub:1, star:1, jelly:1 },    // left in each bottle, 0..1
   pour: { sel:null, tilt:0, tiltTarget:0, strength:0, pouredTotal:0 },
+  bottleLiqY: -10,
   slosh: [0,0,0],
   spin: 0,                 // current spin energy 0..1
   mixAmt: 0,
@@ -914,6 +1097,7 @@ function setMode(m){
   state.mode = m;
   for(const k in modeBtns) modeBtns[k].classList.toggle('active', k===m);
   shelf.classList.toggle('open', m==='pour');
+  document.body.classList.toggle('pour-mode', m==='pour');
   if(m !== 'pour') deselectBottle();
 }
 modeBtns.pour.addEventListener('click', ()=>{ audio(); setMode('pour'); });
@@ -967,6 +1151,8 @@ document.getElementById('btn-reset').addEventListener('click', ()=>{
   audio(); ping(300,0.4,0.15);
   initPlanes();
   state.ing = {blue:0,pink:0,gold:0,bub:0,star:0,jelly:0};
+  state.fresh = {blue:0,pink:0,gold:0,bub:0,star:0,jelly:0};
+  state.front = {blue:0,pink:0,gold:0,bub:0,star:0,jelly:0};
   state.bottles = {blue:1,pink:1,gold:1,bub:1,star:1,jelly:1};
   state.pour.pouredTotal = 0;
   state.totalSpin = 0; state.galaxyLit = false; state.mixAmt = 0;
@@ -1094,186 +1280,63 @@ function bez(a, c, b, u){
 }
 function smooth(a, b, x){ const t = Math.max(0, Math.min(1, (x-a)/(b-a))); return t*t*(3-2*t); }
 
-let fxParticles = [], fxChunks = [], lastChunkT = 0;
+let fxParticles = [], lastChunkT = 0;
 
-const BOT_H = 0.23;   // bottle height in units of min(W,H)
+// world-space bottle geometry (must match the shader SDF)
+const POUR_BH = 0.52, POUR_PIVOT_Y = 1.94;
+let bottleX = -0.72;
+// per-ingredient pour-front speed & settle rate: gold sinks fast,
+// stars/jellies drift slowly, bubbles rush back up and linger at the top
+const FRESH_SPEED = { blue:0.85, pink:0.85, gold:1.2, bub:2.4, star:0.45, jelly:0.5 };
+const FRESH_DRAIN = { blue:2.6, pink:2.6, gold:2.2, bub:1.4, star:2.0, jelly:1.8 };
+
 function updatePour(dt){
   const p = state.pour;
   p.tilt += (p.tiltTarget - p.tilt) * Math.min(1, dt*9);
   let rate = 0;
+  state.bottleLiqY = -10;
   if(p.sel && state.mode==='pour'){
     const fill = state.bottles[p.sel];
-    // liquid escapes when the mouth dips below the (world-horizontal) surface
-    const mouthRel = -Math.cos(p.tilt) * BOT_H*0.5;
-    const surfRel  = (0.5 - fill) * BOT_H;
-    rate = Math.max(0, Math.min(1, (mouthRel - surfRel)*12)) * 0.55;
+    // liquid escapes once the mouth dips below the (world-horizontal) surface
+    const liqY = POUR_PIVOT_Y + (fill - 0.5)*POUR_BH*0.96;
+    const mouthY = POUR_PIVOT_Y + Math.cos(p.tilt)*0.38;
+    rate = Math.max(0, Math.min(1, (liqY - mouthY)*10)) * 0.55;
     if(p.tilt > 2.3) rate = Math.max(rate, 0.35);          // near upside-down: dump it all
     if(fill <= 0.002) rate = 0;
+    if(fill > 0.002) state.bottleLiqY = liqY;
   }
   let transfer = 0;
   if(rate > 0){
-    transfer = Math.min(rate*dt, state.bottles[p.sel], 1 - state.ing[p.sel]);
+    transfer = Math.min(rate*dt, state.bottles[p.sel], 1 - state.ing[p.sel] - state.fresh[p.sel]);
     if(transfer > 0){
       state.bottles[p.sel] -= transfer;
-      state.ing[p.sel] += transfer;
+      state.fresh[p.sel] += transfer;          // enters the gem as "in transit"
       p.pouredTotal += transfer;
-      state.slosh[1] += transfer*2.0;
-      state.mixAmt = Math.min(1, state.mixAmt + transfer*0.25);
       updateShelf();
       if(p.pouredTotal > 0.18) setHint(2);
       if(p.pouredTotal > 0.75) setHint(3);
+    }
+  }
+  // two-phase settling: the front travels through the gem, and only what
+  // has arrived drains into the settled field (level rise, steady particles)
+  for(const k in state.fresh){
+    if(state.fresh[k] > 0.0005){
+      state.front[k] = Math.min(1, state.front[k] + dt*FRESH_SPEED[k]);
+      const dr = Math.min(state.fresh[k], state.fresh[k]*FRESH_DRAIN[k]*smooth(0.55,1,state.front[k])*dt);
+      if(dr > 0){
+        state.fresh[k] -= dr;
+        state.ing[k] = Math.min(1, state.ing[k] + dr);
+        if(ING[k].liquid){ state.slosh[1] += dr*1.5; state.mixAmt = Math.min(1, state.mixAmt + dr*0.25); }
+      }
+    } else {
+      state.fresh[k] = 0;
+      state.front[k] = Math.max(0, state.front[k] - dt*1.2);
     }
   }
   p.strength = transfer > 0
     ? Math.min(1, p.strength + dt*8) * Math.min(1, rate/0.35)
     : Math.max(0, p.strength - dt*6);
   setPourSound(p.strength, p.sel ? ING[p.sel].liquid : true);
-}
-
-function drawFunnel(F, FM, s, t, k){
-  const bob = Math.sin(t*2.1)*0.004*s;
-  const idle = (state.pour.sel && k<0.05) ? 0.5+0.5*Math.sin(t*3.4) : 0;
-  const gulp = 1 + 0.06*Math.sin(t*13)*k;
-  const wTop = 0.075*s, wNeck = 0.015*s, tube = 0.036*s;
-  fxc.save();
-  fxc.translate(F.x, F.y + bob);
-  fxc.scale(1, gulp);
-  const yTop = FM.y - F.y - bob;
-  const path = new Path2D();
-  path.moveTo(-wTop, yTop); path.lineTo(-wNeck, 0); path.lineTo(-wNeck*0.85, tube);
-  path.lineTo(wNeck*0.85, tube); path.lineTo(wNeck, 0); path.lineTo(wTop, yTop);
-  path.closePath();
-  fxc.fillStyle = 'rgba(190,225,255,0.14)';
-  fxc.fill(path);
-  const glowC = state.pour.sel ? ING[state.pour.sel].color : '#9fd4ff';
-  fxc.shadowColor = glowC;
-  fxc.shadowBlur = (0.012 + 0.03*(k + idle*0.5))*s;
-  fxc.strokeStyle = k>0.05 ? glowC : `rgba(200,232,255,${0.75+idle*0.25})`;
-  fxc.lineWidth = 0.006*s;
-  fxc.stroke(path);
-  fxc.beginPath();
-  fxc.ellipse(0, yTop, wTop, wTop*0.26, 0, 0, 6.2832);
-  fxc.stroke();
-  fxc.shadowBlur = 0;
-  fxc.restore();
-}
-
-function drawBottle(P, tilt, key, fill, s, t){
-  const ing = ING[key];
-  const BH = BOT_H*s, BW = 0.095*s, NW = 0.045*s, NH = 0.045*s, R = 0.022*s;
-  const top = -BH/2, bot = BH/2;
-  fxc.save();
-  fxc.translate(P.x, P.y);
-  fxc.rotate(tilt);
-  const path = new Path2D();
-  path.moveTo(-NW/2, top);
-  path.lineTo(-NW/2, top+NH*0.55);
-  path.quadraticCurveTo(-BW/2, top+NH, -BW/2, top+NH+0.02*s);
-  path.lineTo(-BW/2, bot-R);
-  path.quadraticCurveTo(-BW/2, bot, -BW/2+R, bot);
-  path.lineTo(BW/2-R, bot);
-  path.quadraticCurveTo(BW/2, bot, BW/2, bot-R);
-  path.lineTo(BW/2, top+NH+0.02*s);
-  path.quadraticCurveTo(BW/2, top+NH, NW/2, top+NH*0.55);
-  path.lineTo(NW/2, top);
-  path.closePath();
-  // liquid keeps a world-horizontal surface
-  if(fill > 0.005){
-    fxc.save();
-    fxc.clip(path);
-    fxc.rotate(-tilt);
-    const liqTop = (0.5 - fill*0.96)*BH + Math.sin(t*6.5)*0.004*s;
-    fxc.fillStyle = ing.color;
-    fxc.globalAlpha = 0.85;
-    fxc.fillRect(-BH*1.2, liqTop, BH*2.4, BH*2.4);
-    fxc.globalAlpha = 0.35;
-    fxc.fillStyle = '#ffffff';
-    fxc.fillRect(-BH*1.2, liqTop, BH*2.4, 0.006*s);
-    fxc.globalAlpha = 1;
-    fxc.restore();
-  }
-  fxc.fillStyle = 'rgba(190,225,255,0.10)';
-  fxc.fill(path);
-  fxc.strokeStyle = 'rgba(214,238,255,0.95)';
-  fxc.lineWidth = 0.008*s;
-  fxc.stroke(path);
-  fxc.strokeStyle = 'rgba(255,255,255,0.45)';
-  fxc.lineWidth = 0.0045*s;
-  fxc.beginPath();
-  fxc.moveTo(-BW*0.30, top+NH+0.035*s);
-  fxc.lineTo(-BW*0.30, bot-0.04*s);
-  fxc.stroke();
-  fxc.font = `${0.05*s}px sans-serif`;
-  fxc.textAlign = 'center'; fxc.textBaseline = 'middle';
-  fxc.fillText(ing.em, 0, NH*0.55);
-  fxc.restore();
-  const mr = BH/2 + 0.004*s;
-  return { x: P.x + Math.sin(tilt)*mr, y: P.y - Math.cos(tilt)*mr };
-}
-
-function drawStream(m, FM, k, ing, t, s){
-  const cp = { x: m.x + (FM.x-m.x)*0.30, y: m.y - 0.04*s };
-  const N = 16, pts = [];
-  for(let i=0;i<=N;i++) pts.push(bez(m, cp, FM, i/N));
-  const w0 = 0.011*s*(0.35 + 0.8*k);
-  fxc.globalAlpha = 0.8;
-  fxc.fillStyle = ing.color;
-  fxc.beginPath();
-  for(let i=0;i<=N;i++){ const w = w0*(1-0.4*i/N); const pt = pts[i];
-    if(i===0) fxc.moveTo(pt.x-w, pt.y); else fxc.lineTo(pt.x-w, pt.y); }
-  for(let i=N;i>=0;i--){ const w = w0*(1-0.4*i/N); const pt = pts[i]; fxc.lineTo(pt.x+w, pt.y); }
-  fxc.closePath();
-  fxc.fill();
-  fxc.globalAlpha = 0.5;
-  fxc.strokeStyle = 'rgba(255,255,255,0.85)';
-  fxc.lineWidth = w0*0.35;
-  fxc.beginPath();
-  fxc.moveTo(pts[0].x, pts[0].y);
-  for(const pt of pts) fxc.lineTo(pt.x, pt.y);
-  fxc.stroke();
-  for(let i=0;i<4;i++){
-    const u = (t*1.8 + i/4)%1;
-    const pt = bez(m, cp, FM, u);
-    fxc.globalAlpha = 0.5;
-    fxc.fillStyle = '#fff';
-    fxc.beginPath(); fxc.arc(pt.x, pt.y, w0*0.5*(1-0.3*u), 0, 6.2832); fxc.fill();
-  }
-  fxc.globalAlpha = 1;
-}
-
-function drawChunk(pt, c, s, t){
-  const ing = ING[c.ing];
-  fxc.save();
-  fxc.translate(pt.x, pt.y);
-  fxc.rotate(c.spin + t*3);
-  if(c.ing === 'gold'){
-    fxc.shadowColor = ing.color; fxc.shadowBlur = 0.012*s;
-    fxc.fillStyle = ing.color;
-    fxc.beginPath(); fxc.arc(0, 0, 0.008*s, 0, 6.2832); fxc.fill();
-  } else if(c.ing === 'bub'){
-    fxc.strokeStyle = 'rgba(215,242,255,0.95)'; fxc.lineWidth = 0.0035*s;
-    fxc.beginPath(); fxc.arc(0, 0, 0.011*s, 0, 6.2832); fxc.stroke();
-  } else if(c.ing === 'star'){
-    fxc.shadowColor = ing.color; fxc.shadowBlur = 0.014*s;
-    fxc.fillStyle = ing.color;
-    fxc.beginPath();
-    for(let i=0;i<10;i++){
-      const r = (i%2===0 ? 0.014 : 0.006)*s, a = i*Math.PI/5 - Math.PI/2;
-      const x = Math.cos(a)*r, y = Math.sin(a)*r;
-      if(i===0) fxc.moveTo(x,y); else fxc.lineTo(x,y);
-    }
-    fxc.closePath(); fxc.fill();
-  } else { // jelly
-    fxc.strokeStyle = ing.color; fxc.fillStyle = ing.color; fxc.lineWidth = 0.003*s;
-    fxc.beginPath(); fxc.arc(0, 0, 0.013*s, Math.PI, 0); fxc.closePath(); fxc.fill();
-    for(let i=-1;i<=1;i++){
-      fxc.beginPath();
-      fxc.moveTo(i*0.007*s, 0.002*s);
-      fxc.quadraticCurveTo(i*0.009*s + 0.004*s*Math.sin(t*8+i), 0.012*s, i*0.007*s, 0.02*s);
-      fxc.stroke();
-    }
-  }
-  fxc.restore();
 }
 
 function splashAt(x, y, color, s, n){
@@ -1284,40 +1347,22 @@ function splashAt(x, y, color, s, n){
   }
 }
 
+// The bottle, funnel and stream are raymarched in 3D by the main shader;
+// this overlay only adds screen-space splash sparkles at the funnel mouth.
 function drawFX(dt, t){
   const W = innerWidth, H = innerHeight, s = Math.min(W, H);
   fxc.clearRect(0, 0, W, H);
   const p = state.pour;
-  const F = projScreen(0, 1.14, 0);
-  const FM = { x: F.x, y: F.y - 0.055*s };
-  if(state.mode === 'pour' && camShift > 0.04){
-    drawFunnel(F, FM, s, t, p.strength);
-    if(p.sel){
-      const P = { x: F.x - 0.24*s, y: F.y - 0.155*s };
-      const mouth = drawBottle(P, p.tilt, p.sel, state.bottles[p.sel], s, t);
-      if(p.strength > 0.03){
-        const ing = ING[p.sel];
-        if(ing.liquid){
-          drawStream(mouth, FM, p.strength, ing, t, s);
-          if(Math.random() < p.strength*0.85) splashAt(FM.x, FM.y, ing.color, s, 2);
-        } else if(t - lastChunkT > 0.09/Math.max(p.strength, 0.25)){
-          lastChunkT = t;
-          fxChunks.push({ u:0, ing:p.sel, dur:0.42+Math.random()*0.12, m:{...mouth}, spin:Math.random()*6 });
-        }
-      }
-    }
-  }
-  for(let i=fxChunks.length-1;i>=0;i--){
-    const c = fxChunks[i];
-    c.u += dt/c.dur;
-    if(c.u >= 1){
-      splashAt(FM.x, FM.y, ING[c.ing].color, s, 3);
+  if(state.mode === 'pour' && p.sel && p.strength > 0.05){
+    const ing = ING[p.sel];
+    const F = projScreen(0, 1.52, 0);
+    if(ing.liquid){
+      if(Math.random() < p.strength*0.8) splashAt(F.x, F.y, ing.color, s, 2);
+    } else if(t - lastChunkT > 0.24/Math.max(p.strength, 0.3)){
+      lastChunkT = t;
+      splashAt(F.x, F.y, ing.color, s, 3);
       plop();
-      fxChunks.splice(i,1);
-      continue;
     }
-    const cp = { x: c.m.x + (FM.x-c.m.x)*0.30, y: c.m.y - 0.04*s };
-    drawChunk(bez(c.m, cp, FM, c.u), c, s, t);
   }
   for(let i=fxParticles.length-1;i>=0;i--){
     const q = fxParticles[i];
@@ -1338,6 +1383,7 @@ function drawFX(dt, t){
 // ============================================================
 initPlanes();
 let t0 = performance.now();
+const streamArr = new Float32Array(18);
 const BASE_SCALE = Math.min(window.devicePixelRatio||1, 1.6) * 0.8;
 let resScale = BASE_SCALE;
 let marchSteps = 26.0;
@@ -1381,7 +1427,7 @@ function frame(now){
   state.flash = Math.max(0, state.flash - dt*3.0);
 
   updatePour(dt);
-  const csTarget = state.mode==='pour' ? 0.40 : 0;
+  const csTarget = state.mode==='pour' ? 0.46 : 0;
   camShift += (csTarget - camShift) * Math.min(1, dt*5);
 
   if(state.started) evalDiscoveries();
@@ -1416,9 +1462,40 @@ function frame(now){
   gl.uniform1f(U.uFlash, state.flash);
   gl.uniform1f(U.uSteps, marchSteps);
   gl.uniform1f(U.uCamShift, camShift);
-  gl.uniform1f(U.uPour, state.pour.strength);
   const tint = state.pour.sel ? ING[state.pour.sel].tint : [1,1,1];
   gl.uniform3f(U.uPourTint, tint[0], tint[1], tint[2]);
+
+  // 3D props: the hand carries the bottle over the funnel as it tilts, and the
+  // stream is a real ballistic parabola from the mouth down into the funnel
+  const aspect = canvas.width/canvas.height;
+  bottleX = -(0.30 + 0.42*Math.max(0, Math.min(1, (aspect-0.55)/0.9)));
+  const tilt = state.pour.tilt;
+  const carry = smooth(0.6, 2.2, tilt);
+  const px = (1-carry)*bottleX + carry*(-0.03 - 0.42*Math.sin(tilt));
+  const stx = px + Math.sin(tilt)*0.42, sty = POUR_PIVOT_Y + Math.cos(tilt)*0.42;
+  const dirx = Math.max(Math.sin(tilt), 0.05), diry = Math.cos(tilt);
+  const K = -stx/dirx;                    // launch impulse that lands at x=0
+  const endY = 1.46;
+  const grav = Math.max(sty + K*diry - endY, 0.02);
+  for(let i=0;i<6;i++){
+    const u = i/5;
+    streamArr[i*3]   = stx + K*dirx*u;
+    streamArr[i*3+1] = sty + K*diry*u - grav*u*u;
+    streamArr[i*3+2] = 0;
+  }
+  gl.uniform1f(U.uPropVis, Math.max(0, Math.min(1, camShift/0.46)));
+  gl.uniform1f(U.uBottleOn, state.pour.sel ? 1 : 0);
+  gl.uniform3f(U.uBottlePos, px, POUR_PIVOT_Y, 0);
+  gl.uniform1f(U.uTilt, tilt);
+  gl.uniform1f(U.uBottleLiqY, state.bottleLiqY);
+  gl.uniform1f(U.uStreamOn, state.pour.strength);
+  gl.uniform1f(U.uStreamSolid, state.pour.sel && !ING[state.pour.sel].liquid ? 1 : 0);
+  gl.uniform1f(U.uStreamR, 0.011 + 0.02*state.pour.strength);
+  gl.uniform3fv(U.uStreamPts, streamArr);
+  gl.uniform3f(U.uFreshA, state.fresh.blue, state.fresh.pink, state.fresh.gold);
+  gl.uniform3f(U.uFrontA, state.front.blue, state.front.pink, state.front.gold);
+  gl.uniform3f(U.uFreshB, state.fresh.bub, state.fresh.star, state.fresh.jelly);
+  gl.uniform3f(U.uFrontB, state.front.bub, state.front.star, state.front.jelly);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   drawFX(dt, t);
