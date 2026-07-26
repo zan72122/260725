@@ -272,6 +272,7 @@ const PARTICLE_FRAG = /* glsl */`
       a *= 0.55 + 0.45 * sin(uTime * uTwinkle + vSeed * 40.0);
     #endif
 
+
     #ifdef LIT
       // Two-sided: a confetti chip is lit whichever way it faces, but the back
       // is dimmer and slightly warmer, as thin paper actually is.

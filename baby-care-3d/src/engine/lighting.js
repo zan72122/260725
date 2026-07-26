@@ -65,72 +65,112 @@ function buildEnvScene(mood) {
 
 /* --------------------------------------------------------- mood presets -- */
 
+/**
+ * Two things every entry now carries that it did not before.
+ *
+ * `shadowSpan` — the half-width, in metres, of the key light's orthographic
+ * shadow frustum. It used to be a single hardcoded 4.2 for every mood, which
+ * silently capped how *long* a cast shadow could be: a low raking key throws a
+ * shadow three or four times the height of the object casting it, and anything
+ * past 4.2 m from the aim point simply fell outside the map and vanished. That
+ * is why `golden` — whose whole identity is long shadows — rendered as flat
+ * ambient. The span is per mood because a high midday key needs a *tight*
+ * frustum for shadow texel density, and a low evening key needs a wide one.
+ *
+ * `grade.shadowTint / highTint / split` — the split-tone pair fed to the grade
+ * pass. Warm key against neutral shadow gives an image luminance range but no
+ * chromatic range; these push the shadows toward whatever is actually filling
+ * them (the sky, the window, a lamp on the far wall) so the frame has both.
+ */
 export const MOODS = {
   day: {
-    envWall: 0xf2e4ef, envWallI: 0.1925,
+    envWall: 0xeae4f4, envWallI: 0.1925,
     envCeil: 0xfff4e6, envCeilI: 0.4375,
     envFloor: 0xffd9e6, envFloorI: 0.1575,
     envWindow: 0xdff0ff, envWindowI: 1.2,
-    envFill: 0xffe9d6, envFillI: 0.385,
+    envFill: 0xe6ecff, envFillI: 0.385,
     envLamp: 0xffd9a0, envLampI: 0.24,
 
-    keyColor: 0xfff2df, keyIntensity: 2.9838, keyPos: [-4.4, 5.2, 3.4],
-    fillColor: 0xd8ecff, fillIntensity: 0.4335, fillPos: [4.6, 2.6, 3.0],
+    keyColor: 0xfff0d4, keyIntensity: 3.05, keyPos: [-4.4, 4.6, 3.4],
+    // The fill is the sky coming through the window on the shadow side. It was
+    // at 0.43 and barely tinted anything; at 0.62 the shaded side of every prop
+    // reads visibly blue against the key's cream.
+    fillColor: 0xbcd8ff, fillIntensity: 0.62, fillPos: [4.6, 2.6, 3.0],
     rimColor: 0xffe2c4, rimIntensity: 1.0024, rimPos: [1.2, 4.0, -5.0],
-    hemiSky: 0xdff0ff, hemiGround: 0xffd9c9, hemiIntensity: 0.1513,
-    envIntensity: 0.3024,
-    grade: { saturation: 1.12, contrast: 1.05, warmth: 0.03, vignette: 0.26, exposure: 1.0 },
-    fog: { color: 0xf6e9f2, density: 0.008 }
+    hemiSky: 0xc4dcff, hemiGround: 0xffd2bc, hemiIntensity: 0.26,
+    envIntensity: 0.30, shadowSpan: 4.2,
+    grade: {
+      saturation: 1.12, contrast: 1.06, warmth: 0.03, vignette: 0.26, exposure: 1.0,
+      shadowTint: [0.885, 0.955, 1.16], highTint: [1.035, 1.0, 0.955], split: 1.0
+    },
+    fog: { color: 0xf1ecf6, density: 0.008 }
   },
 
   golden: {   // late afternoon — the "play" and "feed" hero look
-    envWall: 0xf6e0dc, envWallI: 0.175,
-    envCeil: 0xffeacd, envCeilI: 0.3675,
-    envFloor: 0xffd0b8, envFloorI: 0.175,
-    envWindow: 0xffd8a8, envWindowI: 1.36,
-    envFill: 0xffdcc0, envFillI: 0.315,
-    envLamp: 0xffc98a, envLampI: 0.36,
+    envWall: 0xf3d9cc, envWallI: 0.150,
+    envCeil: 0xffe2bc, envCeilI: 0.290,
+    envFloor: 0xffc9aa, envFloorI: 0.150,
+    envWindow: 0xffcf92, envWindowI: 1.55,
+    envFill: 0xc8d8f4, envFillI: 0.200,
+    envLamp: 0xffc07a, envLampI: 0.30,
 
-    keyColor: 0xffdcae, keyIntensity: 3.2725, keyPos: [-5.0, 3.4, 2.6],
-    fillColor: 0xcfe4ff, fillIntensity: 0.3162, fillPos: [4.4, 2.4, 3.2],
-    rimColor: 0xffcf9a, rimIntensity: 1.4107, rimPos: [0.4, 3.4, -5.2],
-    hemiSky: 0xffe6cc, hemiGround: 0xffc9a8, hemiIntensity: 0.1375,
-    envIntensity: 0.3024,
-    grade: { saturation: 1.14, contrast: 1.06, warmth: 0.07, vignette: 0.32, exposure: 1.02 },
-    fog: { color: 0xf9e3d6, density: 0.012 }
+    // Sun elevation ≈ 16° above the aim point rather than the old 25°, and
+    // pushed a further 1.6 m out along −X. That is the whole defect: at 25° a
+    // 0.9 m prop throws a 1.9 m shadow that mostly hides under itself, at 16°
+    // it throws 3.1 m of raking shadow straight across the floor toward camera.
+    keyColor: 0xffc887, keyIntensity: 3.85, keyPos: [-6.6, 2.35, 2.80],
+    // Fill and hemi are pulled *down* hard. Late afternoon is a high-contrast
+    // hour; carrying `day`'s ambient into it is exactly what made the two moods
+    // indistinguishable, because ambient is the half of the image that does not
+    // change when you move the sun.
+    fillColor: 0xa8c4f0, fillIntensity: 0.235, fillPos: [4.4, 2.4, 3.2],
+    rimColor: 0xffbe80, rimIntensity: 1.85, rimPos: [0.4, 2.6, -5.2],
+    hemiSky: 0xc0d4f4, hemiGround: 0xffbe94, hemiIntensity: 0.105,
+    envIntensity: 0.235, shadowSpan: 6.2,
+    grade: {
+      saturation: 1.18, contrast: 1.10, warmth: 0.11, vignette: 0.34, exposure: 1.0,
+      shadowTint: [0.82, 0.915, 1.22], highTint: [1.075, 1.0, 0.885], split: 1.15
+    },
+    fog: { color: 0xffd9b4, density: 0.020 }
   },
 
   evening: {  // bath time
-    envWall: 0xe6dcf0, envWallI: 0.147,
-    envCeil: 0xffeedd, envCeilI: 0.315,
-    envFloor: 0xe8d2e2, envFloorI: 0.1225,
-    envWindow: 0xa8b8e8, envWindowI: 0.352,
-    envFill: 0xffe0c0, envFillI: 0.28,
-    envLamp: 0xffc98a, envLampI: 0.8,
+    envWall: 0xdfd8f0, envWallI: 0.147,
+    envCeil: 0xffe8d4, envCeilI: 0.290,
+    envFloor: 0xdccbe4, envFloorI: 0.1225,
+    envWindow: 0x9fb2e8, envWindowI: 0.40,
+    envFill: 0xc0cef0, envFillI: 0.28,
+    envLamp: 0xffc98a, envLampI: 0.85,
 
-    keyColor: 0xffe0b8, keyIntensity: 2.5025, keyPos: [-3.2, 4.4, 2.8],
-    fillColor: 0xb8c8f0, fillIntensity: 0.2805, fillPos: [4.0, 2.2, 2.6],
-    rimColor: 0xc9d8ff, rimIntensity: 1.1138, rimPos: [1.6, 3.6, -4.6],
-    hemiSky: 0xc8d4f0, hemiGround: 0xffd0b0, hemiIntensity: 0.1155,
-    envIntensity: 0.2873,
-    grade: { saturation: 1.08, contrast: 1.07, warmth: 0.05, vignette: 0.38, exposure: 0.98 },
-    fog: { color: 0xe9dced, density: 0.016 }
+    keyColor: 0xffdcac, keyIntensity: 2.62, keyPos: [-4.2, 3.0, 2.8],
+    fillColor: 0xa8bcf0, fillIntensity: 0.46, fillPos: [4.0, 2.2, 2.6],
+    rimColor: 0xc9d8ff, rimIntensity: 1.28, rimPos: [1.6, 3.6, -4.6],
+    hemiSky: 0xb4c6f4, hemiGround: 0xffc8a4, hemiIntensity: 0.185,
+    envIntensity: 0.2873, shadowSpan: 5.2,
+    grade: {
+      saturation: 1.10, contrast: 1.08, warmth: 0.05, vignette: 0.38, exposure: 0.99,
+      shadowTint: [0.83, 0.92, 1.21], highTint: [1.055, 1.0, 0.925], split: 1.1
+    },
+    fog: { color: 0xdcd6ee, density: 0.016 }
   },
 
   night: {    // sleep
-    envWall: 0x39406b, envWallI: 0.175,
-    envCeil: 0x4a5590, envCeilI: 0.1925,
-    envFloor: 0x3a3560, envFloorI: 0.105,
+    envWall: 0x333a68, envWallI: 0.175,
+    envCeil: 0x44508e, envCeilI: 0.1925,
+    envFloor: 0x36325e, envFloorI: 0.105,
     envWindow: 0x8fa8e8, envWindowI: 0.256,
     envFill: 0x5f6bb0, envFillI: 0.175,
     envLamp: 0xffc078, envLampI: 1.28,
 
-    keyColor: 0xffcb8a, keyIntensity: 1.4437, keyPos: [-1.6, 2.6, 2.0],
-    fillColor: 0x8098e0, fillIntensity: 0.2805, fillPos: [3.4, 2.6, 2.2],
+    keyColor: 0xffc884, keyIntensity: 1.52, keyPos: [-1.6, 2.2, 2.0],
+    fillColor: 0x7088dc, fillIntensity: 0.36, fillPos: [3.4, 2.6, 2.2],
     rimColor: 0x9fb4ff, rimIntensity: 1.1138, rimPos: [1.0, 3.4, -4.4],
-    hemiSky: 0x6f80c8, hemiGround: 0x4a4070, hemiIntensity: 0.0963,
-    envIntensity: 0.257,
-    grade: { saturation: 0.98, contrast: 1.10, warmth: -0.02, vignette: 0.50, exposure: 1.06 },
+    hemiSky: 0x6478c8, hemiGround: 0x443a6c, hemiIntensity: 0.115,
+    envIntensity: 0.257, shadowSpan: 3.4,
+    grade: {
+      saturation: 1.0, contrast: 1.10, warmth: -0.02, vignette: 0.50, exposure: 1.06,
+      shadowTint: [0.80, 0.90, 1.26], highTint: [1.08, 1.0, 0.90], split: 1.2
+    },
     fog: { color: 0x3b3f66, density: 0.030 }
   }
 };
@@ -260,6 +300,22 @@ export class LightingRig {
     col(this.hemi.groundColor, a.hemiGround, b.hemiGround);
     this.hemi.intensity = lerp(a.hemiIntensity, b.hemiIntensity, t);
 
+    // A low key needs a wide shadow frustum or its long shadows are simply
+    // clipped away; a high key wants a narrow one for texel density. Both cost
+    // the same, so the span rides the crossfade with everything else.
+    const span = lerp(a.shadowSpan ?? 4.2, b.shadowSpan ?? 4.2, t);
+    const sc = this.key.shadow.camera;
+    if (Math.abs(sc.right - span) > 1e-4) {
+      sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span;
+      // The eye is at the light, so the far plane has to clear the whole box
+      // even when the light is low and the box is long.
+      sc.far = Math.max(22, span * 4.5);
+      sc.updateProjectionMatrix();
+      // A wider frustum means fewer texels per metre, so the PCF kernel has to
+      // shrink or a 6 m box turns every contact into a smudge.
+      this.key.shadow.radius = THREE.MathUtils.clamp(9.2 / span, 1.1, 2.6);
+    }
+
     if (this.scene.fog) {
       col(this.scene.fog.color, a.fog.color, b.fog.color);
       this.scene.fog.density = lerp(a.fog.density, b.fog.density, t);
@@ -273,12 +329,17 @@ export class LightingRig {
     const b = MOODS[this._target] || a;
     const t = this._target ? this._blend : 1;
     const L = THREE.MathUtils.lerp;
+    const L3 = (p, q) => [L(p[0], q[0], t), L(p[1], q[1], t), L(p[2], q[2], t)];
+    const NEUTRAL = [1, 1, 1];
     return {
       saturation: L(a.grade.saturation, b.grade.saturation, t),
       contrast: L(a.grade.contrast, b.grade.contrast, t),
       warmth: L(a.grade.warmth, b.grade.warmth, t),
       vignette: L(a.grade.vignette, b.grade.vignette, t),
-      exposure: L(a.grade.exposure, b.grade.exposure, t)
+      exposure: L(a.grade.exposure, b.grade.exposure, t),
+      shadowTint: L3(a.grade.shadowTint || NEUTRAL, b.grade.shadowTint || NEUTRAL),
+      highTint: L3(a.grade.highTint || NEUTRAL, b.grade.highTint || NEUTRAL),
+      split: L(a.grade.split ?? 1, b.grade.split ?? 1, t)
     };
   }
 

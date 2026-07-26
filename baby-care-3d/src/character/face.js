@@ -57,124 +57,138 @@ const MORPHS = [
   ['browRaise', (ax, x, y, z, s, o) => {
     const w = g1(Math.hypot(ax - 0.028, y - 0.5455, z - 0.0645), 0.030)
       + 0.5 * g1(Math.hypot(ax - 0.020, y - 0.5680, z - 0.0630), 0.034);
-    o[1] += 0.0062 * w; o[2] += 0.0012 * w;
+    o[1] += 0.0112 * w; o[2] += 0.0022 * w;
+    // the forehead creases when a baby raises its brows — three soft ridges
+    const fold = Math.sin((y - 0.5560) * 520) * g1(Math.hypot(ax * 0.7, y - 0.5640, z - 0.0640), 0.026);
+    o[2] += 0.0011 * fold;
   }],
   ['browFurrow', (ax, x, y, z, s, o) => {
     const w = g1(Math.hypot(ax - 0.014, y - 0.5440, z - 0.0655), 0.024);
-    o[1] -= 0.0048 * w; o[0] -= 0.0034 * w * s; o[2] += 0.0028 * w;
+    o[1] -= 0.0086 * w; o[0] -= 0.0060 * w * s; o[2] += 0.0044 * w;
     // the little vertical ridge between the brows
-    o[2] += 0.0022 * g1(Math.hypot(ax, y - 0.5480, z - 0.0680), 0.011);
+    o[2] += 0.0038 * g1(Math.hypot(ax, y - 0.5480, z - 0.0680), 0.011);
   }],
   ['browSad', (ax, x, y, z, s, o) => {
     const inner = g1(Math.hypot(ax - 0.012, y - 0.5445, z - 0.0660), 0.021);
     const outer = g1(Math.hypot(ax - 0.046, y - 0.5430, z - 0.0560), 0.024);
-    o[1] += 0.0055 * inner - 0.0032 * outer;
-    o[2] += 0.0016 * inner;
+    o[1] += 0.0102 * inner - 0.0064 * outer;
+    o[2] += 0.0030 * inner;
+    // the oblique fold that appears above the inner brow — the single most
+    // legible cue for distress on any face
+    o[2] += 0.0022 * g1(Math.hypot(ax - 0.016, y - 0.5580, z - 0.0630), 0.017);
   }],
   ['eyeWide', (ax, x, y, z, s, o) => {
     const up = g1(Math.hypot(ax - 0.030, y - 0.5470, z - 0.0600), 0.020);
     const dn = g1(Math.hypot(ax - 0.030, y - 0.5165, z - 0.0600), 0.019);
-    o[1] += 0.0038 * up - 0.0026 * dn;
+    o[1] += 0.0062 * up - 0.0042 * dn;
   }],
   ['eyeSquint', (ax, x, y, z, s, o) => {
     const dn = g1(Math.hypot(ax - 0.032, y - 0.5170, z - 0.0600), 0.022);
     const up = g1(Math.hypot(ax - 0.030, y - 0.5480, z - 0.0600), 0.019);
-    o[1] += 0.0050 * dn - 0.0022 * up; o[2] += 0.0018 * dn;
+    o[1] += 0.0086 * dn - 0.0036 * up; o[2] += 0.0030 * dn;
+    // crow's-foot bunching at the outer canthus
+    o[2] -= 0.0016 * g1(Math.hypot(ax - 0.052, y - 0.5300, z - 0.0430), 0.018);
   }],
   ['smileSmall', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0235, y - 0.4870, z - 0.0585), 0.017);
-    const ch = g1(Math.hypot(ax - 0.040, y - 0.5000, z - 0.0570), 0.026);
-    o[1] += 0.0042 * c + 0.0018 * ch; o[0] += 0.0016 * c * s; o[2] -= 0.0008 * c;
+    const c = g1(Math.hypot(ax - 0.0245, y - 0.4868, z - 0.0640), 0.017);
+    const ch = g1(Math.hypot(ax - 0.040, y - 0.5000, z - 0.0600), 0.026);
+    o[1] += 0.0062 * c + 0.0030 * ch; o[0] += 0.0026 * c * s; o[2] -= 0.0010 * c;
   }],
   ['smileBig', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0250, y - 0.4880, z - 0.0570), 0.020);
-    const ch = g1(Math.hypot(ax - 0.042, y - 0.5040, z - 0.0560), 0.028);
-    const lip = g1(Math.hypot(ax, y - 0.4930, z - 0.0670), 0.020);
-    o[1] += 0.0088 * c + 0.0072 * ch + 0.0026 * lip;
-    o[0] += 0.0055 * c * s + 0.0022 * ch * s;
-    o[2] += 0.0032 * ch - 0.0012 * c;
+    const c = g1(Math.hypot(ax - 0.0255, y - 0.4878, z - 0.0630), 0.020);
+    const ch = g1(Math.hypot(ax - 0.042, y - 0.5040, z - 0.0590), 0.028);
+    const lip = g1(Math.hypot(ax, y - 0.4930, z - 0.0740), 0.020);
+    o[1] += 0.0128 * c + 0.0104 * ch + 0.0036 * lip;
+    o[0] += 0.0082 * c * s + 0.0032 * ch * s;
+    o[2] += 0.0046 * ch - 0.0016 * c;
     // nasolabial fold: the crease that separates the cheek apple
     const nl = g1(Math.abs(Math.hypot(ax - 0.030, y - 0.4970) - 0.010), 0.0055)
-      * g1(z - 0.0640, 0.020);
-    o[2] -= 0.0026 * nl;
+      * g1(z - 0.0670, 0.020);
+    o[2] -= 0.0042 * nl;
   }],
   ['jawOpen', (ax, x, y, z, s, o) => {
     // rotate the lower face about the jaw hinge, then scoop the lip region
     // backward so the mouth bag has somewhere to sit
     const w = sstep(0.5180, 0.4700, y) * sstep(-0.030, 0.020, z);
     const py = y - FACE.jawPivot[1], pz = z - FACE.jawPivot[2];
-    const a = 0.34 * w;
+    const a = 0.40 * w;
     o[1] += (py * Math.cos(a) - pz * Math.sin(a)) - py;
     o[2] += (py * Math.sin(a) + pz * Math.cos(a)) - pz;
-    const m = g1(Math.hypot(ax * 0.72, y - 0.4880, (z - 0.0680) * 0.9), 0.023);
-    o[2] -= 0.0135 * m;
+    const m = g1(Math.hypot(ax * 0.72, y - 0.4880, (z - 0.0740) * 0.9), 0.023);
+    o[2] -= 0.0165 * m;
   }],
   ['mouthPout', (ax, x, y, z, s, o) => {
-    const m = g1(Math.hypot(ax * 0.9, y - 0.4855, z - 0.0665), 0.020);
-    const c = g1(Math.hypot(ax - 0.0235, y - 0.4865, z - 0.0585), 0.016);
-    o[2] += 0.0068 * m; o[0] -= 0.0040 * c * s; o[1] -= 0.0022 * m;
-    o[1] += 0.0026 * g1(Math.hypot(ax, y - 0.4715, z - 0.0610), 0.017);   // chin up
+    const m = g1(Math.hypot(ax * 0.9, y - 0.4855, z - 0.0740), 0.020);
+    const c = g1(Math.hypot(ax - 0.0240, y - 0.4865, z - 0.0645), 0.016);
+    o[2] += 0.0092 * m; o[0] -= 0.0058 * c * s; o[1] -= 0.0030 * m;
+    o[1] += 0.0038 * g1(Math.hypot(ax, y - 0.4715, z - 0.0660), 0.017);   // chin up
   }],
   ['mouthFrown', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0230, y - 0.4870, z - 0.0585), 0.017);
-    o[1] -= 0.0070 * c; o[0] += 0.0012 * c * s;
-    o[1] += 0.0022 * g1(Math.hypot(ax, y - 0.4790, z - 0.0640), 0.014);
-    o[2] += 0.0020 * g1(Math.hypot(ax, y - 0.4710, z - 0.0600), 0.016);
+    const c = g1(Math.hypot(ax - 0.0238, y - 0.4870, z - 0.0640), 0.017);
+    o[1] -= 0.0112 * c; o[0] += 0.0022 * c * s; o[2] -= 0.0020 * c;
+    o[1] += 0.0034 * g1(Math.hypot(ax, y - 0.4790, z - 0.0700), 0.014);
+    o[2] += 0.0032 * g1(Math.hypot(ax, y - 0.4710, z - 0.0660), 0.016);
   }],
   ['mouthCry', (ax, x, y, z, s, o) => {
     // the wide unhappy rectangle: corners out and down, upper lip up
-    const c = g1(Math.hypot(ax - 0.0270, y - 0.4880, z - 0.0555), 0.021);
-    const upper = g1(Math.hypot(ax * 0.8, y - 0.4930, z - 0.0670), 0.019);
-    o[0] += 0.0090 * c * s; o[1] -= 0.0058 * c;
-    o[1] += 0.0042 * upper; o[2] -= 0.0022 * upper;
-    o[1] += 0.0040 * g1(Math.hypot(ax - 0.036, y - 0.5030, z - 0.0570), 0.024); // cheeks bunch
+    const c = g1(Math.hypot(ax - 0.0275, y - 0.4880, z - 0.0620), 0.021);
+    const upper = g1(Math.hypot(ax * 0.8, y - 0.4930, z - 0.0745), 0.019);
+    o[0] += 0.0130 * c * s; o[1] -= 0.0086 * c; o[2] -= 0.0034 * c;
+    o[1] += 0.0068 * upper; o[2] -= 0.0034 * upper;
+    o[1] += 0.0072 * g1(Math.hypot(ax - 0.036, y - 0.5030, z - 0.0600), 0.024); // cheeks bunch
+    // the tongue-shaped hollow under the lower lip of a full bawl
+    o[2] -= 0.0030 * g1(Math.hypot(ax * 0.8, y - 0.4740, z - 0.0680), 0.016);
   }],
   ['cheekPuff', (ax, x, y, z, s, o) => {
     const w = g1(Math.hypot(ax - 0.0455, y - 0.5010, z - 0.0480), 0.030);
-    o[0] += 0.0092 * w * s; o[2] += 0.0038 * w; o[1] -= 0.0010 * w;
+    o[0] += 0.0118 * w * s; o[2] += 0.0050 * w; o[1] -= 0.0012 * w;
   }],
   ['cheekSuck', (ax, x, y, z, s, o) => {
     const w = g1(Math.hypot(ax - 0.0430, y - 0.5000, z - 0.0520), 0.024);
-    o[0] -= 0.0068 * w * s; o[2] -= 0.0022 * w;
+    o[0] -= 0.0086 * w * s; o[2] -= 0.0028 * w;
   }],
   ['noseWrinkle', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax, y - 0.5150, z - 0.0740), 0.018);
-    o[1] += 0.0034 * w; o[2] += 0.0014 * w;
-    const side = g1(Math.hypot(ax - 0.014, y - 0.5090, z - 0.0700), 0.011);
-    o[1] += 0.0026 * side;
+    // three short transverse ridges across the nose bridge, the ala pulled up
+    const w = g1(Math.hypot(ax, y - 0.5150, z - 0.0770), 0.018);
+    o[1] += 0.0058 * w; o[2] += 0.0030 * w;
+    o[2] += 0.0016 * Math.sin((y - 0.5100) * 700) * w;
+    const side = g1(Math.hypot(ax - 0.014, y - 0.5060, z - 0.0700), 0.012);
+    o[1] += 0.0050 * side; o[0] += 0.0016 * side * s;
   }],
   ['lipsPurse', (ax, x, y, z, s, o) => {
-    const m = g1(Math.hypot(ax, y - 0.4860, z - 0.0670), 0.019);
-    o[2] += 0.0050 * m; o[0] -= 0.0034 * m * s * clamp01(ax / 0.02);
+    const m = g1(Math.hypot(ax, y - 0.4860, z - 0.0740), 0.019);
+    o[2] += 0.0072 * m; o[0] -= 0.0050 * m * s * clamp01(ax / 0.02);
   }],
   ['sleepSoft', (ax, x, y, z, s, o) => {
     const w = sstep(0.5200, 0.4700, y);
-    o[1] -= 0.0026 * w;
-    o[1] -= 0.0020 * g1(Math.hypot(ax - 0.030, y - 0.5460, z - 0.0630), 0.028);
-    o[1] += 0.0022 * g1(Math.hypot(ax - 0.042, y - 0.5020, z - 0.0560), 0.028);
-    o[2] += 0.0018 * g1(Math.hypot(ax, y - 0.4860, z - 0.0665), 0.018);
+    o[1] -= 0.0034 * w;
+    o[1] -= 0.0032 * g1(Math.hypot(ax - 0.030, y - 0.5460, z - 0.0630), 0.028);
+    o[1] += 0.0030 * g1(Math.hypot(ax - 0.042, y - 0.5020, z - 0.0590), 0.028);
+    o[2] += 0.0026 * g1(Math.hypot(ax, y - 0.4860, z - 0.0735), 0.018);
   }],
   ['sulk', (ax, x, y, z, s, o) => {
     // deliberately asymmetric: one corner down, one flat
     const left = x > 0 ? 1 : 0.15;
-    const c = g1(Math.hypot(ax - 0.0230, y - 0.4870, z - 0.0585), 0.017) * left;
-    o[1] -= 0.0062 * c;
-    o[2] += 0.0044 * g1(Math.hypot(ax, y - 0.4820, z - 0.0660), 0.017);   // lower lip out
-    o[1] -= 0.0026 * g1(Math.hypot(ax - 0.020, y - 0.5440, z - 0.0655), 0.024);
+    const c = g1(Math.hypot(ax - 0.0238, y - 0.4870, z - 0.0640), 0.017) * left;
+    o[1] -= 0.0098 * c;
+    o[2] += 0.0074 * g1(Math.hypot(ax, y - 0.4805, z - 0.0730), 0.017);   // lower lip out
+    o[1] -= 0.0040 * g1(Math.hypot(ax - 0.020, y - 0.5440, z - 0.0655), 0.024);
   }],
   ['chinRaise', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax, y - 0.4720, z - 0.0590), 0.020);
-    o[1] += 0.0044 * w; o[2] += 0.0016 * w;
+    const w = g1(Math.hypot(ax, y - 0.4720, z - 0.0640), 0.020);
+    o[1] += 0.0064 * w; o[2] += 0.0026 * w;
+    // the walnut-chin dimpling that comes with a wobbling lip
+    o[2] -= 0.0014 * Math.sin(ax * 620) * w;
   }],
   ['yawnWide', (ax, x, y, z, s, o) => {
     const w = sstep(0.5180, 0.4650, y) * sstep(-0.030, 0.020, z);
     const py = y - FACE.jawPivot[1], pz = z - FACE.jawPivot[2];
-    const a = 0.62 * w;
+    const a = 0.70 * w;
     o[1] += (py * Math.cos(a) - pz * Math.sin(a)) - py;
     o[2] += (py * Math.sin(a) + pz * Math.cos(a)) - pz;
-    const m = g1(Math.hypot(ax * 0.68, y - 0.4830, (z - 0.0680) * 0.85), 0.026);
-    o[2] -= 0.0180 * m;
-    o[0] -= 0.0030 * g1(Math.hypot(ax - 0.045, y - 0.5000, z - 0.0520), 0.026) * s;
+    const m = g1(Math.hypot(ax * 0.68, y - 0.4830, (z - 0.0740) * 0.85), 0.026);
+    o[2] -= 0.0205 * m;
+    o[0] -= 0.0040 * g1(Math.hypot(ax - 0.045, y - 0.5000, z - 0.0540), 0.026) * s;
   }]
 ];
 
