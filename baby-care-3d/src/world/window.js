@@ -1168,9 +1168,9 @@ export class WindowUnit {
     // beam's contribution stayed fixed in absolute terms and therefore fell in
     // relative terms — it stopped being visible as airborne light at all in the
     // wide shot. The beam is meant to be the best thing in that frame.
-    this.shaftU.uIntensity.value = 0.66 * i;
-    this.poolU.uIntensity.value = 0.72 * i;
-    this.moteU.uIntensity.value = 0.60 * Math.min(1.4, i);
+    this.shaftU.uIntensity.value = 1.05 * i;
+    this.poolU.uIntensity.value = 0.86 * i;
+    this.moteU.uIntensity.value = 0.85 * Math.min(1.4, i);
   }
 
   /** What the room should feed its window-bounce light. */

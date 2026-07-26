@@ -32,6 +32,39 @@ const SAY = {
   thanks:  { text: 'ありがと', icon: '💕', mood: 'shy' }
 };
 
+/**
+ * Unprompted behaviour, per mood.
+ *
+ * `Baby.gesture()` has always exposed eleven of these and nothing ever asked
+ * for one, so the character only ever moved when the game told it to — the
+ * single clearest tell of a puppet rather than a creature. Weights are
+ * frequencies, not probabilities; they are normalised at pick time.
+ */
+const IDLE_POOL = {
+  default: { kick: 3, suck: 2, wave: 1.4, clap: 1.2, point: 1, hiccup: 0.8, reach: 1.2, yawn: 0.6, shiver: 0.3 },
+  happy:   { clap: 3, kick: 3, wave: 2.4, reach: 1.6, point: 1.2, hiccup: 0.6 },
+  giggle:  { clap: 4, kick: 3.4, wave: 2, reach: 1.2 },
+  excited: { clap: 4, kick: 4, wave: 3, reach: 2, point: 1.4 },
+  sad:     { suck: 3, 'rub-eyes': 2.4, shiver: 1.2, hiccup: 1 },
+  cry:     { kick: 4, shiver: 2.6, hiccup: 2.2, 'rub-eyes': 2 },
+  sleepy:  { yawn: 4, 'rub-eyes': 3.4, suck: 2 },
+  sulk:    { suck: 2.6, kick: 1.6, shiver: 0.8 },
+  shy:     { suck: 2.6, 'rub-eyes': 1.4, wave: 0.8 },
+  yum:     { suck: 3, clap: 1.6, kick: 1.2 },
+  surprised: { reach: 3, point: 2, hiccup: 1.2 }
+};
+
+/** Small deterministic PRNG so a screenshot of a given moment is repeatable. */
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class Baby {
   constructor({ tier = 2, state = null } = {}) {
     this.tier = tier;
@@ -48,6 +81,14 @@ export class Baby {
     this._t = 0;
     this._sayPending = null;
     this._built = false;
+
+    /* idle life --------------------------------------------------------- */
+    this._rnd = mulberry(0x5eed1);
+    // the first gap is long on purpose: a still capture warms 2–4 s of clock,
+    // and a gesture firing inside that window would make every screenshot a
+    // different pose
+    this._idleT = 9.0;
+    this.idleLife = true;
   }
 
   /* ------------------------------------------------------------- build --- */
@@ -196,6 +237,8 @@ export class Baby {
   setMood(name, seconds = 0.45) {
     this.mood = name;
     this.face?.setMood(name, seconds);
+    // the body answers to the mood too, not just the face
+    this.anim?.setMoodPose(name, name === 'cry' ? 1 : 0.85);
     if (name === 'asleep' && this.anim) this.anim.energy = 0.25;
     else if (name === 'sleepy' && this.anim) this.anim.energy = 0.55;
     else if (this.anim) this.anim.energy = name === 'excited' || name === 'giggle' ? 1.35 : 1;
@@ -326,7 +369,14 @@ export class Baby {
     if (!this._built) return;
     this._t += dt;
 
+    this._idleLife(dt);
     this.anim.update(dt, ctx);
+    // moods carry a head cant — sympathy tilt on sad, the coy duck on shy
+    const tilt = this.face?.controls?.headTilt || 0;
+    if (tilt) {
+      this.rig.bones.head.rotation.z += tilt * 0.30;
+      this.rig.bones.neck.rotation.z += tilt * 0.16;
+    }
     this._solveIK();
     this.rig.root.updateMatrixWorld(true);
 
@@ -344,6 +394,35 @@ export class Baby {
       this._sayPending.t += dt;
       if (this._sayPending.t > 2.8) this._sayPending = null;
     }
+  }
+
+  /**
+   * Fire an unprompted gesture every few seconds, weighted by mood. Real
+   * infants are never still for eight seconds at a stretch and never do the
+   * same thing twice in a row, so the last pick is excluded and the interval is
+   * drawn fresh each time.
+   */
+  _idleLife(dt) {
+    if (!this.idleLife || !this.anim || this.mood === 'asleep') return;
+    if (this.poseName === 'sleep') return;
+    this._idleT -= dt;
+    if (this._idleT > 0) return;
+    // sleepier babies fidget less often; excited ones more
+    const pace = this.mood === 'sleepy' ? 1.7 : this.mood === 'excited' || this.mood === 'giggle' ? 0.6 : 1;
+    this._idleT = (3.4 + this._rnd() * 6.5) * pace;
+    if (this.anim.isGesturing() || this.attached.size) return;
+    const pool = IDLE_POOL[this.mood] || IDLE_POOL.default;
+    let total = 0;
+    for (const k in pool) if (k !== this._lastIdle) total += pool[k];
+    if (total <= 0) return;
+    let r = this._rnd() * total;
+    for (const k in pool) {
+      if (k === this._lastIdle) continue;
+      r -= pool[k];
+      if (r <= 0) { this._lastIdle = k; this.gesture(k); break; }
+    }
+    // a glance and a blink almost always accompany a fidget
+    if (this._rnd() < 0.55) this.blink();
   }
 
   _solveIK() {
@@ -435,6 +514,9 @@ export class Baby {
     this.setWet(0);
     this.setMood('neutral', 0.01);
     this.anim?.clearGestures();
+    this._rnd = mulberry(0x5eed1);
+    this._idleT = 9.0;
+    this._lastIdle = null;
     this.playPose('sit', { seconds: 0.01 });
     this.lookAt(null);
     this._ikTargets = { L: null, R: null, footL: null, footR: null };

@@ -252,28 +252,31 @@ export class SleepActivity {
     const rig = ctx.cameraRig;
     if (!rig?.overridePreset) return;
     rig.setSubject?.(this.shotPivot);
-    // The near rail tops out 0.25 m *above* the sleeping head, so the eye
-    // height is not a taste call: a camera standing `u` metres outside the
-    // rail only sees the face at all above y = 0.76·u + 0.68 (rail top). Each
-    // of these sits ~0.05 m over that line, which puts the rail itself just
-    // inside the bottom of the frame — the baby is genuinely seen *over* it.
+    // The near rail is a solid bar 0.25 m *above* the sleeping face, so the
+    // eye height is not a taste call. Sighting past its far edge (z ≈ head
+    // +0.26, top y = 0.68) needs the camera above y = 1.20·a + 0.74, where `a`
+    // is how far outside that edge it stands. Every framing below clears that
+    // line by ~0.09 m, which lands the rail across the very bottom of the
+    // frame — the baby is genuinely seen *over* it rather than through it.
+    // Getting this wrong is exactly what made `51-sleep-asleep` a black
+    // rectangle, and then a close-up of a cot rail.
     const faceShot = {
       space: 'subject',
-      pos: [-0.583, 0.494, 0.227], target: [-0.011, -0.026, 0.017],
-      fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
+      pos: [-0.541, 0.716, 0.100], target: [0.00, 0.045, -0.056],
+      fov: 32, focusRange: 0.12, dof: 1.30, handheld: 0.45, roll: 0.4
     };
     rig.overridePreset('crib-face', faceShot);
     // so a goTo('face') from anywhere in this scene lands on the cot portrait
     rig.overridePreset('face', faceShot);
     rig.overridePreset('crib', {
       space: 'subject',
-      pos: [-0.845, 0.716, 0.329], target: [-0.011, -0.060, 0.017],
-      fov: 36, focusRange: 0.18, dof: 1.15, handheld: 0.50, roll: 0.5
+      pos: [-0.812, 1.074, 0.150], target: [0.00, 0.020, -0.040],
+      fov: 34, focusRange: 0.20, dof: 1.15, handheld: 0.50, roll: 0.5
     });
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [-0.700, 0.593, 0.272], target: [-0.011, -0.045, 0.017],
-      fov: 34, focusRange: 0.15, dof: 1.20, handheld: 0.55, roll: 0.5
+      pos: [-0.660, 0.874, 0.122], target: [0.00, 0.030, -0.050],
+      fov: 34, focusRange: 0.16, dof: 1.20, handheld: 0.55, roll: 0.5
     });
   }
 
@@ -285,9 +288,16 @@ export class SleepActivity {
     if (!this.shotPivot) return;
     const b = this.ctx.baby;
     let head = null;
-    try { head = b?.headWorldPos?.(); } catch (e) { head = null; }
+    // The head *bone* is where the face geometry actually is; headWorldPos()
+    // reports a point ~0.16 m past the crown, which is enough to slide a
+    // 0.5 m-wide portrait frame clean off the face.
+    try {
+      const bone = b?.bone?.('head');
+      if (bone?.isObject3D) head = bone.getWorldPosition(this._v2);
+      else head = b?.headWorldPos?.();
+    } catch (e) { head = null; }
     if (!head || !Number.isFinite(head.x)) {
-      head = this._v.set(this.cribPos.x - 0.28, this.surfaceY + 0.11, this.cribPos.z);
+      head = this._v.set(this.cribPos.x - 0.12, this.surfaceY + 0.09, this.cribPos.z);
     }
     // The pivot lives under this.group, which is at the identity — world and
     // local coincide, so a straight copy is correct and stays correct.
@@ -296,15 +306,34 @@ export class SleepActivity {
     this.shotPivot.updateMatrixWorld(true);
   }
 
+  /**
+   * Park the room's own version of a prop while this scene stands its
+   * simulatable one in the same place.
+   *
+   * The anchors are bare locators — `Room.anchor('crib')` has no children, so
+   * traversing it hid nothing and the room cot stayed standing *inside* ours.
+   * Its mattress top is at y = 0.52 against our 0.315, so it covered the
+   * sleeping baby completely: `51-sleep-asleep` framed an empty quilt with the
+   * character sealed underneath. The real prop hangs off the Room instance by
+   * name, so mask that too, and keep the anchor sweep for the day it does own
+   * geometry.
+   */
   _maskAnchor(name) {
-    const a = this.ctx.room?.anchor?.(name);
-    if (!a?.isObject3D) return;
-    a.traverse((o) => {
-      if (o !== a && o.isMesh && o.visible) {
-        this._masked.push(o);
-        o.visible = false;
-      }
-    });
+    const room = this.ctx.room;
+    const hide = (root) => {
+      if (!root?.isObject3D) return;
+      root.traverse((o) => {
+        if (o !== root && o.isMesh && o.visible) {
+          this._masked.push(o);
+          o.visible = false;
+        }
+      });
+      if (root.isMesh && root.visible) { this._masked.push(root); root.visible = false; }
+    };
+    hide(room?.anchor?.(name));
+    const prop = room?.[name];
+    if (prop?.isObject3D) hide(prop);
+
     this.res.onDispose(() => {
       for (const o of this._masked) o.visible = true;
       this._masked.length = 0;

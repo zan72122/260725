@@ -322,7 +322,18 @@ export function makeWood({
     roughness: 1.0,
     metalness: 0,
     clearcoat,                    // the lacquer on nursery furniture
-    clearcoatRoughness: 0.35,
+    /* 0.35 is a *piano* finish. On the chest of drawers — a 1.2 m flat panel
+     * facing the window — that plus the room agent's `envMapIntensity = 1.45`
+     * produced a single broad mirror reflection of the environment across the
+     * whole carcass, and the oak dresser read as chrome. Nursery furniture is
+     * satin-lacquered: the coat scatters its reflection over 20–30°, so you
+     * get a soft sheen that tells you the surface is sealed, not an image of
+     * the room in it. This is also the difference between "wood" and the
+     * generic plastic look flagged in rubric §4.2 #21.
+     */
+    clearcoatRoughness: 0.62,
+    // Deliberately below the room's 1.45: a lacquered panel should pick up
+    // *less* of the environment than the matte wall next to it, not more.
     envMapIntensity: 0.9
   });
   mat.normalScale.set(0.7, 0.7);

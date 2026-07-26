@@ -271,6 +271,70 @@ export const GESTURES = {
   }
 };
 
+/* ------------------------------------------------------------ mood pose --- */
+
+/**
+ * Additive bone offsets that ride on top of whatever pose is playing, so the
+ * *body* answers to the mood and not only the face. A crying infant is not a
+ * placidly seated infant with a different mouth: the back arches, the shoulders
+ * come up, the arms clamp in and the legs stiffen out. Without this layer the
+ * pose is byte-identical between `happy` and a full-intensity `cry`, which is
+ * exactly what the review found.
+ */
+export const MOOD_POSE = {
+  cry: {
+    hips: [-0.10, 0, 0], spine: [-0.17, 0, 0], chest: [-0.13, 0, 0],
+    neck: [-0.15, 0, 0], head: [-0.09, 0, 0],
+    armL: [-0.60, 0, 0.50], armR: [-0.60, 0, -0.50],
+    forearmL: [-0.72, 0, 0.28], forearmR: [-0.72, 0, -0.28],
+    handL: [-0.38, 0, 0], handR: [-0.38, 0, 0],
+    thighL: [0.22, 0, -0.16], thighR: [0.22, 0, 0.16],
+    shinL: [-0.20, 0, 0], shinR: [-0.20, 0, 0]
+  },
+  sad: {
+    spine: [0.11, 0, 0], chest: [0.09, 0, 0], neck: [0.16, 0, 0], head: [0.11, 0, 0],
+    armL: [0.10, 0, -0.12], armR: [0.10, 0, 0.12],
+    forearmL: [-0.20, 0, 0.06], forearmR: [-0.20, 0, -0.06]
+  },
+  sulk: {
+    spine: [0.13, 0, 0], chest: [0.05, 0, 0], neck: [0.13, 0, 0], head: [0.09, 0.14, 0],
+    armL: [-0.32, 0, 0.24], armR: [-0.32, 0, -0.24],
+    forearmL: [-0.90, 0, 0.30], forearmR: [-0.90, 0, -0.30]
+  },
+  shy: {
+    neck: [0.13, 0, 0], head: [0.05, 0.17, 0],
+    armL: [-0.58, 0, 0.32], armR: [-0.22, 0, -0.14],
+    forearmL: [-1.05, 0, 0.34], forearmR: [-0.38, 0, -0.18]
+  },
+  sleepy: {
+    spine: [0.10, 0, 0], chest: [0.08, 0, 0], neck: [0.19, 0, 0], head: [0.09, 0, 0],
+    armL: [0.06, 0, -0.09], armR: [0.06, 0, 0.09]
+  },
+  happy: {
+    chest: [-0.05, 0, 0], neck: [-0.05, 0, 0],
+    armL: [-0.20, 0, 0.16], armR: [-0.20, 0, -0.16]
+  },
+  giggle: {
+    spine: [-0.07, 0, 0], chest: [-0.09, 0, 0], neck: [-0.09, 0, 0],
+    armL: [-0.42, 0, 0.32], armR: [-0.42, 0, -0.32],
+    forearmL: [-0.30, 0, 0.10], forearmR: [-0.30, 0, -0.10]
+  },
+  excited: {
+    spine: [-0.09, 0, 0], chest: [-0.11, 0, 0], neck: [-0.11, 0, 0],
+    armL: [-0.78, 0, 0.46], armR: [-0.78, 0, -0.46],
+    forearmL: [-0.34, 0, 0.14], forearmR: [-0.34, 0, -0.14]
+  },
+  surprised: {
+    spine: [-0.11, 0, 0], neck: [-0.12, 0, 0],
+    armL: [-0.36, 0, 0.36], armR: [-0.36, 0, -0.36],
+    forearmL: [-0.24, 0, 0.10], forearmR: [-0.24, 0, -0.10]
+  },
+  yum: {
+    neck: [-0.05, 0, 0], armL: [-0.30, 0, 0.20], armR: [-0.12, 0, -0.10],
+    forearmL: [-0.55, 0, 0.18]
+  }
+};
+
 /* ---------------------------------------------------------------- noise --- */
 
 function hash1(n) {
@@ -333,6 +397,11 @@ export class Animator {
     this.faceOverlay = {};
     this._gOut = {};
 
+    // mood pose: a per-bone cross-fade so switching mood eases the whole body
+    this.moodPoseName = null;
+    this.moodWeight = 1;
+    this._moodMix = {};
+
     // secondary-motion springs
     this.headLag = { x: 0, y: 0, vx: 0, vy: 0 };
     this.belly = { x: 0, v: 0 };
@@ -369,6 +438,28 @@ export class Animator {
 
   isGesturing(name) {
     return name ? this.gestures.some(g => g.name === name) : this.gestures.length > 0;
+  }
+
+  /** Body attitude for a mood; `weight` scales it (0 disables). */
+  setMoodPose(name, weight = 1) {
+    this.moodPoseName = MOOD_POSE[name] ? name : null;
+    this.moodWeight = weight;
+  }
+
+  /** Cross-fade `_moodMix` toward the active mood table. */
+  _stepMoodPose(dt) {
+    const tgt = (this.moodPoseName && MOOD_POSE[this.moodPoseName]) || null;
+    const mix = this._moodMix;
+    if (tgt) for (const b in tgt) if (!mix[b]) mix[b] = [0, 0, 0];
+    const k = Math.min(1, dt * 3.2);
+    for (const b in mix) {
+      const t = tgt && tgt[b];
+      const w = this.moodWeight;
+      const cur = mix[b];
+      for (let i = 0; i < 3; i++) cur[i] += ((t ? t[i] * w : 0) - cur[i]) * k;
+      if (!t && Math.abs(cur[0]) + Math.abs(cur[1]) + Math.abs(cur[2]) < 1e-4) delete mix[b];
+    }
+    return mix;
   }
 
   clearGestures() { this.gestures.length = 0; }
@@ -418,6 +509,9 @@ export class Animator {
       cyc = this._crawl(this.cycle);
     }
 
+    /* --- mood attitude ---------------------------------------------------- */
+    const mood = this._stepMoodPose(dt);
+
     /* --- per-bone spring toward pose + additive layers -------------------- */
     const bt = rig.table;
     for (let i = 0; i < bt.length; i++) {
@@ -427,11 +521,12 @@ export class Animator {
       const base = pose[def.name] || ZERO;
       const a = add[def.name];
       const c = cyc && cyc[def.name];
+      const md = mood[def.name];
       const micro = this._micro(def.name, t, i) * E;
       const target = [
-        base[0] + (a ? a[0] : 0) + (c ? c[0] : 0) + micro,
-        base[1] + (a ? a[1] : 0) + (c ? c[1] : 0) + micro * 0.6,
-        base[2] + (a ? a[2] : 0) + (c ? c[2] : 0) + micro * 0.8
+        base[0] + (a ? a[0] : 0) + (c ? c[0] : 0) + (md ? md[0] : 0) + micro,
+        base[1] + (a ? a[1] : 0) + (c ? c[1] : 0) + (md ? md[1] : 0) + micro * 0.6,
+        base[2] + (a ? a[2] : 0) + (c ? c[2] : 0) + (md ? md[2] : 0) + micro * 0.8
       ];
       const s = this.springs[def.name].step(target, dt, this.freq * (a || c ? 1.9 : 1));
       bone.rotation.set(s[0], s[1], s[2]);

@@ -102,13 +102,13 @@ export const MOODS = {
     // of 5:1 is a portrait ratio, not a room ratio — a real nursery at 4 pm has
     // a whole wall of sky filling the side away from the sun. 0.86 puts it at
     // ~3.5:1, which still separates the two sides but leaves the dark side lit.
-    fillColor: 0xbcd8ff, fillIntensity: 0.86, fillPos: [4.6, 2.6, 3.0],
+    fillColor: 0xcadeff, fillIntensity: 0.82, fillPos: [4.6, 2.6, 3.0],
     rimColor: 0xffe2c4, rimIntensity: 1.0024, rimPos: [1.2, 4.0, -5.0],
     hemiSky: 0xc4dcff, hemiGround: 0xffd2bc, hemiIntensity: 0.34,
     // Ambient is where a dark wood surface gets its *material* from — its
     // specular response and the colour of the room reflected in its lacquer.
     // At 0.30 the oak dresser had neither and read as a brown cutout.
-    envIntensity: 0.44, shadowSpan: 4.2,
+    envIntensity: 0.36, shadowSpan: 4.2,
     grade: {
       // Exposure was pinned at 1.0 with AgX, whose mid-grey sits low by design;
       // the frame came out a stop under and the whole image lived in a narrow
@@ -122,11 +122,11 @@ export const MOODS = {
   },
 
   golden: {   // late afternoon — the "play" and "feed" hero look
-    envWall: 0xf3d9cc, envWallI: 0.150,
-    envCeil: 0xffe2bc, envCeilI: 0.290,
+    envWall: 0xf6ddca, envWallI: 0.185,
+    envCeil: 0xffe2bc, envCeilI: 0.335,
     envFloor: 0xffc9aa, envFloorI: 0.150,
     envWindow: 0xffcf92, envWindowI: 1.55,
-    envFill: 0xc8d8f4, envFillI: 0.200,
+    envFill: 0xd6dcec, envFillI: 0.175,
     envLamp: 0xffc07a, envLampI: 0.30,
 
     // Sun elevation ≈ 16° above the aim point rather than the old 25°, and
@@ -147,10 +147,10 @@ export const MOODS = {
     // shadow side of a west-facing nursery is filled by a whole hemisphere of
     // blue sky; at 16:1 the crib simply went black and the mood stopped reading
     // as "late afternoon" and started reading as "underexposed".
-    fillColor: 0xb2c6e8, fillIntensity: 0.34, fillPos: [4.4, 2.4, 3.2],
+    fillColor: 0xc8d2e4, fillIntensity: 0.38, fillPos: [4.4, 2.4, 3.2],
     rimColor: 0xffbe80, rimIntensity: 1.85, rimPos: [0.4, 2.6, -5.2],
-    hemiSky: 0xc0d4f4, hemiGround: 0xffbe94, hemiIntensity: 0.14,
-    envIntensity: 0.30, shadowSpan: 6.2,
+    hemiSky: 0xcfdaf0, hemiGround: 0xffbe94, hemiIntensity: 0.17,
+    envIntensity: 0.33, shadowSpan: 6.2,
     grade: {
       // Split pulled back hard. At 1.15 with a shadow tint of [0.82, .915, 1.22]
       // the multiplier on the blue channel was 1.25 across everything the eye

@@ -363,12 +363,25 @@ export function wood({
       // symmetric triangle wave.
       r = Math.pow(r, 1.45);
       // fine fibre streaks running *along* the grain
-      // 0.30 of a *ridged* field at a single dominant frequency gave the floor
-      // a corduroy read — dead-parallel fine ribs running the whole length of
-      // every board. Fibre should be a whisper on top of the figure, not a
-      // second pattern competing with it.
+      /* Fibre. Two things had to change before this stopped reading as
+       * corduroy — dead-parallel fine ribs running the whole length of every
+       * board, at constant strength, from the skirting to the camera.
+       *
+       *   · Weight. A ridged field at a single dominant frequency is the most
+       *     visually aggressive noise there is: it has a hard crest and it
+       *     phase-locks across the whole tile. At 0.30, and then at 0.17, it
+       *     was still competing with the growth rings rather than sitting under
+       *     them. Fibre is a whisper.
+       *   · Continuity. Real fibre is *patchy*: a length of ray fleck here, a
+       *     stretch of clear quarter-sawn there. Gating it with a slow field
+       *     (period 3 × 7) breaks the ribbing into passages, which is both more
+       *     truthful and — because the pattern no longer runs unbroken across
+       *     the frame — much harder for the eye to lock onto.
+       */
+      const patch = smooth(Math.max(0, Math.min(1,
+        (fbm2(u, v, 3, 7, 2, seed + 211) - 0.32) * 2.6)));
       const streak = ridged2(u, v, fibreU, fibreV, 2, seed + 31);
-      return Math.min(1, r * 0.83 + streak * 0.17);
+      return Math.min(1, r * 0.90 + streak * 0.10 * (0.25 + 0.75 * patch));
     };
 
     // A joint between two boards: soft-shouldered rather than a hard line, so

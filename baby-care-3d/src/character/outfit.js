@@ -39,7 +39,7 @@ export const GARMENTS = {
   top: {
     groups: ['torso', 'armL', 'armR'],
     inflate: 0.0082,
-    lod: 0.78,
+    lod: 0.92,
     mask: (x, y, z) => {
       // the collar sits low and wide, well clear of the head shell's own rim —
       // an overlapping neckline leaves the two surfaces fighting and shows as
@@ -183,8 +183,14 @@ export class Outfit {
         capStart: spec.capStart, capEnd: spec.capEnd,
         tMax: spec.tMax, uvRepeat: this.uvRepeat,
         inflate: def.inflate,
-        // taper the offset to zero at the hem so cloth sinks into skin
-        detail: (x, y, z) => -def.inflate * (1 - def.mask(x, y, z)),
+        // Taper the offset to zero at the hem, then keep going: the last
+        // millimetres of a garment have to end up *under* the skin, or the
+        // ragged triangle boundary left by the mask trim shows as a fringe of
+        // hard flat shards around every neckline and cuff.
+        detail: (x, y, z) => {
+          const mk = def.mask(x, y, z);
+          return -def.inflate * (1 - mk) - 0.0055 * (1 - sstep(0.22, 0.62, mk));
+        },
         margin: 0.030, sinkDepth: 0.004,
         collapse: spec.collapse
       }));
@@ -205,11 +211,11 @@ export class Outfit {
       const n = p.pos.length / 3;
       for (let i = 0; i < p.idx.length; i += 3) {
         const a = p.idx[i] + vo, b = p.idx[i + 1] + vo, c = p.idx[i + 2] + vo;
-        let keep = 0;
-        for (const v of [a, b, c]) {
-          if (def.mask(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]) > 0.035) keep++;
-        }
-        if (keep > 0) idx.push(a, b, c);
+        // averaged rather than "any vertex survives": a max test leaves a
+        // sawtooth of single triangles hanging past every hem
+        let sum = 0;
+        for (const v of [a, b, c]) sum += def.mask(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
+        if (sum / 3 > 0.13) idx.push(a, b, c);
       }
       vo += n;
     }

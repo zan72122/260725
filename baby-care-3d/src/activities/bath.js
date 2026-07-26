@@ -967,7 +967,7 @@ export class BathActivity {
         // corner ruck
         const cd = Math.hypot(Math.max(0, u - 0.52) / 0.48, Math.max(0, t - 0.55) / 0.45);
         const k = Math.max(0, 1 - Math.min(1, cd));
-        const lift = k * k * (3 - 2 * k) * 0.052;
+        const lift = k * k * (3 - 2 * k) * 0.075;
         _d.y += lift;
         // the fold pulls the corner back toward the middle as it curls up
         _d.x -= k * k * 0.030;
@@ -1005,18 +1005,24 @@ export class BathActivity {
     slab.receiveShadow = true;
     g.add(slab);
 
-    // --- fringe along both short ends -------------------------------------
-    const tuftGeo = roundedBox(0.0055, 0.0075, 0.034, 0.0022, 2);
+    // --- fringe along both ends -------------------------------------------
+    // Evenly-spaced identical teeth read as a zip fastener, so every tuft gets
+    // its own length, thickness, splay and lean, and the spacing wanders.
+    const tuftGeo = roundedBox(0.0060, 0.0080, 0.030, 0.0026, 2);
     const tufts = [];
-    const n = 26;
+    const n = 24;
     for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1) - 0.5) * (W - 0.030);
       for (const sz of [-1, 1]) {
-        const wob = (noise() - 0.5);
+        const wob = noise() - 0.5;
+        const wob2 = noise() - 0.5;
+        const len = 0.72 + noise() * 0.75;             // 22–38 mm of thread
+        const x = (i / (n - 1) - 0.5) * (W - 0.028) + wob * 0.009;
         tufts.push({
           geo: tuftGeo,
-          pos: [x + wob * 0.004, H * 0.42, sz * (D * 0.5 + 0.014) + wob * 0.003],
-          rot: [sz * (0.10 + wob * 0.18), wob * 0.30, 0]
+          pos: [x, H * 0.40 + wob2 * 0.004,
+                sz * (D * 0.5 + 0.012 + len * 0.011)],
+          rot: [sz * (0.16 + wob * 0.40), wob2 * 0.55, wob * 0.22],
+          scale: [0.7 + noise() * 0.7, 0.8 + noise() * 0.5, len]
         });
       }
     }
@@ -1470,41 +1476,59 @@ export class BathActivity {
    * distance if the rig names nothing recognisable.
    */
   _estimateHeadRadius() {
+    this._measureHead();
+    return this._headRadius;
+  }
+
+  /**
+   * Find the head, in metres, from the rendered geometry.
+   *
+   * Two numbers come out of this and both matter. The radius decides how big
+   * the cap of lather is; the *offset* decides where it sits. `headWorldPos()`
+   * is not the centre of the skull — measured against the actual head mesh it
+   * sits about 0.08 m high — so anchoring the foam to it hung the whole horn
+   * in the air above the crown with a clear gap under it. Anchoring to the
+   * measured centre of the head box puts it on the head instead.
+   */
+  _measureHead() {
     const b = this.ctx.baby;
+    this._headRadius = 0.082;
+    if (!this._headOffset) this._headOffset = new THREE.Vector3();
+    else this._headOffset.set(0, 0, 0);
     try {
       const g = b?.group;
+      g?.updateMatrixWorld?.(true);      // the box is only as fresh as the rig
+      const h = b?.headWorldPos?.();
       if (g) {
-        let best = 0;
+        let best = 0, bestBox = null;
         const box = new THREE.Box3(), size = new THREE.Vector3();
         g.traverse(o => {
           if (!o.isMesh || !/head|skull|cranium/i.test(o.name || '')) return;
           box.setFromObject(o);
           box.getSize(size);
           const r = Math.max(size.x, size.y, size.z) * 0.5;
-          if (r > best && r < 0.2) best = r;
+          if (r > best && r < 0.2) { best = r; bestBox = box.clone(); }
         });
-        if (best > 0.03) return best * 0.96;
-      }
-      // The character is one merged mesh with no part named "head", so the
-      // loop above finds nothing and we fall through. What the foam actually
-      // needs is not the anatomical radius but the distance from the head
-      // anchor to the crown — measure that directly off the silhouette.
-      const h = b?.headWorldPos?.();
-      if (h && g) {
-        const bb = new THREE.Box3().setFromObject(g);
-        const crown = bb.max.y - h.y;
-        if (crown > 0.03 && crown < 0.18) return crown;
+        if (best > 0.03 && bestBox) {
+          this._headRadius = best * 0.92;
+          if (h) {
+            bestBox.getCenter(_v2);
+            this._headOffset.copy(_v2).sub(h);
+            // Never let a mis-measure throw the lather across the room.
+            if (this._headOffset.length() > 0.25) this._headOffset.set(0, 0, 0);
+          }
+          return;
+        }
       }
       const c = b?.focusPoint?.();
       if (h && c) {
         const d = h.distanceTo(c);
-        // Head centre to chest centre on an infant is roughly 1.6 head radii;
-        // the old 0.45 factor under-read it badly enough that the whole cap of
-        // lather ended up inside the skull.
-        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.62, 0.050, 0.14);
+        // Head centre to chest centre on an infant is roughly 1.6 head radii.
+        if (d > 0.04 && d < 0.4) {
+          this._headRadius = THREE.MathUtils.clamp(d * 0.62, 0.050, 0.14);
+        }
       }
     } catch (e) { /**/ }
-    return 0.082;
   }
 
   _babyPoint(kind) {
@@ -2498,7 +2522,8 @@ export class BathActivity {
       if (q) a.quaternion.copy(q);
       a.updateMatrixWorld();
     };
-    set('head', this._babyPoint('head'));
+    // Shifted onto the measured centre of the skull — see _measureHead().
+    set('head', this._babyPoint('head').add(this._headOffset || _v.set(0, 0, 0)));
     set('body', this._babyPoint('body'));
     set('handL', this._babyPoint('handL'));
     set('handR', this._babyPoint('handR'));
