@@ -450,9 +450,17 @@ export function buildCrib(M) {
 
   /* --- rails ---------------------------------------------------------- */
   const railLen = L - 0.05, railW = W - 0.05;
-  // back + sides at full height, the camera-facing rail sits lower
-  parts.push(rbox(railLen, 0.052, 0.05, [0, top, -pz], [0, 0, 0], 0.018, 1.6));
-  parts.push(rbox(railLen, 0.052, 0.05, [0, dropTop, pz], [0, 0, 0], 0.018, 1.6));
+  // The two long top rails are the only part of a cot anyone ever grips, so
+  // they get the worn, unlacquered wood — one extra draw call for the single
+  // clearest "this cot has been used" cue in the room.
+  const gripped = mergeAll([
+    rbox(railLen, 0.052, 0.05, [0, top, -pz], [0, 0, 0], 0.018, 1.6),
+    rbox(railLen, 0.052, 0.05, [0, dropTop, pz], [0, 0, 0], 0.018, 1.6)
+  ]);
+  const grips = mesh(gripped, M.worn, 'cribRails');
+  grips.castShadow = false;                 // the frame beneath it already does
+  g.add(grips);
+
   parts.push(rbox(0.05, 0.052, railW, [-px, top - 0.09, 0], [0, 0, 0], 0.018, 1.6));
   parts.push(rbox(0.05, 0.052, railW, [px, top - 0.09, 0], [0, 0, 0], 0.018, 1.6));
   for (const z of [-pz, pz]) parts.push(rbox(railLen, 0.042, 0.042, [0, low, z], [0, 0, 0], 0.014, 1.6));
