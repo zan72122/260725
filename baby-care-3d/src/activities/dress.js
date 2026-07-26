@@ -32,7 +32,7 @@ import * as S from './_shared.js';
 
 /* --------------------------------------------------------------- wardrobe - */
 
-const GARMENTS = [
+export const GARMENTS = [
   {
     id: 'onesie', label: 'ロンパース', color: 0x9fe0c8, trim: 0x5fb9a0,
     weave: 'knit', buttons: 3, sleeve: 'short', skirt: false, hood: false, kind: 'day'
@@ -58,6 +58,146 @@ const GARMENTS = [
 const RAIL_Y = 0.60;
 const RAIL_SPAN = 0.46;
 const HEAD_R = 0.072;          // fallback head radius when the rig will not say
+
+/* ---------------------------------------------------- picker garment art --
+ * The wardrobe rail is the real chooser — five 3D garments on hangers that the
+ * raycaster already picks up. But the child needs to see a choice even when
+ * the camera is not on the rail, so the same five garments also go into the
+ * HUD's contextual tray as tappable tiles. Tapping a tile runs exactly the
+ * same `_tapGarment()` path as tapping the hanger, so the head/sleeve/button
+ * sequence is unchanged.
+ *
+ * The art is drawn here (rather than reusing the single `onesie` glyph) so a
+ * pre-literate child can tell a dress from pyjamas from a raincoat at a
+ * glance — silhouette first, colour second, no text anywhere. It follows the
+ * house language from ui/icons.js: 64×64 grid, art inside the 6..58 box,
+ * one linear gradient plus one white sheen, 3-unit round strokes.
+ * ------------------------------------------------------------------------ */
+
+let _svgSeq = 0;
+const uid = (p) => `bc-dg-${p}-${(++_svgSeq).toString(36)}`;
+const hex = (n) => '#' + ((n >>> 0) & 0xffffff).toString(16).padStart(6, '0');
+
+/** Multiply a hex colour towards black (k<1) or white (k>1, clamped). */
+function shade(n, k) {
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * k));
+  const g = Math.min(255, Math.round(((n >> 8) & 255) * k));
+  const b = Math.min(255, Math.round((n & 255) * k));
+  return hex((r << 16) | (g << 8) | b);
+}
+
+const SHEEN = (id) =>
+  `<radialGradient id="${id}" cx="0.3" cy="0.18" r="0.75">` +
+  `<stop offset="0" stop-color="#fff" stop-opacity=".55"/>` +
+  `<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`;
+
+const GRAD = (id, a, b) =>
+  `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">` +
+  `<stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`;
+
+const line = (d, c, w = 3, extra = '') =>
+  `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" ` +
+  `stroke-linecap="round" stroke-linejoin="round"${extra ? ' ' + extra : ''}/>`;
+
+/**
+ * Silhouettes keyed by garment id. Each is called with the garment's own
+ * colours so the tile shows the *actual* garment hanging on the rail, not a
+ * generic clothes symbol.
+ */
+const GARMENT_ART = {
+  onesie(c) {
+    const g = uid('on'), s = uid('sh');
+    const body = 'M24 11.6h16l9.8 5.1c2.2 1.1 3 3.8 1.9 6l-2.3 4.4c-1.1 2-3.7 2.6-5.5 1.3l-2-1.3v13.2c0 5.2-3 8.4-8.1 9-1-3-1.6-5.2-1.8-7.7h-2.4c-.2 2.5-.8 4.7-1.8 7.7-5.1-.6-8.1-3.8-8.1-9V27.1l-2 1.3c-1.8 1.3-4.4.7-5.5-1.3l-2.3-4.4c-1.1-2.2-.3-4.9 1.9-6Z';
+    return `<defs>${GRAD(g, c.light, c.deep)}${SHEEN(s)}</defs>
+      <path d="${body}" fill="url(#${g})"/>
+      <path d="M23.4 39.9h17.2c-.5 3.4-1.7 5.7-3.5 7H26.9c-1.8-1.3-3-3.6-3.5-7Z" fill="${c.trim}" opacity=".9"/>
+      <circle cx="28.2" cy="44.1" r="1.9" fill="#fff"/>
+      <circle cx="35.8" cy="44.1" r="1.9" fill="#fff"/>
+      ${line('M24 11.6c1.6 3.4 4.4 5.1 8 5.1s6.4-1.7 8-5.1', c.trim, 3.4)}
+      <path d="${body}" fill="url(#${s})"/>
+      ${line('M20.4 20.5v9.4', '#fff', 3, 'opacity=".5"')}`;
+  },
+
+  dress(c) {
+    const g = uid('dr'), s = uid('sh');
+    const body = 'M25 11.6h14l7.9 4.1c2.1 1.1 2.9 3.7 1.8 5.8l-2 3.9c-1 2-3.5 2.7-5.3 1.5l-.6-.4 6.7 19.9c.7 2-.5 4.1-2.5 4.6-8.5 2.1-17.1 2.1-25.6 0-2.1-.5-3.3-2.6-2.6-4.6l6.7-19.9-.6.4c-1.8 1.2-4.3.5-5.3-1.5l-2-3.9c-1.1-2.1-.3-4.7 1.8-5.8Z';
+    return `<defs>${GRAD(g, c.light, c.deep)}${SHEEN(s)}</defs>
+      <path d="${body}" fill="url(#${g})"/>
+      ${line('M22.2 28.6h19.6', c.trim, 3.4)}
+      ${line('M16.4 44.8c10.4 2.5 20.8 2.5 31.2 0', c.trim, 3.2)}
+      ${line('M25 11.6c1.5 3.2 4.1 4.8 7 4.8s5.5-1.6 7-4.8', c.trim, 3.4)}
+      <circle cx="32" cy="22.4" r="2.1" fill="#fff" opacity=".85"/>
+      <path d="${body}" fill="url(#${s})"/>
+      ${line('M20.6 19.8v5.6', '#fff', 2.8, 'opacity=".5"')}`;
+  },
+
+  raincoat(c) {
+    const g = uid('rc'), s = uid('sh');
+    // Wide skirt, long sleeves that hang to the hip, and a hood slung across
+    // the shoulders in the *same* cloth — a hood drawn in the trim colour on
+    // top of the collar reads as a separate hat, which is not what a raincoat
+    // looks like to anyone, least of all a four-year-old.
+    const body = 'M22.4 16.6h19.2l10.6 5.5c2.2 1.2 3 3.9 1.8 6.1l-4.7 9c-1.1 2.1-3.7 2.8-5.7 1.5v11.9c0 2-1.6 3.6-3.6 3.6H24c-2 0-3.6-1.6-3.6-3.6V38.7c-2 1.3-4.6.6-5.7-1.5l-4.7-9c-1.2-2.2-.4-4.9 1.8-6.1Z';
+    return `<defs>${GRAD(g, c.light, c.deep)}${SHEEN(s)}</defs>
+      <path d="M32 5.8c-7.4 0-12.6 5.1-12.6 11.8 0 1.1.9 1.9 1.9 1.9h21.4c1.1 0 1.9-.9 1.9-1.9C44.6 10.9 39.4 5.8 32 5.8Z" fill="${c.deep}"/>
+      <path d="M32 9.8c-4.9 0-8.7 3.3-9.5 8h19c-.8-4.7-4.6-8-9.5-8Z" fill="${c.trim}"/>
+      <path d="${body}" fill="url(#${g})"/>
+      ${line('M32 19.4V54.2', c.trim, 3.2)}
+      <circle cx="28" cy="27.4" r="2" fill="#fff"/>
+      <circle cx="28" cy="36.2" r="2" fill="#fff"/>
+      <circle cx="28" cy="45" r="2" fill="#fff"/>
+      ${line('M15.8 34.6 13.3 30M48.2 34.6l2.5-4.6', c.trim, 3.2)}
+      <path d="${body}" fill="url(#${s})"/>
+      ${line('M18.6 24.6 16.2 30', '#fff', 3, 'opacity=".5"')}`;
+  },
+
+  pyjamas(c) {
+    const g = uid('pj'), g2 = uid('pj2'), s = uid('sh');
+    const top = 'M24 9.6h16l9.4 4.9c2.1 1.1 2.9 3.6 1.8 5.7l-2.2 4.2c-1 2-3.5 2.6-5.3 1.4l-1.7-1.1v8.5H22v-8.5l-1.7 1.1c-1.8 1.2-4.3.6-5.3-1.4l-2.2-4.2c-1.1-2.1-.3-4.6 1.8-5.7Z';
+    const legs = 'M22.6 35.4h18.8c1.4 0 2.4 1.1 2.3 2.5l-1.5 15.9c-.1 1.4-1.3 2.5-2.7 2.5h-3.6c-1.4 0-2.6-1.1-2.7-2.5L32 44.2l-1.2 9.6c-.2 1.4-1.3 2.5-2.7 2.5h-3.6c-1.4 0-2.6-1.1-2.7-2.5l-1.5-15.9c-.1-1.4.9-2.5 2.3-2.5Z';
+    return `<defs>${GRAD(g, c.light, c.deep)}${GRAD(g2, c.deep, c.dark)}${SHEEN(s)}</defs>
+      <path d="${legs}" fill="url(#${g2})"/>
+      <path d="${top}" fill="url(#${g})"/>
+      ${line('M24 9.6c1.6 3.3 4.3 5 8 5s6.4-1.7 8-5', c.trim, 3.4)}
+      ${line('M21.4 34.2h21.2', c.trim, 3.4)}
+      <circle cx="27" cy="20.6" r="1.9" fill="#fff" opacity=".8"/>
+      <circle cx="37.4" cy="27" r="1.6" fill="#fff" opacity=".7"/>
+      <circle cx="27.6" cy="44.4" r="1.7" fill="#fff" opacity=".65"/>
+      <circle cx="37" cy="47.6" r="1.5" fill="#fff" opacity=".6"/>
+      <path d="${top}" fill="url(#${s})"/>`;
+  },
+
+  tshirt(c) {
+    const g = uid('ts'), s = uid('sh');
+    const body = 'M24 13.4h16l10 5.2c2.2 1.1 3 3.8 1.9 6l-2.3 4.4c-1.1 2-3.7 2.6-5.5 1.3L42 29v18.6c0 2.4-1.9 4.4-4.4 4.4H26.4c-2.5 0-4.4-2-4.4-4.4V29l-2.1 1.3c-1.8 1.3-4.4.7-5.5-1.3l-2.3-4.4c-1.1-2.2-.3-4.9 1.9-6Z';
+    return `<defs>${GRAD(g, c.light, c.deep)}${SHEEN(s)}</defs>
+      <path d="${body}" fill="url(#${g})"/>
+      ${line('M24 13.4c1.6 3.4 4.4 5.1 8 5.1s6.4-1.7 8-5.1', c.trim, 3.6)}
+      ${line('M23.4 48.2h17.2', c.trim, 2.8, 'opacity=".7"')}
+      <path d="${body}" fill="url(#${s})"/>
+      ${line('M20.4 22.2v9.4', '#fff', 3, 'opacity=".5"')}`;
+  }
+};
+
+/**
+ * One tray tile: a 64×64 SVG string ready for `UI#setTools({ svg })`.
+ * `dim` greys the tile out while the garment is in the wash — the child still
+ * sees five garments, so the row never reflows, but the unavailable ones read
+ * as unavailable without a word of text.
+ */
+export function garmentTile(spec, dim = false) {
+  const draw = GARMENT_ART[spec.id] || GARMENT_ART.onesie;
+  const c = {
+    light: shade(spec.color, 1.1),
+    deep: hex(spec.color),
+    dark: shade(spec.color, 0.8),
+    trim: hex(spec.trim)
+  };
+  const style = dim ? ' style="opacity:.42;filter:saturate(.25)"' : '';
+  return `<svg class="ic ic-garment ic-garment-${spec.id}" viewBox="0 0 64 64" ` +
+    `xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"${style}>` +
+    `${draw(c)}</svg>`;
+}
 
 export class DressActivity {
   constructor(ctx) {
@@ -754,13 +894,69 @@ export class DressActivity {
         if (l) this.labels.push(l);
       }
     }
+    this._syncOutfitToBaby();
+    this._refreshPicker();
     this._advise();
     this.clock.after(1.6, () => S.mood(ctx, 'neutral'));
+  }
+
+  /* ======================================================= outfit picker == */
+
+  /**
+   * Push whatever the save says the baby is wearing back onto the rig on the
+   * way in. `State` is the record of the outfit; the dressing room is the one
+   * screen where a mismatch between the two would be obvious.
+   */
+  _syncOutfitToBaby() {
+    const ctx = this.ctx;
+    const outfit = ctx.state?.outfit;
+    if (!outfit) return;
+    // Light up the tile the baby is already wearing. State records the cloth
+    // *colour*, the rail records specs, so match on that.
+    if (typeof outfit.top === 'number') {
+      this.worn = this.garments.find(g => g.spec.color === outfit.top) || this.worn;
+    }
+    if (!ctx.baby?.setOutfit) return;
+    try { ctx.baby.setOutfit({ ...outfit }); } catch (e) { /* rig may differ */ }
+  }
+
+  /**
+   * Mirror the five hangers into the HUD's contextual tray.
+   *
+   * The wardrobe rail is the real chooser and stays tappable, but it is not
+   * always on camera, and a prompt that says "choose an outfit" with nothing
+   * on screen to tap is worse than no prompt at all. Tiles route straight into
+   * `_tapGarment()`, so a tap on a tile and a tap on a hanger are the same
+   * event as far as the rest of this file is concerned.
+   *
+   * The tray is pulled while a garment is actually going on (head → sleeves →
+   * buttons → socks → shoes): during those steps the only thing worth tapping
+   * is the baby, and leaving five dead tiles up would teach the child that
+   * tapping does nothing.
+   */
+  _refreshPicker() {
+    const ui = this.ctx?.ui;
+    if (!ui?.setTools) return;
+    if (!this._entered || this.dressing || this.footStep > 0) {
+      ui.clearTools?.();
+      return;
+    }
+    const items = this.garments.map((entry) => {
+      const busy = entry.state !== 'clean';
+      return {
+        id: entry.spec.id,
+        label: entry.spec.label,          // screen-reader only; never rendered
+        svg: garmentTile(entry.spec, busy),
+        selected: this.worn === entry
+      };
+    });
+    ui.setTools(items, (id) => this._tapGarment(id));
   }
 
   async exit() {
     const ctx = this.ctx;
     this._entered = false;
+    ctx.ui?.clearTools?.();
     S.hideSay(ctx);
     S.lookAt(ctx, null);
     for (const l of this.labels) S.dropLabel(ctx, l);
@@ -781,6 +977,7 @@ export class DressActivity {
 
   dispose() {
     const ctx = this.ctx;
+    ctx.ui?.clearTools?.();
     for (const l of this.labels) S.dropLabel(ctx, l);
     this.labels.length = 0;
     this.washLoop?.stop?.();
@@ -1040,7 +1237,9 @@ export class DressActivity {
   }
 
   _setGarmentState(entry, state) {
+    const was = entry.state;
     entry.state = state;
+    if (was !== state) this._refreshPicker();
     if (!entry.baseColor) entry.baseColor = entry.cloth.color.clone();
     if (state === 'dirty') {
       entry.cloth.color.copy(entry.baseColor).lerp(new THREE.Color(0x6a5a3a), 0.35);
@@ -1066,6 +1265,7 @@ export class DressActivity {
   _startDressing(entry) {
     const ctx = this.ctx;
     this.dressing = { g: entry, step: 'head', buttonsDone: 0 };
+    this._refreshPicker();          // pulls the tray: now the baby is the target
     this._setDetail(entry, true);
     entry.group.userData.railHome = entry.group.position.clone();
     try { ctx.baby?.setOutfit?.({ top: null, bottom: null }); } catch (e) { /* ignore */ }
@@ -1266,16 +1466,33 @@ export class DressActivity {
     entry.cloth.transparent = true;
   }
 
+  /**
+   * Hand the chosen garment over to the rig's own clothing.
+   *
+   * Colours, not ids: `character/outfit.js` resolves a slot to a palette name
+   * or a hex number, and an unknown string ('onesie', 'shorts') silently falls
+   * back to a stock colour — so the baby ended up in a stock mint top whatever
+   * the child picked. Passing `spec.color` puts the garment they actually
+   * chose on the body. The nappy stays on underneath; a baby out of the bath
+   * and into clothes still wears one.
+   */
   _applyOutfit(entry) {
     const ctx = this.ctx;
     const spec = entry.spec;
-    try {
-      ctx.baby?.setOutfit?.({
-        top: spec.id, bottom: spec.skirt ? 'skirt' : 'shorts', diaper: false
-      });
-    } catch (e) { /* rig may not know the id; the prop still told the story */ }
-    try { ctx.state?.patch?.({ outfit: spec.id }); } catch (e) { /* ignore */ }
+    const outfit = {
+      top: spec.color,
+      bottom: spec.skirt ? spec.color : spec.trim,
+      diaper: true
+    };
+    try { ctx.baby?.setOutfit?.(outfit); }
+    catch (e) { /* rig may differ; the prop still told the story */ }
+    // `Baby#setOutfit` already writes through to State, but say it explicitly
+    // so the save is correct even on a build where the rig refused the call.
+    // (It must be an object — `patch({ outfit: 'onesie' })` used to replace the
+    // whole slot map with a string and leave the baby with nothing to wear.)
+    try { ctx.state?.patch?.({ outfit }); } catch (e) { /* ignore */ }
     this.worn = entry;
+    this._refreshPicker();
   }
 
   _resetGarment(entry) {
@@ -1367,9 +1584,10 @@ export class DressActivity {
   _finishFootwear() {
     const ctx = this.ctx;
     const rain = this.worn?.spec.kind === 'rain';
-    try {
-      ctx.baby?.setOutfit?.({ socks: 'mint', shoes: rain ? 'boots' : 'red' });
-    } catch (e) { /* ignore */ }
+    // 'boots' is not a colour the outfit palette knows; yellow wellies to match
+    // the raincoat, red shoes otherwise.
+    const shoes = rain ? 0xffd23f : 'red';
+    try { ctx.baby?.setOutfit?.({ socks: 'cream', shoes }); } catch (e) { /* ignore */ }
     for (const s of [...this.socks, ...this.shoes, ...this.boots]) {
       s.visible = false;
       s.userData.on = false;
@@ -1421,6 +1639,9 @@ export class DressActivity {
   _advise() {
     const ctx = this.ctx;
     if (!this._entered) return;
+    // Guidance and the tray always move together: whenever the prompt changes,
+    // what is tappable has changed too.
+    this._refreshPicker();
     if (this.dressing) return;
     if (this.laundry) { S.say(ctx, 'せんたくを みてみよう', 'washer'); return; }
     if (this.footStep > 0) { S.say(ctx, 'あんよを タップしてね', 'hand'); return; }
@@ -1617,7 +1838,7 @@ export class DressActivity {
           this._footWorld(i, this._v);
           this.socks[i].position.copy(this.root.worldToLocal(this._v.clone()));
         }
-        try { ctx.baby?.setOutfit?.({ socks: 'mint' }); } catch (e) { /* ignore */ }
+        try { ctx.baby?.setOutfit?.({ socks: 'cream' }); } catch (e) { /* ignore */ }
       }
       S.say(ctx, step === 'socks' ? 'くつしたを かたあしずつ' : 'つぎは くつを はこう', 'hand');
       this.hop.t = 1.0;
@@ -1645,11 +1866,12 @@ export class DressActivity {
     } else if (step === 'done') {
       this._applyOutfit(g);
       this._resetGarment(g);
-      try { ctx.baby?.setOutfit?.({ socks: 'mint', shoes: g.spec.kind === 'rain' ? 'boots' : 'red' }); }
+      try { ctx.baby?.setOutfit?.({ socks: 'cream', shoes: g.spec.kind === 'rain' ? 0xffd23f : 'red' }); }
       catch (e) { /* ignore */ }
       S.mood(ctx, 'happy');
       this._advise();
     }
+    this._refreshPicker();
   }
 
   _sudsUpdate(dt, amount) {

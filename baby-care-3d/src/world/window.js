@@ -157,10 +157,15 @@ const SHAFT_FRAG = /* glsl */`
     // previous frame's resolved linear depth, which is plenty for a beam that
     // barely moves.
     if (uHasDepth > 0.5) {
+      float span = max(1e-4, uFar - uNear);
       float sceneD = texture2D(uDepth, gl_FragCoord.xy / uResolution).x;
       float vz = -(viewMatrix * vec4(vWorld, 1.0)).z;
-      float fragD = (vz - uNear) / max(1e-4, uFar - uNear);
-      a *= clamp((sceneD - fragD) * uSoft, 0.0, 1.0);
+      float fragD = (vz - uNear) / span;
+      // uSoft is in METRES. Doing this in normalised depth made the fade
+      // distance scale with the far plane — at far = 60 the beam was being
+      // dimmed to a fifth over its whole length instead of only where it
+      // actually meets the floor.
+      a *= clamp((sceneD - fragD) * span / max(0.01, uSoft), 0.0, 1.0);
     }
 
     // NaN belt-and-braces: a rogue uniform must never poison the HDR buffer.
@@ -277,27 +282,36 @@ const RINGS_PER_PANEL = 7;
  */
 function foldProfile(f, y0, { folds = 6, amp = 0.042, gather = 0, drape = 0, sway = 0, seed = 0 }) {
   // Wandering pitch: a slow modulation of the phase, so no two pleats are the
-  // same width, without ever creating a discontinuity.
+  // same width, without ever creating a discontinuity. The extra term in y0
+  // lets each fold meander a little as it falls — perfectly parallel folds are
+  // the tell that turns a curtain into a set of vertical blinds.
   const base = (f + 0.5) * folds * Math.PI * 2;
-  const phase = base + 0.42 * Math.sin(base * 0.37 + seed) + 0.18 * Math.sin(base * 0.79 - seed * 1.7);
+  const phase = base
+    + 0.34 * Math.sin(base * 0.37 + seed)
+    + 0.15 * Math.sin(base * 0.79 - seed * 1.7)
+    + 0.22 * (1 - y0) * Math.sin(base * 0.5 + seed * 0.8);
 
-  // Depth wanders too, and dies away at the two vertical edges where the panel
-  // is pinned flat against the wall / the leading edge hangs free.
-  const wander = 0.78 + 0.34 * (0.5 + 0.5 * Math.sin(base * 0.29 + seed * 2.3));
+  // Depth wanders too, and flattens toward the two vertical edges: one is
+  // pinned to the wall, the other is the free leading edge, and neither
+  // carries a full pleat.
+  const wander = 0.80 + 0.30 * (0.5 + 0.5 * Math.sin(base * 0.29 + seed * 2.3));
+  const edgeOff = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, f + 0.5))), 0.42);
   // Pleats are gripped hardest just under the heading tape and relax downward.
-  const alongY = 0.55 + 0.45 * Math.pow(y0, 0.55);
-  const depth = amp * wander * alongY * (1 + gather * 0.55);
+  const alongY = 0.62 + 0.38 * Math.pow(y0, 0.55);
+  const depth = amp * wander * alongY * edgeOff;
 
-  // Round lobe toward the room, sharp valley away from it.
-  const lobe = Math.pow(0.5 + 0.5 * Math.cos(phase), 0.62) * 2 - 1;
+  // Round lobe toward the room, slightly sharper valley away from it. Pushed
+  // much closer to a plain cosine than the first pass: with a cusped profile
+  // and a depth near the fold pitch the panel reads as a concertina of blades.
+  const lobe = Math.pow(0.5 + 0.5 * Math.cos(phase), 0.88) * 2 - 1;
   const z = lobe * depth
           + drape * (1 - y0) * (1 - y0)
           + sway * (1 - y0) * (1 - y0);
 
   // Material crowds toward the lobes; the effect grows as the panel gathers.
   const narrow = 1 - gather * 0.52 * (0.35 + 0.65 * y0);
-  const bunch = -Math.sin(phase) * depth * (0.45 + 0.75 * gather);
-  return { x: f * narrow + bunch / Math.max(1e-4, folds * 0.9), z };
+  const bunch = -Math.sin(phase) * depth * (0.25 + 0.35 * gather);
+  return { x: f * narrow + bunch / Math.max(1e-4, folds * 1.6), z };
 }
 
 /**
@@ -713,7 +727,7 @@ export class WindowUnit {
       uBarX: { value: this.barX }, uBarY: { value: this.barY },
       uOpen: { value: 1 },
       uHasDepth: { value: 0 }, uNear: { value: 0.1 }, uFar: { value: 60 },
-      uSoft: { value: 26 }
+      uSoft: { value: 0.30 }          // metres of soft-particle fade
     };
     const shaftMat = new THREE.ShaderMaterial({
       uniforms: this.shaftU,
@@ -868,15 +882,18 @@ export class WindowUnit {
     for (const panel of this.panels) {
       const sx = panel.userData.side;
       const narrow = this.panelW * (1 - open * 0.52);
-      // Gathering a curtain does not just squash it: the same amount of cloth
-      // now lives in a narrower run, so the pleats get deeper and there are the
-      // same number of them. That relationship is the whole reason a drawn-back
-      // curtain reads as fabric.
+      // Gathering a curtain does not just squash it: the same cloth now lives
+      // in a narrower run, so the pleats deepen. But a fold can never be much
+      // deeper than half its own pitch or the panel folds back on itself and
+      // reads as a row of vertical blinds — so the depth is *capped against the
+      // pitch*, which is the physical constraint, rather than freely scaled.
+      const folds = 6;
+      const pitch = this.panelW * (1 - open * 0.52 * 0.68) / folds;
       const shape = {
-        folds: 6,
-        amp: 0.030 + 0.052 * open,
+        folds,
+        amp: Math.min(0.030 + 0.052 * open, pitch * 0.42),
         gather: open,
-        drape: 0.026,
+        drape: 0.030,
         sway,
         seed: panel.userData.seed
       };

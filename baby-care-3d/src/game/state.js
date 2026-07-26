@@ -19,11 +19,16 @@
  * ========================================================================== */
 
 import { STICKER_IDS } from '../ui/icons.js';
-import { loadSave, queueSave, writeSave, flushSave, clearSave, defaultSave } from './save.js';
+import {
+  loadSave, queueSave, writeSave, flushSave, clearSave, defaultSave,
+  garment, OUTFIT_SLOTS, DEFAULT_OUTFIT
+} from './save.js';
 
 export const METERS = ['food', 'clean', 'happy', 'energy'];
 export const DIRT_ZONES = ['face', 'hands', 'feet', 'body', 'hair'];
 export const STARS_PER_STICKER = 5;
+
+export { OUTFIT_SLOTS, DEFAULT_OUTFIT };
 
 /** Which activity refills which meter — used for the "needs you" badges. */
 export const METER_ACTIVITY = {
@@ -160,15 +165,37 @@ export class State {
 
   /* ------------------------------------------------------------ outfit -- */
 
+  /**
+   * Merge a partial outfit. Slots are normalised on the way in so the seven
+   * slots only ever hold `false` or a value `character/outfit.js` can resolve:
+   *
+   *   setOutfit({ top: 'mint', hat: false })   // put a top on, take the hat off
+   *   setOutfit({ top: null })                 // undress — bath.js does this
+   *   setOutfit('raincoat')                    // shorthand for { top: … }
+   *
+   * Callers may legitimately strip every slot (the bath, mid-dressing); the
+   * default outfit is a *starting* state, not a lock, so nothing is re-added
+   * here. `save.js` restores it on the next boot instead.
+   */
   setOutfit(patch) {
+    if (typeof patch === 'string' && patch) patch = { top: patch };
     if (!patch || typeof patch !== 'object') return;
+    const applied = {};
     let changed = false;
     for (const k of Object.keys(patch)) {
-      if (this.outfit[k] !== patch[k]) { this.outfit[k] = patch[k]; changed = true; }
+      if (!OUTFIT_SLOTS.includes(k)) continue;
+      const v = garment(patch[k], false);
+      applied[k] = v;
+      if (this.outfit[k] !== v) { this.outfit[k] = v; changed = true; }
     }
     if (!changed) return;
-    this.emit('outfit', { outfit: this.outfit, patch });
+    this.emit('outfit', { outfit: { ...this.outfit }, patch: applied });
     this._touch();
+  }
+
+  /** True while at least one slot has something in it. */
+  isDressed() {
+    return OUTFIT_SLOTS.some((slot) => this.outfit[slot] !== false);
   }
 
   /* ------------------------------------------------- stars & stickers --- */
@@ -283,7 +310,10 @@ export class State {
       } else if (key === 'dirt') {
         if (typeof value === 'number') { for (const z of DIRT_ZONES) this.setDirt(z, value); }
         else if (value && typeof value === 'object') { for (const [z, v] of Object.entries(value)) this.setDirt(z, v); }
-      } else if (key === 'outfit' && value && typeof value === 'object') {
+      } else if (key === 'outfit') {
+        // Never let `{ outfit: 'onesie' }` fall through to the scratch-space
+        // branch below — that used to replace the whole slot map with a string
+        // and left the character with nothing to put on.
         this.setOutfit(value);
       } else if (key === 'wet') {
         this.setWet(value);
@@ -361,10 +391,26 @@ export class State {
     this.emit('change', { patch: this.snapshot(), loaded: true });
     for (const m of METERS) this.emit('meter', { name: m, value: this.meters[m], prev: this.meters[m] });
     this.emit('star', { stars: this.stars, delta: 0 });
+    this._announceOutfit();
     return this;
   }
 
-  /** Fresh profile. Keeps nothing — used by the harness before every shot. */
+  /**
+   * Re-broadcast the whole outfit, unconditionally. `setOutfit` is a diff and
+   * stays silent when nothing moved, which is exactly wrong after a load or a
+   * reset: the character may have been undressed by the bath and needs telling
+   * that it is wearing the restored set again.
+   */
+  _announceOutfit() {
+    const outfit = { ...this.outfit };
+    this.emit('outfit', { outfit, patch: outfit, restored: true });
+  }
+
+  /**
+   * Fresh profile. Keeps nothing — used by the harness before every shot,
+   * which is why the default outfit has to be re-applied *and* re-announced
+   * here: every review still was shot straight after a `reset()`.
+   */
   reset({ keepProgress = false } = {}) {
     const d = defaultSave();
     const stars = keepProgress ? this.stars : 0;
@@ -384,6 +430,9 @@ export class State {
     this.emit('reset', {});
     for (const m of METERS) this.emit('meter', { name: m, value: this.meters[m], prev: this.meters[m] });
     this.emit('star', { stars: this.stars, delta: 0 });
+    this._announceOutfit();
+    for (const z of DIRT_ZONES) this.emit('dirt', { zone: z, amount: 0, dirt: this.dirt });
+    this.emit('wet', { wet: 0 });
     this.emit('change', { patch: this.snapshot(), reset: true });
     return this;
   }

@@ -58,6 +58,10 @@ class App {
     this.baby = new Baby({ tier: this.tier, state: this.state });
     this.scene.add(this.baby.group);
 
+    // Every `space:'subject'` camera preset is composed around this transform
+    // unless an activity claims the rig with cameraRig.setSubject().
+    this.cameraRig.setDefaultSubject(this.baby.group);
+
     this.ui = new UI({ app: this });
     await this.ui.init();
 
@@ -87,6 +91,14 @@ class App {
 
     this.room.build(this.ctx);
     await this.baby.build(this.ctx);
+
+    // The saved / default outfit is authoritative, not whatever baby.build()
+    // happened to hardcode. Push it once now and subscribe so every later
+    // change — a dress-up pick, a load(), the harness' reset() — reaches the
+    // rig. `State.setOutfit` is a diff and stays silent on a no-op, so the
+    // write-back from `Baby.setOutfit` cannot loop.
+    this.baby.setOutfit(this.state.outfit);
+    this.state.on('outfit', ({ outfit }) => this.baby.onState({ outfit }));
 
     this._bindInput(canvas);
 
@@ -131,6 +143,13 @@ class App {
       this.activity.dispose?.();
       this.activity = null;
     }
+
+    // Hand the camera back before the next scene claims it: any preset the
+    // outgoing activity re-composed around its own props is dropped, and
+    // subject-space presets fall back to the baby root.
+    this.cameraRig.restorePresets();
+    this.cameraRig.setSubject(null);
+
     this.activityName = name;
     const inst = new def.Class(this.ctx);
     await inst.build?.();

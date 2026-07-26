@@ -1,0 +1,14 @@
+[
+  {
+    "id": "01-room-wide",
+    "file": "01-room-wide.png",
+    "scene": "play",
+    "note": "Establishing shot of the nursery. Judge: lighting, materials, composition, light shaft."
+  },
+  {
+    "id": "62-clutter",
+    "file": "62-clutter.png",
+    "scene": "play",
+    "note": "Lived-in room with scattered toys."
+  }
+]

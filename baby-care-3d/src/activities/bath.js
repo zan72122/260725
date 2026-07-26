@@ -1006,25 +1006,32 @@ export class BathActivity {
    */
   _registerCameras() {
     const rig = this.ctx.cameraRig;
-    if (!rig?.addPreset) return;
+    if (!rig?.overridePreset) return;
     this.tub.updateMatrixWorld(true);
-    const w = (x, y, z) => {
-      const v = new THREE.Vector3(x, y, z);
-      this.tub.localToWorld(v);
-      return [v.x, v.y, v.z];
-    };
-    const add = (name, pos, target, fov, focus) => {
+
+    // Offsets are authored in tub-local metres and handed to the rig as
+    // subject-space offsets with the tub as the subject, so all three shots
+    // travel with the room's anchor instead of being baked into world
+    // coordinates at build time. `overridePreset` keeps them scoped: the
+    // built-in `tub` framing is restored the moment this scene leaves.
+    rig.setSubject?.(this.tub);
+    const add = (name, pos, target, fov, focus, dof = 1.1) => {
       try {
-        rig.addPreset(name, { pos: w(...pos), target: w(...target), fov, focusRange: focus });
+        rig.overridePreset(name, {
+          space: 'subject', pos, target, fov, focusRange: focus, dof,
+          handheld: 0.7, roll: 0.7
+        });
       } catch (e) { /* the rig may not accept overrides — never fatal */ }
     };
     // The hero shot: the bowl, the mixer above the rim, and enough headroom
-    // for a fully sculpted foam horn on a seated baby.
-    add('tub', [0.57, 1.39, 1.97], [0.00, 0.61, 0.10], 34, 0.28);
+    // for a fully sculpted foam horn on a seated baby. Pulled in hard from the
+    // original framing, which left the tub at a third of the frame height and
+    // the bottom third empty floor.
+    add('tub', [0.36, 0.94, 1.16], [0.00, 0.50, 0.06], 34, 0.22);
     // over the rim, tight on a baby sitting in the water
-    add('bath-face', [0.44, 1.10, 1.24], [0.02, 0.72, 0.02], 37, 0.18);
+    add('bath-face', [0.30, 0.84, 0.82], [0.02, 0.60, 0.02], 34, 0.14, 1.25);
     // the towel-and-dryer stage on the mat
-    add('bath-dry', [0.45, 0.86, 2.03], [0.02, 0.40, 0.50], 33, 0.22);
+    add('bath-dry', [0.34, 0.72, 1.34], [0.02, 0.28, 0.46], 33, 0.20);
   }
 
   _goTo(preset, seconds = 1.1) {

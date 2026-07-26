@@ -1,0 +1,20 @@
+[
+  {
+    "id": "03-baby-face",
+    "file": "03-baby-face.png",
+    "scene": "play",
+    "note": "Hero face closeup. Judge: skin SSS, eyes, catchlights, hair."
+  },
+  {
+    "id": "07-baby-full",
+    "file": "07-baby-full.png",
+    "scene": "play",
+    "note": "Full body. Judge: proportions, silhouette, cloth, contact shadow."
+  },
+  {
+    "id": "30-dress-outfit",
+    "file": "30-dress-outfit.png",
+    "scene": "dress",
+    "note": "Wardrobe + outfit selection."
+  }
+]

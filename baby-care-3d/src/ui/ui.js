@@ -31,6 +31,11 @@ const ACTIVITY_LABEL = {
   feed: 'ごはん', bath: 'おふろ', dress: 'きせかえ', play: 'あそぶ', sleep: 'ねんね'
 };
 
+/** How many star slots the collection card shows. Never a number: a child
+ *  reads "three of my spaces are filled", which is a sticker sheet, not a
+ *  score. Completing a card is the reward beat. */
+const STAR_SLOTS = 5;
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const clamp01 = (v) => Math.min(1, Math.max(0, typeof v === 'number' && isFinite(v) ? v : 0));
@@ -89,6 +94,7 @@ export class UI {
     for (const a of $$('.act', els.actBar)) els.acts[a.dataset.act] = a;
 
     this.paintIcons(document);
+    this._buildStarSlots();
     this._buildAlbum();
     this._bind();
 
@@ -214,6 +220,7 @@ export class UI {
     }
 
     this._layoutLabels();
+    if (this._promptTarget && this.els.prompt?.classList.contains('is-on')) this._layoutPrompt();
     this._stepFlights(dt);
 
     this._needAcc += dt;
@@ -355,19 +362,69 @@ export class UI {
   /** Absolute setter, kept separate from the award animation. */
   setStars(total) { this.state.setStars(total); }
 
+  /**
+   * Replace the numeric counter with a row of sticker slots. The markup keeps
+   * the counter element (other code reads it) but it is never shown.
+   */
+  _buildStarSlots() {
+    const box = this.els.starBox;
+    if (!box) return;
+    box.querySelector('.star-box__icon')?.remove();
+    const row = document.createElement('div');
+    row.className = 'star-slots';
+    this.els.starSlots = [];
+    for (let i = 0; i < STAR_SLOTS; i++) {
+      const slot = document.createElement('span');
+      slot.className = 'star-slot is-empty';
+      slot.dataset.on = '0';
+      slot.innerHTML = icon('star');
+      row.appendChild(slot);
+      this.els.starSlots.push(slot);
+    }
+    box.insertBefore(row, box.firstChild);
+    box.setAttribute('aria-label', 'あつめた ほし');
+  }
+
   _paintStars(total, bump) {
     const el = this.els?.starCount;
-    if (!el) return;
-    el.textContent = String(total);
+    if (el) el.textContent = String(total);          // bookkeeping only, never shown
+    const slots = this.els?.starSlots;
+    if (slots && slots.length) {
+      /* A full card stays full for its moment of glory, then the next star
+         starts a fresh one. No digits anywhere in the HUD. */
+      const filled = total > 0 && total % STAR_SLOTS === 0 ? STAR_SLOTS : total % STAR_SLOTS;
+      slots.forEach((slot, i) => {
+        const on = i < filled;
+        if (slot.dataset.on === (on ? '1' : '0')) return;
+        slot.dataset.on = on ? '1' : '0';
+        slot.classList.toggle('is-full', on);
+        slot.classList.toggle('is-empty', !on);
+        if (on && bump) {
+          slot.classList.remove('is-pop');
+          void slot.offsetWidth;
+          slot.classList.add('is-pop');
+        }
+      });
+    }
     if (!bump) return;
     const box = this.els.starBox;
+    if (!box) return;
     box.classList.remove('is-bump');
     void box.offsetWidth;
     box.classList.add('is-bump');
   }
 
+  /** The slot a flying star should land in — the first empty one. */
+  _starTarget() {
+    const slots = this.els?.starSlots;
+    if (slots && slots.length) {
+      return this._elCenter(slots.find(s => s.dataset.on === '0') || slots[slots.length - 1]);
+    }
+    return this._elCenter(this.els.starBox);
+  }
+
   _flyStar(from, delta) {
-    const target = this._elCenter(this.els.starBox?.querySelector('.star-box__icon'));
+    const target = this._starTarget();
     const p0 = this._toScreen(from) || this._lastPointer || { x: innerWidth / 2, y: innerHeight * 0.45 };
     this._cancelStarSync?.();
     this._cancelStarSync = null;
@@ -545,23 +602,87 @@ export class UI {
    * The gentle "what to do next" hint. Slides in with a bobbing arrow and
    * stays until the step is done (or `seconds` elapse).
    */
-  prompt(text, { icon: iconName = 'heart', seconds = 0, arrow = true } = {}) {
+  prompt(text, { icon: iconName = 'heart', seconds = 0, arrow, target = null } = {}) {
     const el = this.els.prompt;
     if (!el) return;
     this.els.promptText.textContent = text || '';
     if (this.els.promptIcon) {
       this.els.promptIcon.innerHTML = icon(iconName) || icon('heart');
     }
-    el.querySelector('.prompt__arrow')?.style.setProperty('display', arrow ? '' : 'none');
+
+    /* An arrow is a promise that something is *there*. Without a target we
+       cannot keep that promise — the old build drew a fixed downward arrow
+       under text that named an object somewhere else entirely — so the arrow
+       only appears when a real target has been handed in. */
+    /* An activity can also publish what its current step is about by setting
+       `promptTarget` on itself; that saves every call site passing it. */
+    const t = target || this.app.activity?.promptTarget || null;
+    this._promptTarget = t;
+    this._promptArrow = arrow === undefined ? !!t : !!arrow;
+    this._layoutPrompt(true);
+
     el.classList.add('is-on');
     this._promptTimer?.();
     this._promptTimer = seconds > 0 ? this.after(seconds, () => this.hidePrompt()) : null;
     this._sfx('pop');
   }
 
+  /** Re-aim an existing prompt at a 3D object (or Vector3), or clear it. */
+  promptTarget(objectOrVec) {
+    this._promptTarget = objectOrVec || null;
+    this._promptArrow = !!objectOrVec;
+    this._layoutPrompt(true);
+  }
+
+  /**
+   * Place the bubble so it never covers its own target, and rotate the arrow
+   * so it points at it. The arrow art points *down* at 0°, so the CSS rotation
+   * that aims (0,1) at (dx,dy) is atan2(-dx, dy).
+   */
+  _layoutPrompt(immediate = false) {
+    const el = this.els.prompt;
+    if (!el) return;
+    const arrowEl = el.querySelector('.prompt__arrow');
+    if (arrowEl) arrowEl.style.display = this._promptArrow ? '' : 'none';
+
+    const canvas = this.app.renderer?.domElement;
+    const w = canvas?.clientWidth || innerWidth;
+    const h = canvas?.clientHeight || innerHeight;
+
+    let side = 'left', vert = 'bottom';
+    const p = this._promptTarget ? this._toScreen(this._promptTarget) : null;
+
+    if (p && isFinite(p.x) && isFinite(p.y)) {
+      /* Sit on the opposite side of the frame from the target, both axes, so
+         the bubble and the thing it names never share screen space. */
+      side = p.x < w * 0.5 ? 'right' : 'left';
+      vert = p.y > h * 0.52 ? 'top' : 'bottom';
+    }
+
+    el.classList.toggle('prompt--left', side === 'left');
+    el.classList.toggle('prompt--right', side === 'right');
+    el.classList.toggle('prompt--top', vert === 'top');
+
+    if (!p || !this._promptArrow) {
+      el.style.removeProperty('--arrow-rot');
+      return;
+    }
+    /* Aim from the bubble's own centre, measured after the placement classes
+       have been applied. `immediate` skips a frame of transition lag. */
+    const box = el.getBoundingClientRect();
+    if (!box.width) return;
+    const cx = box.left + box.width * (side === 'left' ? 0.86 : 0.14);
+    const cy = box.top + box.height / 2;
+    const deg = Math.atan2(-(p.x - cx), p.y - cy) * 180 / Math.PI;
+    el.style.setProperty('--arrow-rot', deg.toFixed(1) + 'deg');
+    if (immediate) void el.offsetWidth;
+  }
+
   hidePrompt() {
     this._promptTimer?.();
     this._promptTimer = null;
+    this._promptTarget = null;
+    this._promptArrow = false;
     this.els.prompt?.classList.remove('is-on');
   }
 

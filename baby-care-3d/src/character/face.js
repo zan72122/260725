@@ -207,6 +207,51 @@ export function buildFaceMorphs(headGeometry) {
 
 /* ------------------------------------------------------------- geometry --- */
 
+/**
+ * Eyeball.
+ *
+ * `makeEye()` paints the iris as a disc at the *centre* of a square canvas.
+ * A stock `SphereGeometry` maps that square as an equirectangular wrap, which
+ * puts the iris in a band around the sphere's equator and leaves the pole —
+ * whichever pole you rotate to the front — showing nothing but sclera. That is
+ * why the character rendered as blank white lozenges no matter where it was
+ * looking. So the eyeball gets its own azimuthal UV: distance from the *front*
+ * pole maps to distance from the centre of the texture, which is the layout
+ * the texture was actually painted for.
+ *
+ * `irisDeg` is the angular radius the painted iris (0.34 of the canvas) ends up
+ * subtending on the ball, i.e. how big the iris reads.
+ */
+function eyeballGeometry(R, segs, rings, irisDeg = 41) {
+  const g = new THREE.BufferGeometry();
+  const pos = [], nor = [], uv = [], idx = [];
+  const thetaRef = (0.5 / 0.34) * irisDeg * DEG;      // θ at the texture's edge
+  for (let j = 0; j <= rings; j++) {
+    const th = Math.PI * (j / rings);
+    for (let i = 0; i <= segs; i++) {
+      const ph = (i / segs) * Math.PI * 2;
+      const st = Math.sin(th), ct = Math.cos(th);
+      const nx = st * Math.cos(ph), ny = st * Math.sin(ph), nz = ct;
+      pos.push(nx * R, ny * R, nz * R);
+      nor.push(nx, ny, nz);
+      const s = 0.5 * (th / thetaRef);
+      uv.push(0.5 + s * Math.cos(ph), 0.5 + s * Math.sin(ph));
+    }
+  }
+  for (let j = 0; j < rings; j++) {
+    for (let i = 0; i < segs; i++) {
+      const a = j * (segs + 1) + i, b = a + segs + 1;
+      if (j > 0) idx.push(a, b, a + 1);
+      if (j < rings - 1) idx.push(a + 1, b, b + 1);
+    }
+  }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+
 /** Spherical cap with a rolled rim, used for both eyelids. */
 function lidGeometry(R, halfAngle, segs, rings) {
   const g = new THREE.BufferGeometry();
@@ -266,35 +311,57 @@ function lashGeometry(R, halfAngle, segs) {
   return g;
 }
 
-/** A soft tapered arc — the brow. */
-function browGeometry(len, thick, segs) {
+/**
+ * A soft tapered arc — the brow.
+ *
+ * An infant brow is barely there: a haze of very fine hair with no hard edge
+ * anywhere. So this is a flat-ish ribbon lying on the brow ridge, carrying a
+ * per-vertex alpha that fades to nothing at both ends and along the top and
+ * bottom margins. (Vertex alpha rather than an alpha map: a 4-component
+ * `color` attribute switches three's `USE_COLOR_ALPHA` path on, which
+ * multiplies straight into the material's alpha without needing a texture.)
+ *
+ * `bias` shifts the whole brow's mass toward the inner (-1) or outer (+1) end,
+ * and `arch` how much it lifts in the middle — the two knobs that let the left
+ * and right brow differ *on purpose*.
+ */
+function browGeometry({ len = 0.0215, thick = 0.0052, segs = 20, bias = 0, arch = 1 } = {}) {
   const g = new THREE.BufferGeometry();
-  const pos = [], nor = [], uv = [], idx = [];
-  const around = 5;
+  const pos = [], nor = [], uv = [], col = [], idx = [];
+  const across = 4;
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
     const u = t * 2 - 1;
     const cx = u * len;
-    const cy = -u * u * 0.0042 + (u > 0 ? -u * 0.0016 : 0);
-    const cz = -Math.abs(u) * u * 0.0030 - u * u * 0.0055;
-    const r = thick * (1 - u * u * 0.55) * (u < 0 ? 1.0 : 0.82);
-    for (let k = 0; k <= around; k++) {
-      const a = (k / around) * Math.PI * 2;
-      const ny = Math.cos(a), nz = Math.sin(a);
-      pos.push(cx, cy + ny * r, cz + nz * r * 0.55);
-      nor.push(0, ny, nz);
-      uv.push(t, k / around);
+    // the arch: highest a third of the way out from the inner end
+    const cy = arch * (0.0034 * (1 - u * u) - 0.0026 * u * Math.abs(u)) - 0.0012 * u * u;
+    const cz = -0.0064 * u * u - 0.0018 * Math.abs(u) * u;
+    // thickness: fullest just inboard of the arch, feathering to nothing at
+    // both ends — no blunt terminations
+    const shape = Math.pow(Math.max(0, 1 - u * u), 0.62) * (1 + bias * u * 0.45);
+    const r = thick * shape;
+    const endFade = Math.pow(Math.max(0, 1 - u * u), 0.85);
+    for (let k = 0; k <= across; k++) {
+      const v = k / across;
+      const a = (v - 0.5) * 2;                        // -1 bottom … +1 top
+      pos.push(cx, cy + a * r, cz + (1 - a * a) * 0.0011);
+      nor.push(0, 0.35 * a, 1);
+      uv.push(t, v);
+      // alpha: soft at the margins, softer still at the roots
+      const edge = Math.pow(Math.max(0, 1 - a * a), 0.55);
+      col.push(1, 1, 1, edge * endFade * 0.92);
     }
   }
   for (let i = 0; i < segs; i++) {
-    for (let k = 0; k < around; k++) {
-      const a = i * (around + 1) + k, b = a + around + 1;
+    for (let k = 0; k < across; k++) {
+      const a = i * (across + 1) + k, b = a + across + 1;
       idx.push(a, b, a + 1, a + 1, b, b + 1);
     }
   }
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;
@@ -364,15 +431,19 @@ export class Face {
   build() {
     const irisColors = [0x4a3728, 0x3b2a1e, 0x5c4630];
     this.eyeMat = MAT.makeEye({ iris: irisColors[0], sclera: 0xfffaf7 });
-    this.corneaMat = MAT.makeCornea();
+    // makeCornea() is memoised and shared; take a private copy so the veil can
+    // be pulled right down without changing anything else that asks for one.
+    this.corneaMat = MAT.makeCornea().clone();
+    this.corneaMat.opacity = 0.07;
+    this.corneaMat.transmission = 0.35;
+    this.corneaMat.envMapIntensity = 1.5;
     this.skinMat = null;                          // injected by Baby.build()
 
-    const eyeGeo = new THREE.SphereGeometry(FACE.eyeR, this.tier >= 2 ? 22 : 16, this.tier >= 2 ? 16 : 12);
-    // The iris texture is laid out on a flat square, so rotate the sphere's
-    // pole to face forward — that puts the pupil dead centre of the cornea.
-    eyeGeo.rotateX(-Math.PI / 2);
-    const corneaGeo = new THREE.SphereGeometry(FACE.lidR * 0.985, 16, 10,
-      0, Math.PI * 2, 0, Math.PI * 0.42);
+    const eyeGeo = eyeballGeometry(FACE.eyeR, this.tier >= 2 ? 30 : 20, this.tier >= 2 ? 20 : 14);
+    // A tight corneal dome rather than a full milky hemisphere: enough to bend
+    // a specular over the iris, not enough to fog it.
+    const corneaGeo = new THREE.SphereGeometry(FACE.lidR * 1.005, 20, 12,
+      0, Math.PI * 2, 0, Math.PI * 0.25);
     corneaGeo.rotateX(Math.PI / 2);
 
     const lidSegs = this.tier >= 2 ? 22 : 15;
@@ -384,7 +455,15 @@ export class Face {
     const lashGeo = lashGeometry(FACE.lidR, LID_HALF, lidSegs);
 
     this.lashMat = MAT.makeLash({ color: 0x4b3428 });
-    this.browMat = MAT.makeLash({ color: 0x9a6f4e, opacity: 0.94 });
+    // Infant brows are a warm haze, not a drawn line. Vertex alpha carries the
+    // root fade; the material only has to agree to look at it.
+    this.browMat = MAT.makeLash({ color: 0xb08a63, opacity: 1 });
+    this.browMat.vertexColors = true;
+    this.browMat.transparent = true;
+    this.browMat.depthWrite = false;
+    this.browMat.roughness = 0.85;
+    this.browMat.sheen = 0.5;
+    this.browMat.needsUpdate = true;
 
     this.eyes = [];
     this.brows = [];
@@ -402,17 +481,24 @@ export class Face {
       pivot.add(cornea);
 
       // the catchlight: a tiny additive disc that always faces out. Without a
-      // guaranteed specular hit the eyes read as buttons.
-      const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.0062, 0.0062), MAT.makeCatchlight());
-      cl.position.set(-0.0052 * s, 0.0055, FACE.lidR * 0.97);
+      // guaranteed specular hit the eyes read as buttons. It lives on a rig
+      // that is re-aimed at the actual key light every frame (see _aimCatch),
+      // and the two eyes are given slightly different radii so the pair never
+      // reads as a stamped-on decal.
+      const clRig = new THREE.Object3D();
+      pivot.add(clRig);
+      const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.0058, 0.0058), MAT.makeCatchlight());
+      cl.position.set(0, 0, FACE.eyeR * 1.06);
       cl.renderOrder = 5;
-      pivot.add(cl);
-      const cl2 = cl.clone();
-      cl2.material = cl.material.clone();
-      cl2.material.opacity = 0.30;
-      cl2.scale.setScalar(0.55);
-      cl2.position.set(0.0060 * s, -0.0040, FACE.lidR * 0.97);
-      pivot.add(cl2);
+      clRig.add(cl);
+      const cl2 = new THREE.Mesh(cl.geometry, cl.material.clone());
+      cl2.material.opacity = 0.26;
+      cl2.scale.setScalar(0.52);
+      cl2.renderOrder = 5;
+      const clRig2 = new THREE.Object3D();
+      cl2.position.set(0, 0, FACE.eyeR * 1.06);
+      clRig2.add(cl2);
+      pivot.add(clRig2);
 
       // lids: separate pivots so they can follow gaze independently of the eye
       const upper = new THREE.Object3D();
@@ -430,15 +516,33 @@ export class Face {
       ll.scale.setScalar(0.97);
       upper.add(ul); lower.add(ll);
 
-      const brow = new THREE.Mesh(browGeometry(FACE.browHalf, 0.0042, 12), this.browMat);
+      // Deliberate asymmetry, small enough to read as character rather than
+      // error: the baby's left brow sits a hair higher and arches a little
+      // more than the right. The old pair differed by accident and in the
+      // wrong currency — length and darkness — which reads as a bug.
+      const left = s > 0;
+      const brow = new THREE.Mesh(browGeometry({
+        len: FACE.browHalf * (left ? 1.02 : 0.99),
+        thick: 0.0058,
+        segs: 22,
+        bias: left ? 0.10 : 0.02,
+        arch: left ? 1.12 : 0.94
+      }), this.browMat);
       const browPivot = new THREE.Object3D();
-      browPivot.position.set(FACE.brow[0] * s, FACE.brow[1], FACE.brow[2]);
-      browPivot.rotation.z = -0.10 * s;
+      browPivot.position.set(FACE.brow[0] * s, FACE.brow[1] + (left ? 0.0008 : 0), FACE.brow[2]);
+      // resting tilt is now very slightly *up* at the outer end: down-and-in
+      // is a scowl, and a resting infant does not scowl
+      browPivot.rotation.z = 0.045 * s;
       browPivot.add(brow);
       this.group.add(browPivot);
-      this.brows.push({ pivot: browPivot, s, rest: browPivot.position.clone(), restRot: -0.10 * s });
+      this.brows.push({
+        pivot: browPivot, s, rest: browPivot.position.clone(), restRot: 0.045 * s
+      });
 
-      this.eyes.push({ s, pivot, ball, cornea, upper, lower, upperMesh: um, lowerMesh: lm, catch: cl, catch2: cl2 });
+      this.eyes.push({
+        s, pivot, ball, cornea, upper, lower, upperMesh: um, lowerMesh: lm,
+        catch: cl, catch2: cl2, catchRig: clRig, catchRig2: clRig2
+      });
     }
 
     this._buildMouth();
@@ -535,6 +639,12 @@ export class Face {
     const p = headBone.getWorldPosition(new THREE.Vector3());
     this.group.position.set(-p.x, -p.y, -p.z);
     headBone.add(this.group);
+    // The rig root's local space *is* bind-world (every bone is placed there at
+    // its bind coordinate), which makes it the right frame to author idle gaze
+    // points in — they then stay put in the room as the head turns.
+    let r = headBone;
+    while (r.parent && r.parent.type !== 'Scene' && r.name !== 'rigRoot') r = r.parent;
+    this._rigRoot = r;
   }
 
   /** Skin material arrives after Baby builds it; lids must match the face. */
@@ -606,10 +716,14 @@ export class Face {
   _updateGaze(dt) {
     const head = this._headBone;
     if (!head) return;
+    // Eye pivots live in `this.group`, which is offset from the head bone by
+    // the bone's bind position (~0.47 m). The look target must therefore be
+    // resolved into *group* space, not bone space — converting into bone space
+    // makes every target read half a metre too low, pins the pitch solve at its
+    // lower clamp, and rolls both irises out behind the lids for good.
     let localTarget;
     if (this.lookTarget) {
-      localTarget = this.lookTarget.clone();
-      head.worldToLocal(localTarget);
+      localTarget = this.group.worldToLocal(this.lookTarget.clone());
     } else {
       // idle wander: infants scan in short hops with long fixations
       this._saccadeIn -= dt;
@@ -617,12 +731,14 @@ export class Face {
         this._saccadeIn = 0.9 + Math.random() * 2.6;
         this._idlePoint.set(
           (Math.random() - 0.5) * 0.55,
-          P.eyeY + (Math.random() - 0.35) * 0.28,
+          P.eyeY + (Math.random() - 0.35) * 0.22,
           0.55 + Math.random() * 0.5
         );
       }
-      localTarget = this._idlePoint.clone();
-      head.worldToLocal(this.group.localToWorld(localTarget));
+      const w = this._rigRoot
+        ? this._rigRoot.localToWorld(this._idlePoint.clone())
+        : this.group.localToWorld(this._idlePoint.clone());
+      localTarget = this.group.worldToLocal(w);
     }
 
     // per-eye vergence: each eye aims at the point itself
@@ -630,9 +746,11 @@ export class Face {
       const p = e.pivot.position;
       const dx = localTarget.x - p.x, dy = localTarget.y - p.y, dz = Math.max(0.05, localTarget.z - p.z);
       let yaw = Math.atan2(dx, dz);
-      let pitch = Math.atan2(dy, Math.hypot(dx, dz));
-      yaw = THREE.MathUtils.clamp(yaw, -0.62, 0.62);
-      pitch = THREE.MathUtils.clamp(pitch, -0.42, 0.40);
+      // rotation.x is *positive downward* (it takes +z toward -y), so a target
+      // above the eye needs a negative pitch
+      let pitch = -Math.atan2(dy, Math.hypot(dx, dz));
+      yaw = THREE.MathUtils.clamp(yaw, -0.55, 0.55);
+      pitch = THREE.MathUtils.clamp(pitch, -0.36, 0.40);
       e.goalYaw = yaw; e.goalPitch = pitch;
     }
 
@@ -674,58 +792,81 @@ export class Face {
     }
 
     /* -- eyelids ----------------------------------------------------------- */
-    // lidClose from mood, blink, and a lid-follows-gaze term
-    const gazeLid = -(this.gazePitch || 0) * 0.55;
+    // lidClose from mood, blink, and a lid-follows-gaze term. gazePitch is now
+    // positive-downward, so only a downward glance should drop the lid.
+    const gazeLid = Math.max(0, this.gazePitch || 0) * 0.55;
     for (const e of this.eyes) {
-      const close = clamp01(Math.max(this._blinkAmount, val('lidClose')) + val('lidLower') * 0.55 + gazeLid * 0.4);
-      const squint = val('eyeSquint') * 0.30 + val('mouthCry') * 0.25;
+      const close = clamp01(Math.max(this._blinkAmount, val('lidClose'))
+        + val('lidLower') * 0.72 + val('sleepSoft') * 0.22 + gazeLid * 0.4);
+      // a true smile is made by the *cheek*, which pushes the lower lid up —
+      // without it a grin reads as a mouth pasted on a staring face
+      const squint = val('eyeSquint') * 0.62 + val('smileBig') * 0.30 + val('mouthCry') * 0.55;
       const wide = val('eyeWide');
       // Lids are hemispherical caps of half-angle LID_HALF. Solve directly for
       // where each lid's *edge* should cross the front of the eye (measured in
       // degrees from straight up) and back out the pivot angle — far easier to
       // reason about than raw rotations, and it makes the aperture explicit.
-      const upEdge = THREE.MathUtils.lerp(62 - wide * 8 + squint * 7, 100, close);
-      const loEdge = THREE.MathUtils.lerp(119 + wide * 5, 96, close * 0.62 + squint * 0.85);
+      const upEdge = THREE.MathUtils.lerp(60 - wide * 11 + squint * 9, 101, close);
+      const loEdge = THREE.MathUtils.lerp(121 + wide * 6, 97, clamp01(close * 0.62 + squint * 0.95));
       e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
       e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;
-      e.upper.rotation.z = e.s * (val('browSad') * 0.10 - val('browFurrow') * 0.08);
+      // the inner corner of the upper lid drops on a sad brow, lifts on a
+      // furrow — the tell that separates "sad" from "cross"
+      e.upper.rotation.z = e.s * (val('browSad') * 0.26 - val('browFurrow') * 0.20 + val('sulk') * 0.14);
       const vis = close < 0.985;
       e.cornea.visible = vis;
-      e.catch.visible = vis && close < 0.6;
+      e.catch.visible = vis && close < 0.72;
       e.catch2.visible = e.catch.visible;
     }
+    this._aimCatch(ctx);
 
     /* -- brows ------------------------------------------------------------- */
+    // Every mood moves the brows. They are the loudest thing on an infant face
+    // and leaving them flat is what made `cry` and `happy` read as the same
+    // photograph with a different mouth.
     for (const b of this.brows) {
-      const raise = val('browRaise') - val('browFurrow') * 0.8;
+      const raise = val('browRaise') + val('browLift') - val('browFurrow') * 0.8;
       const sad = val('browSad');
-      const inner = sad * 0.5 - val('browFurrow') * 0.4;
+      const inner = sad * 1.0 - val('browFurrow') * 0.55 - val('browRaise') * 0.10;
       b.pivot.position.set(
-        b.rest.x + (val('browFurrow') * -0.0035) * b.s,
-        b.rest.y + raise * 0.0090 + sad * 0.0018 - val('sleepSoft') * 0.0020,
-        b.rest.z + raise * 0.0012);
-      b.pivot.rotation.z = b.restRot + b.s * (inner * 0.42 + val('browRaise') * -0.06);
-      b.pivot.scale.set(1 + val('browFurrow') * -0.06, 1 + raise * 0.10, 1);
+        b.rest.x + (val('browFurrow') * -0.0052) * b.s,
+        b.rest.y + raise * 0.0165 + sad * 0.0044
+          - val('sleepSoft') * 0.0034 - val('eyeSquint') * 0.0026 - val('sulk') * 0.0030,
+        b.rest.z + raise * 0.0018);
+      // inner end up + outer end down is the whole grammar of an unhappy brow
+      b.pivot.rotation.z = b.restRot + b.s * (inner * 0.72 + val('browRaise') * -0.10)
+        + b.s * val('sulk') * -0.18;
+      b.pivot.scale.set(
+        1 + val('browFurrow') * -0.10 + raise * 0.04,
+        1 + raise * 0.22 + sad * 0.15,
+        1);
     }
 
     /* -- mouth ------------------------------------------------------------- */
-    const open = clamp01(val('jawOpen') + val('yawnWide') * 1.5 + val('mouthCry') * 0.35);
+    const open = clamp01(val('jawOpen') + val('yawnWide') * 1.5 + val('mouthCry') * 0.62);
     const g = this.mouthGroup;
     const wide = clamp01(val('smileBig') * 0.9 + val('mouthCry'));
     g.visible = open > 0.02;
     g.scale.set(
-      0.62 + wide * 0.55 + open * 0.30,
-      0.30 + open * 1.35,
+      0.70 + wide * 0.85 + open * 0.34,
+      0.34 + open * 1.55,
       0.55 + open * 0.60);
-    g.position.y = FACE.mouth[1] - open * 0.0135;
-    g.position.z = FACE.mouth[2] - 0.0165 - open * 0.0060;
+    g.position.y = FACE.mouth[1] - open * 0.0150;
+    g.position.z = FACE.mouth[2] - 0.0140 - open * 0.0058;
     this.tongue.position.y = -0.0072 - open * 0.0030 + (ov.tongue || 0) * 0.004;
     this.tongue.position.z = 0.0055 + (ov.tongue || 0) * 0.020;
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';
 
     /* -- cheeks / blush ---------------------------------------------------- */
-    this.blushMat.opacity = val('blush') * 0.58;
-    for (const m of this.blush) m.visible = this.blushMat.opacity > 0.01;
+    // was val*0.58, which peaked at 0.16 opacity on `happy` — invisible over
+    // saturated skin under a bright key. A flushed infant cheek is not subtle.
+    this.blushMat.opacity = clamp01(val('blush')) * 0.92;
+    for (const m of this.blush) {
+      m.visible = this.blushMat.opacity > 0.012;
+      // the flush spreads as well as deepening
+      const sc = 0.86 + clamp01(val('blush')) * 0.30;
+      m.scale.set(sc, 1, sc);
+    }
 
     /* -- tears ------------------------------------------------------------- */
     this._updateTears(dt, val('tears'));

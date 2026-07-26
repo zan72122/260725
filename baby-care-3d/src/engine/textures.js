@@ -426,7 +426,9 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
       const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });
-    const normal = normalFromHeight(size, 4.2, height);
+    // 4.2 sparkled: at rug distance a tuft is 2–3 screen pixels and a normal
+    // map that strong aliases into glitter. 3.4 still rakes properly.
+    const normal = normalFromHeight(size, 3.4, height);
     const rough = generate(size, (u, v, out) => {
       // tuft tops catch a faint sheen; the roots are pure scatter
       out[0] = out[1] = out[2] = 0.98 - height(u, v) * 0.16;

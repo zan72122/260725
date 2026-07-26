@@ -55,7 +55,16 @@ const GradeShader = {
     uExposure:    { value: 1.0 },
     uVignette:    { value: 0.30 },
     uGrain:       { value: 0.014 },
-    uAberration:  { value: 0.0016 },
+    // 0.0016 put a 3 px rainbow fringe on every high-contrast vertical edge at
+    // 1280 wide — the curtain leading edge looked like a compression artefact.
+    // Real lens CA on a good wide is well under a pixel in the centre.
+    // …and it has to *stop* being a constant term. `0.25 + r2 * 2.4` never
+    // reaches zero, so every edge in the frame carried a fringe, just a smaller
+    // one — which is what made the drum rim and the rug/floor boundary fringe
+    // at frame *centre*. A real lens' lateral CA is a field aberration: it is
+    // identically zero on the optical axis and rises steeply in the last
+    // fifth of the image circle. `pow(r², n)` is that curve.
+    uAberration:  { value: 0.0022 },
     uDofStrength: { value: 0.85 },
     uFocus:       { value: 0.14 },   // view-space depth of the subject
     uFocusRange:  { value: 0.30 },
@@ -65,7 +74,16 @@ const GradeShader = {
     uGain:        { value: new THREE.Vector3(1.03, 1.005, 0.985) },
     uSaturation:  { value: 1.11 },
     uContrast:    { value: 1.045 },
-    uWarmth:      { value: 0.03 }
+    uWarmth:      { value: 0.03 },
+    // Split toning — the single most useful lever for D38. A warm key against
+    // a neutral shadow gives an image luminance range but no *chromatic* range,
+    // and that is what makes a render read as "correctly exposed" rather than
+    // "lit". Real shadow is not the key minus intensity, it is a different
+    // light source: the sky. So shadows get pushed toward that sky, highlights
+    // stay with the key. Per-mood values live in lighting.js `MOODS[*].grade`.
+    uShadowTint:  { value: new THREE.Vector3(0.88, 0.955, 1.16) },
+    uHighTint:    { value: new THREE.Vector3(1.04, 1.0, 0.945) },
+    uSplit:       { value: 1.0 }
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -83,9 +101,9 @@ const GradeShader = {
     uniform sampler2D tDepth;
     uniform float uTime, uExposure, uVignette, uGrain, uAberration;
     uniform float uDofStrength, uFocus, uFocusRange, uNear, uFar;
-    uniform float uSaturation, uContrast, uWarmth;
+    uniform float uSaturation, uContrast, uWarmth, uSplit;
     uniform vec2  uResolution;
-    uniform vec3  uLift, uGain;
+    uniform vec3  uLift, uGain, uShadowTint, uHighTint;
 
     float linearDepth(vec2 uv) {
       float d = texture2D(tDepth, uv).x;
@@ -153,17 +171,33 @@ const GradeShader = {
 
       // depth of field ------------------------------------------------------
       float depth = linearDepth(uv);
+      float dz = depth - uFocus;
       // A dead zone around the focal plane keeps the subject perfectly crisp;
       // without it, tiny depth jitter makes the whole frame feel soft.
-      float defocus = max(0.0, abs(depth - uFocus) - uFocusRange * 0.35);
-      float coc = clamp(defocus / max(1e-4, uFocusRange), 0.0, 1.0);
-      coc = pow(coc, 1.8) * uDofStrength;
+      // The dead zone has to be wide enough to hold the *whole subject*, not
+      // just the plane the focus point sits on: `focusOn()` aims at the chest
+      // socket, and in a portrait the eyes are 4–5 cm nearer than that. At
+      // 0.5 × the face preset's 5 cm range the eyes sat on the ramp and the
+      // sharpest thing in frame was the floor. A full range either side means
+      // the head is inside the dead zone end to end.
+      float dead = uFocusRange;
+      // …and then a long ramp, so focus falls off over metres rather than
+      // snapping from sharp to fully blurred at the edge of the dead zone.
+      float ramp = uFocusRange * 6.0;
+      float defocus = max(0.0, abs(dz) - dead);
+      float coc = clamp(defocus / max(1e-6, ramp), 0.0, 1.0);
+      coc = pow(coc, 1.35) * uDofStrength;
       // never blur the very front of frame as hard as the background
-      coc *= depth < uFocus ? 0.45 : 1.0;
-      float radius = coc * 0.0038;
+      coc *= dz < 0.0 ? 0.45 : 1.0;
+      float radius = coc * 0.0042;
 
-      // chromatic aberration grows toward the edges, like a real wide lens ---
-      float ca = uAberration * (0.25 + r2 * 2.4);
+      // lateral chromatic aberration — a *field* aberration, so it is exactly
+      // zero on axis and only appears in the last fifth of the image circle.
+      // r2 runs 0 at centre → 0.5 at the corner, so `r2 * 2` normalises the
+      // corner to 1 and the cube keeps the middle 60% of the frame clean:
+      // halfway to the corner this is 1.6% of the corner value.
+      float caField = clamp(r2 * 2.0, 0.0, 1.0);
+      float ca = uAberration * caField * caField * caField;
       vec3 col;
       col.r = bokeh(uv + fromCenter * ca, radius).r;
       col.g = bokeh(uv, radius).g;
@@ -171,6 +205,17 @@ const GradeShader = {
 
       col *= uExposure;
       col = agx(col);
+
+      // split tone — cool shadow against warm key -----------------------------
+      // Weighted on display luminance *after* the curve, so the split follows
+      // what the eye reads as shadow rather than what the renderer called dark.
+      // The two ranges deliberately overlap around mid grey: a hard crossover
+      // produces a visible band on any smooth gradient (a wall, a cheek).
+      float sl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      float shadowW = 1.0 - smoothstep(0.015, 0.52, sl);
+      float highW = smoothstep(0.38, 0.95, sl);
+      col *= mix(vec3(1.0), uShadowTint, shadowW * uSplit);
+      col *= mix(vec3(1.0), uHighTint, highW * uSplit);
 
       // lift / gain / saturation / contrast ---------------------------------
       col = col * uGain + uLift;
@@ -351,17 +396,20 @@ export class RenderPipeline {
         // contact, which is why the AO buffer came back almost pure white and
         // every prop still read as pasted on. 0.8 m is roughly "the width of
         // the crib", so legs, plinths and the rug edge all darken properly.
-        radius: 0.80,
+        radius: 0.62,
         distanceExponent: 1.0,
         thickness: 1.0,
-        scale: 2.0,
+        // 2.0 put visible AO blotching on the baby's torso: on a smooth,
+        // strongly curved surface the sample noise survives the denoise and
+        // reads as marbling on the skin. 1.5 keeps the grounding and loses it.
+        scale: 1.5,
         samples: tier === TIER.HIGH ? 16 : 8,
         distanceFallOff: 1.0,
         screenSpaceRadius: false
       });
       // Wider denoise: with the G-buffer coming from the scene depth (below)
       // the raw AO is noisier, and 8 px of Poisson left a visible crawl.
-      gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 13, rings: 2, samples: 16 });
+      gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 16, rings: 2, samples: 16 });
       gtao.blendIntensity = 1.0;
       this._wireGtaoToSceneDepth(gtao, target.depthTexture);
       composer.addPass(gtao);
@@ -371,11 +419,19 @@ export class RenderPipeline {
     // --- bloom ------------------------------------------------------------
     // Threshold sits high: only genuine highlights (window, lamp, sparkles)
     // should bloom, otherwise pastel walls smear.
+    //
+    // The threshold is on *luminance*, which is why 0.86 was not holding the
+    // skin: the SSS term in makeSkin() was pushing the red channel past 2.0 on
+    // every backlit silhouette while green and blue stayed low, and a colour
+    // that saturated still clears a luminance gate at a fraction of its peak.
+    // The real fix is in the shader (the halo is now a rim), but the gate is
+    // raised too so that only things which are bright in *all three* channels —
+    // the window, the lamp shade, a specular hit — can ever fire it.
     const bloom = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      tier === TIER.LOW ? 0.24 : 0.34,   // strength
-      0.72,                              // radius
-      0.86                               // threshold
+      tier === TIER.LOW ? 0.24 : 0.30,   // strength
+      0.66,                              // radius
+      1.02                               // threshold
     );
     composer.addPass(bloom);
     this.bloom = bloom;
@@ -456,18 +512,31 @@ export class RenderPipeline {
     }
   }
 
-  /** Pull focus onto a world-space point (the baby, usually). */
+  /**
+   * Pull focus onto a world-space point (the baby, usually).
+   *
+   * `range` is in **metres** — that is what every `CameraRig` preset authors
+   * (0.05 for the face macro, 0.50 for the establishing wide) and it is the
+   * only reading that makes physical sense. It used to be handed to the shader
+   * as if it were already normalised device depth, so 0.50 meant 30 m on a
+   * 60 m far plane: larger than the room, which is why nothing in the wide shot
+   * was ever out of focus and the frame had no depth separation at all.
+   */
   focusOn(worldPos, range = 0.30) {
     const v = worldPos.clone().applyMatrix4(this.camera.matrixWorldInverse);
-    const depth = (-v.z - this.camera.near) / (this.camera.far - this.camera.near);
+    const span = Math.max(1e-4, this.camera.far - this.camera.near);
+    const depth = (-v.z - this.camera.near) / span;
     this.grade.uniforms.uFocus.value = THREE.MathUtils.clamp(depth, 0, 1);
-    this.grade.uniforms.uFocusRange.value = range;
+    this.grade.uniforms.uFocusRange.value = Math.max(1e-5, range / span);
   }
 
   setExposure(v) { this.grade.uniforms.uExposure.value = v; }
 
   /** Nudge the grade toward a mood (day / evening / night / bath). */
-  setGrade({ lift, gain, saturation, contrast, warmth, vignette, exposure }) {
+  setGrade({
+    lift, gain, saturation, contrast, warmth, vignette, exposure,
+    shadowTint, highTint, split
+  }) {
     const u = this.grade.uniforms;
     if (lift) u.uLift.value.fromArray(lift);
     if (gain) u.uGain.value.fromArray(gain);
@@ -476,6 +545,9 @@ export class RenderPipeline {
     if (warmth !== undefined) u.uWarmth.value = warmth;
     if (vignette !== undefined) u.uVignette.value = vignette;
     if (exposure !== undefined) u.uExposure.value = exposure;
+    if (shadowTint) u.uShadowTint.value.fromArray(shadowTint);
+    if (highTint) u.uHighTint.value.fromArray(highTint);
+    if (split !== undefined) u.uSplit.value = split;
   }
 
   resize() {

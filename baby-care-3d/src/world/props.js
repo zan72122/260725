@@ -128,7 +128,7 @@ export function instanced(geo, mat, items, name = '') {
  * Box with rounded edges on all three axes, built as a bevelled extrusion.
  * `r` is the fillet radius in metres — 0.004–0.02 for furniture.
  */
-export function roundedBox(w, h, d, r = 0.012, smooth = 2) {
+export function roundedBox(w, h, d, r = 0.012, smooth = 3) {
   r = Math.min(r, Math.min(w, h, d) * 0.48);
   const eps = 1e-5;
   const r0 = r - eps;
@@ -264,53 +264,100 @@ export function foldCloth(g, { folds = 4, amp = 0.03, drape = 0, gather = 0, swa
  * room's blobs cost one draw call, with per-instance opacity and softness
  * smuggled through `instanceColor` (r = opacity, g = softness).
  */
+/**
+ * The blob shader. `instanceColor` is a raw payload, not a colour:
+ *   r = opacity, g = softness (drives the falloff exponent), b = mode.
+ *     b >= 0.99            → filled blob (the default)
+ *     0.5 <= b < 0.99      → ring peaking at radius (b - 0.5) * 2
+ *     b <  0.5             → band: constant along u, falling off across v
+ * The ring mode is what puts a dark line exactly under a rug's rim; the band
+ * mode is what puts one along a skirting board. Both cost zero draw calls
+ * because they ride in the same InstancedMesh as every other contact shadow.
+ */
+export function shadowBlobMaterial(color = 0x3d2130) {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uGlobal: { value: 1.0 }
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      varying vec3 vC;
+      void main() {
+        vUv = uv;
+        vC = vec3(1.0);
+        #ifdef USE_INSTANCING_COLOR
+          vC = instanceColor;
+        #endif
+        vec4 p = vec4(position, 1.0);
+        #ifdef USE_INSTANCING
+          p = instanceMatrix * p;
+        #endif
+        gl_Position = projectionMatrix * modelViewMatrix * p;
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec2 vUv;
+      varying vec3 vC;
+      uniform vec3 uColor;
+      uniform float uGlobal;
+      void main() {
+        vec2 q = abs(vUv - 0.5) * 2.0;
+        float d = length(q);
+        float k = 1.0 + vC.g * 6.0;
+        float a;
+        if (vC.b > 0.99) {
+          a = pow(max(0.0, 1.0 - d), k);
+        } else if (vC.b > 0.5) {
+          float ring = (vC.b - 0.5) * 2.0;
+          float w = max(0.04, 1.0 - ring);
+          a = pow(max(0.0, 1.0 - abs(d - ring) / w), k);
+        } else {
+          float across = pow(max(0.0, 1.0 - q.y), k);
+          a = across * smoothstep(1.0, 0.82, q.x);
+        }
+        a *= vC.r * uGlobal;
+        if (a < 0.003) discard;
+        gl_FragColor = vec4(uColor, a);
+      }`
+  });
+}
+
 export class ShadowField {
   constructor() { this.items = []; }
 
-  add(x, z, rx, rz = rx, { opacity = 0.42, softness = 0.45, rot = 0, y = 0.004 } = {}) {
-    this.items.push({ x, y, z, rx, rz, opacity, softness, rot });
+  add(x, z, rx, rz = rx, { opacity = 0.42, softness = 0.45, rot = 0, y = 0.004, mode = 1 } = {}) {
+    this.items.push({ x, y, z, rx, rz, opacity, softness, rot, mode });
+    return this;
+  }
+
+  /**
+   * A real contact shadow is two lobes, not one: a tight almost-black core
+   * where the object actually touches, and a wide haze around it. One call.
+   */
+  pair(x, z, rx, rz = rx, { opacity = 0.5, softness = 0.7, rot = 0, y = 0.004, core = 0.42 } = {}) {
+    this.add(x, z, rx, rz, { opacity: opacity * 0.55, softness: softness * 0.55, rot, y });
+    this.add(x, z, rx * core, rz * core, { opacity: Math.min(0.92, opacity * 1.5), softness: softness + 1.4, rot, y: y + 0.0006 });
+    return this;
+  }
+
+  /** Soft dark line where a wall (or any long edge) meets the floor. */
+  band(x, z, halfLen, halfWidth, { opacity = 0.34, softness = 0.5, rot = 0, y = 0.003 } = {}) {
+    this.add(x, z, halfLen, halfWidth, { opacity, softness, rot, y, mode: 0 });
+    return this;
+  }
+
+  /** Dark line under the rim of a rug or a mat. `r` is 0..1 of the plane. */
+  ring(x, z, rx, rz = rx, r = 0.86, { opacity = 0.34, softness = 0.9, rot = 0, y = 0.003 } = {}) {
+    this.add(x, z, rx, rz, { opacity, softness, rot, y, mode: 0.5 + r * 0.5 });
     return this;
   }
 
   build() {
     const geo = new THREE.PlaneGeometry(1, 1);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        uColor: { value: new THREE.Color(0x3d2130) },
-        uGlobal: { value: 1.0 }
-      },
-      vertexShader: /* glsl */`
-        varying vec2 vUv;
-        varying vec3 vC;
-        void main() {
-          vUv = uv;
-          vC = vec3(1.0);
-          #ifdef USE_INSTANCING_COLOR
-            vC = instanceColor;
-          #endif
-          vec4 p = vec4(position, 1.0);
-          #ifdef USE_INSTANCING
-            p = instanceMatrix * p;
-          #endif
-          gl_Position = projectionMatrix * modelViewMatrix * p;
-        }`,
-      fragmentShader: /* glsl */`
-        varying vec2 vUv;
-        varying vec3 vC;
-        uniform vec3 uColor;
-        uniform float uGlobal;
-        void main() {
-          float d = length(vUv - 0.5) * 2.0;
-          // vC.g drives the exponent: tight dark cores under legs, wide haze
-          // under soft goods.
-          float a = pow(max(0.0, 1.0 - d), 1.0 + vC.g * 6.0) * vC.r * uGlobal;
-          if (a < 0.003) discard;
-          gl_FragColor = vec4(uColor, a);
-        }`
-    });
+    const mat = shadowBlobMaterial();
     const im = new THREE.InstancedMesh(geo, mat, Math.max(1, this.items.length));
     im.frustumCulled = false;
     im.renderOrder = -1;
@@ -321,7 +368,7 @@ export class ShadowField {
       _v.set(it.x, it.y, it.z);
       _s.set(it.rx * 2, 1, it.rz * 2);
       im.setMatrixAt(i, _m4.compose(_v, _q, _s));
-      _c.setRGB(it.opacity, it.softness, 1);   // raw linear payload, not a colour
+      _c.setRGB(it.opacity, it.softness, it.mode === undefined ? 1 : it.mode);
       im.setColorAt(i, _c);
     });
     im.instanceMatrix.needsUpdate = true;
@@ -381,6 +428,16 @@ export function palette() {
   P.plush = MAT.makeCloth({ color: 0xffffff, weave: 'knit', threads: 96, repeat: 6, seed: 17, normalScale: 1.2 });
   P.cloth = MAT.makeCloth({ color: 0xffffff, weave: 'plain', threads: 120, repeat: 5, seed: 7 });
   P.carpet = MAT.makeCarpet({ color: 0xffffff, repeat: 5, seed: 19, density: 170 });
+  // Painted hardwood for the block family. Deliberately the *same* generator
+  // call `fx/toys.js` makes for the tower blocks, so a block on the floor and
+  // a block in the tower are visibly the same object.
+  P.blockWood = unshare(MAT.makeWood({
+    light: 0xffffff, dark: 0xffffff, seed: 5, ringScale: 34, clearcoat: 0.5, satin: 0.36, repeat: 1
+  }), 1);
+  P.blockWood.vertexColors = true;
+  P.blockWood.color.set(0xffffff);
+  P.blockWood.normalScale?.set(0.45, 0.45);
+
   P.leaf = unshare(MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 37, matte: 0.4, clearcoat: 0.18 }), 2.6);
   P.leaf.side = THREE.DoubleSide;
   for (const k of ['plastic', 'plush', 'cloth', 'paper', 'carpet', 'leaf']) P[k].vertexColors = true;
@@ -661,9 +718,9 @@ export function buildDresser(M) {
   const W = 1.06, D = 0.52, H = 0.86;
   const carcass = [];
 
-  carcass.push(rbox(W - 0.10, 0.085, D - 0.08, [0, 0.043, 0], [0, 0, 0], 0.012, 1.4));
+  carcass.push(rbox(W - 0.10, 0.085, D - 0.08, [0, 0.043, 0], [0, 0, 0], 0.016, 1.4));
   for (const sx of [-1, 1]) {
-    carcass.push(rbox(0.028, 0.70, D - 0.03, [sx * (W / 2 - 0.014), 0.44, -0.005], [0, 0, 0], 0.008, 1.4));
+    carcass.push(rbox(0.028, 0.70, D - 0.03, [sx * (W / 2 - 0.014), 0.44, -0.005], [0, 0, 0], 0.0126, 1.4));
   }
   carcass.push(rbox(W - 0.05, 0.70, 0.018, [0, 0.44, -D / 2 + 0.02], [0, 0, 0], 0.006, 1.4));
   // drawer dividers
@@ -671,7 +728,7 @@ export function buildDresser(M) {
     carcass.push(rbox(W - 0.06, 0.016, D - 0.06, [0, y, 0], [0, 0, 0], 0.005, 1.4));
   }
   // overhanging top with a generous eased edge
-  carcass.push(rbox(W + 0.045, 0.042, D + 0.03, [0, H - 0.02, 0], [0, 0, 0], 0.016, 1.2));
+  carcass.push(rbox(W + 0.045, 0.042, D + 0.03, [0, H - 0.02, 0], [0, 0, 0], 0.0198, 1.2));
   g.add(mesh(mergeAll(carcass), M.oak, 'dresserCarcass'));
 
   /* --- drawer fronts (the middle one not pushed home) ------------------ */
@@ -685,7 +742,7 @@ export function buildDresser(M) {
   const drawerY = [0.19, 0.44, 0.665];
   drawerY.forEach((y, i) => {
     const z = D / 2 - 0.006 + proud[i];
-    fronts.push(rbox(W - 0.075, i === 2 ? 0.185 : 0.205, 0.022, [0, y, z], [0, 0, 0], 0.009, 1.4));
+    fronts.push(rbox(W - 0.075, i === 2 ? 0.185 : 0.205, 0.022, [0, y, z], [0, 0, 0], 0.0104, 1.4));
     for (const sx of [-1, 1]) knobs.push({ pos: [sx * 0.235, y, z + 0.012] });
   });
   g.add(mesh(mergeAll(fronts), M.oak, 'dresserDrawers'));
@@ -694,8 +751,10 @@ export function buildDresser(M) {
 
   /* --- changing mat on top -------------------------------------------- */
   const mat = new THREE.Group();
-  mat.position.set(0.02, H + 0.02, 0);
-  const pad = rbox(0.80, 0.055, 0.46, [0, 0, 0], [0, 0, 0], 0.022, 1.6);
+  // the mat is dropped on, not fitted: 2.4° off square and 15 mm off centre
+  mat.position.set(0.006, H + 0.02, 0.014);
+  mat.rotation.y = 0.042;
+  const pad = rbox(0.80, 0.055, 0.46, [0, 0, 0], [0, 0, 0], 0.0262, 1.6);
   mat.add(mesh(pad, M.quilt, 'changingMat'));
   const bolster = [];
   for (const sx of [-1, 1]) {
@@ -706,6 +765,15 @@ export function buildDresser(M) {
         new THREE.Vector3(sx * 0.375, 0.02, 0.20)
       ]), 14, 0.026, 8, false), 0xf7dfe2));
   }
+  // a towel rolled and left across the corner of the mat, well off-axis
+  const roll = lathe([
+    [0, 0], [0.052, 0.004], [0.055, 0.02], [0.054, 0.20], [0.055, 0.216],
+    [0.050, 0.228], [0, 0.232]
+  ], 18);
+  roll.rotateZ(Math.PI / 2);
+  bolster.push(tint(xf(roll, [0.16, 0.052, -0.02], [0.06, 0.46, 0.035]), 0xfdeee6));
+  // the loose end of the roll, flopped open
+  bolster.push(tint(xf(roundedBox(0.13, 0.014, 0.10, 0.006, 3), [0.30, 0.034, 0.05], [0.05, 0.46, -0.10]), 0xfdeee6));
   mat.add(mesh(mergeAll(bolster, { colors: true }), M.plush, 'changingBolsters'));
   g.add(mat);
 
@@ -721,8 +789,8 @@ export function buildShelf(M) {
   g.name = 'shelf';
   const W = 0.94, D = 0.25;
   const carcass = [];
-  for (const sx of [-1, 1]) carcass.push(rbox(0.022, 0.66, D, [sx * W / 2, 0.30, 0], [0, 0, 0], 0.007, 1.6));
-  for (const y of [0, 0.33, 0.62]) carcass.push(rbox(W + 0.02, 0.024, D, [0, y, 0], [0, 0, 0], 0.008, 1.6));
+  for (const sx of [-1, 1]) carcass.push(rbox(0.022, 0.66, D, [sx * W / 2, 0.30, 0], [0, 0, 0], 0.0102, 1.6));
+  for (const y of [0, 0.33, 0.62]) carcass.push(rbox(W + 0.02, 0.024, D, [0, y, 0], [0, 0, 0], 0.0112, 1.6));
   carcass.push(rbox(W, 0.05, 0.014, [0, 0.14, -D / 2 + 0.007], [0, 0, 0], 0.004, 1.6));
   g.add(mesh(mergeAll(carcass), M.paintedWhite, 'shelfCarcass'));
 
@@ -754,31 +822,65 @@ export function buildBooks(M, { n = 8, y = 0, x0 = 0, z = 0, lean = -1, seed = 1
   const R = rng(seed);
   const cols = [0xe4746a, 0xf0b45a, 0x6fa8b8, 0xd88fae, 0x8fb87a, 0xefe0c8, 0x9a86c4];
   const covers = [], pages = [];
+
+  /* Nobody's shelf is a row of identical spines. Three height classes (board
+     book, picture book, slim), a gap where one has been taken out, a small
+     group leaning into that gap, one pulled forward off the shelf line and one
+     laid flat across the top of the group. */
+  const CLASS = [0.62, 1.0, 0.86];
+  const leanA = lean >= 0 ? lean : Math.max(1, (n * 0.55) | 0);
+  const leanSet = new Set([leanA, leanA + 1, 1 + ((leanA + 3) % Math.max(1, n - 2))]);
+  const gapAt = Math.min(n - 1, leanA + 2);
+  const proudAt = Math.max(0, leanA - 3);
+
   let x = x0;
+  let flatSpan = null;
   for (let i = 0; i < n; i++) {
-    const t = 0.020 + R() * 0.016;
-    const hh = h * (0.82 + R() * 0.3);
-    const d = 0.13 + R() * 0.03;
-    const leaning = i === lean;
-    const tilt = leaning ? 0.30 : (R() - 0.5) * 0.02;
-    const px = x + t / 2 + (leaning ? hh * 0.14 : 0);
+    const t = 0.017 + R() * 0.021;
+    const hh = h * CLASS[(i * 5 + seed) % CLASS.length] * (0.93 + R() * 0.16);
+    const d = 0.115 + R() * 0.05;
+    const leaning = leanSet.has(i);
+    // the further into the leaning group, the further it has slumped
+    const tilt = leaning ? 0.22 + R() * 0.16 : (R() - 0.5) * 0.035;
+    const proud = i === proudAt ? 0.030 + R() * 0.012 : 0;
+    const px = x + t / 2 + (leaning ? hh * Math.sin(tilt) * 0.5 : 0);
+    const cy = y + hh / 2 * Math.cos(tilt);
     covers.push({
-      pos: [px, y + hh / 2 * Math.cos(tilt), z], rot: [0, 0, -tilt],
+      pos: [px, cy, z + proud], rot: [0, (R() - 0.5) * 0.05, -tilt],
       scale: [t, hh, d], color: cols[(i * 3 + seed) % cols.length]
     });
     pages.push({
-      pos: [px, y + hh / 2 * Math.cos(tilt), z + 0.004], rot: [0, 0, -tilt],
+      pos: [px, cy, z + proud + 0.004], rot: [0, (R() - 0.5) * 0.05, -tilt],
       scale: [t * 0.82, hh * 0.93, d * 0.94], color: 0xf6ecdc
     });
-    x += t + 0.002 + (leaning ? hh * 0.24 : 0);
+    if (leaning) flatSpan = { x: px, y: y + hh * Math.cos(tilt), d, h: hh };
+    x += t + 0.0018 + (leaning ? hh * Math.sin(tilt) * 0.9 : 0);
+    if (i === gapAt) x += 0.026 + R() * 0.014;          // the missing book
   }
-  const unit = roundedBox(1, 1, 1, 0.06, 1);
+
+  // one laid flat across the top of the leaning group — the one being read
+  if (flatSpan && n > 4) {
+    const ft = 0.020, fh = h * 0.66, fd = 0.13;
+    covers.push({
+      pos: [flatSpan.x + fh * 0.18, flatSpan.y + ft * 0.62, z + 0.012],
+      rot: [0, 0.09, Math.PI / 2 + 0.03],
+      scale: [ft, fh, fd], color: cols[(seed + 2) % cols.length]
+    });
+    pages.push({
+      pos: [flatSpan.x + fh * 0.18, flatSpan.y + ft * 0.62, z + 0.016],
+      rot: [0, 0.09, Math.PI / 2 + 0.03],
+      scale: [ft * 0.8, fh * 0.94, fd * 0.94], color: 0xf6ecdc
+    });
+  }
+
+  const unit = roundedBox(1, 1, 1, 0.055, 2);
   boxUV(unit, 1);
-  const unitPages = roundedBox(1, 1, 1, 0.02, 1);
+  const unitPages = roundedBox(1, 1, 1, 0.02, 2);
   boxUV(unitPages, 1);
   return {
     covers: instanced(unit, M.paper, covers, 'books'),
-    pages: instanced(unitPages, M.paper, pages, 'bookPages')
+    pages: instanced(unitPages, M.paper, pages, 'bookPages'),
+    width: x - x0
   };
 }
 
@@ -1000,38 +1102,106 @@ export function buildWardrobe(M) {
  * in the middle and — the good bit — one edge can lift off the floor where
  * someone has caught it with a foot.
  */
-export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
+export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
   const base = new THREE.Color(0xe9b9c4);
   const band = new THREE.Color(0xfbf1e4);
   const edge = new THREE.Color(0xcf8d9f);
+  const bind = new THREE.Color(0xb87286);          // the woven binding tape
+  const under = new THREE.Color(0x7d4a58);         // hessian backing, in shade
   const c = new THREE.Color();
+
   const liftAngle = 2.35;
+  const PILE = 0.0165;
+
+  // The pattern is *not* concentric with the outline. A hand-tufted rug is
+  // drawn on a stretched backing, so the medallion sits proud of centre and
+  // the outline itself wanders by a couple of centimetres.
+  const OX = 0.085, OZ = -0.062;
+  const outline = (a) => radius * (1 + 0.020 * Math.sin(a * 3 + 0.7)
+                                     + 0.012 * Math.sin(a * 5 - 2.1)
+                                     - 0.008 * Math.cos(a * 2 + 1.4));
+
+  /* Traffic: the line people actually walk, from the door corner to the cot
+     side, is trodden flat. Everything under the play table keeps its pile. */
+  const traffic = (x, z) => {
+    const t = (x * 0.82 + z * -0.57);                  // distance along the path
+    const perp = (x * 0.57 + z * 0.82) - 0.16;         // distance across it
+    return Math.exp(-(perp * perp) / 0.085) * (0.55 + 0.45 * Math.cos(Math.min(1, Math.abs(t) / 1.4) * Math.PI));
+  };
+
+  const put = (x, z, y, u, v, colr) => {
+    pos.push(x, y, z);
+    uv.push(u, v);
+    col.push(colr.r, colr.g, colr.b);
+  };
+
+  /* --- the pile surface ----------------------------------------------- */
   for (let i = 0; i <= rings; i++) {
     const rr = i / rings;
-    const r = rr * radius;
     for (let j = 0; j <= segs; j++) {
       const a = (j / segs) * Math.PI * 2;
+      const R = outline(a);
+      const r = rr * R;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+
       let d = a - liftAngle;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      // pile thickness + a dished centre + the lifted corner
-      let y = 0.013 - rr * rr * 0.004;
+
+      // pile thickness, dished centre, trodden path, tuft breakup, and the
+      // one corner someone has caught with a foot
+      let y = PILE - rr * rr * 0.004;
+      y -= traffic(x, z) * 0.0072;
       y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
-      y += Math.sin(a * 3 + rr * 6) * 0.0015;
-      pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
-      uv.push((Math.cos(a) * rr * 0.5 + 0.5), (Math.sin(a) * rr * 0.5 + 0.5));
-      // concentric colour bands, hand-drawn wobble on the boundaries
-      const wob = Math.sin(a * 5) * 0.015;
-      if (rr > 0.93 + wob) c.copy(edge);
-      else if (rr > 0.62 + wob && rr < 0.74 + wob) c.copy(band);
-      else if (rr < 0.24 + wob * 0.35) c.copy(band);   // medallion stays round
+      y += Math.sin(a * 3 + rr * 6) * 0.0016 + Math.sin(a * 11 - rr * 17) * 0.0008;
+      // a soft ruck: the rug has been shoved and never quite pulled straight
+      y += Math.exp(-((rr - 0.55) ** 2) / 0.012) * Math.exp(-((a - 4.1) ** 2) / 0.35) * 0.010;
+
+      // pattern distance is measured from the *offset* centre
+      const pd = Math.hypot(x - OX, z - OZ) / radius;
+      const wob = Math.sin(a * 5 + 1.1) * 0.018 + Math.sin(a * 9) * 0.008;
+      if (rr > 0.955) c.copy(edge).lerp(bind, 0.35);
+      else if (pd > 0.90 + wob) c.copy(edge);
+      else if (pd > 0.60 + wob && pd < 0.725 + wob) c.copy(band);
+      else if (pd < 0.235 + wob * 0.35) c.copy(band);
       else c.copy(base);
-      col.push(c.r, c.g, c.b);
+      // wear: the trodden line and the outer third are faded and greyed
+      const worn = Math.min(1, traffic(x, z) * 0.9 + Math.max(0, rr - 0.72) * 1.1);
+      c.lerp(new THREE.Color(0xe8dcd4), worn * 0.28);
+      c.multiplyScalar(1 - worn * 0.05);
+
+      put(x, z, y, Math.cos(a) * rr * 0.5 + 0.5, Math.sin(a) * rr * 0.5 + 0.5, c);
     }
   }
+
+  /* --- bound edge: a rolled hem with real thickness -------------------- */
+  const rimRows = [
+    { rs: 1.012, ys: 0.86, tint: bind, shade: 1.0 },     // the tape rolls out
+    { rs: 1.016, ys: 0.42, tint: bind, shade: 0.82 },    // and turns down
+    { rs: 1.004, ys: 0.10, tint: under, shade: 0.7 },
+    { rs: 0.972, ys: 0.005, tint: under, shade: 0.5 }    // tucked under, on the floor
+  ];
+  for (const row of rimRows) {
+    for (let j = 0; j <= segs; j++) {
+      const a = (j / segs) * Math.PI * 2;
+      const R = outline(a);
+      const r = R * row.rs;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      let d = a - liftAngle;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      const lift = 0.055 * Math.exp(-(d * d) / 0.20);
+      const y = (PILE - 0.004) * row.ys + lift * (0.6 + 0.4 * row.ys)
+              + Math.sin(a * 7 + 0.4) * 0.0009;
+      c.copy(row.tint).multiplyScalar(row.shade);
+      put(x, z, y, Math.cos(a) * 0.52 + 0.5, Math.sin(a) * 0.52 + 0.5, c);
+    }
+  }
+
   const row = segs + 1;
-  for (let i = 0; i < rings; i++) {
+  const totalRows = rings + 1 + rimRows.length;
+  for (let i = 0; i < totalRows - 1; i++) {
     for (let j = 0; j < segs; j++) {
       // counter-clockwise seen from +Y, or the whole rug back-face culls away
       const a = i * row + j, b = a + 1, cIdx = a + row, dIdx = cIdx + 1;
@@ -1045,7 +1215,8 @@ export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
   g.setIndex(idx);
   g.computeVertexNormals();
   const m = mesh(g, M.carpet, 'rug');
-  m.castShadow = false;         // a 13 mm rug casting a shadow map just aliases
+  m.castShadow = false;         // a 16 mm rug casting a shadow map just aliases
+  m.userData.radius = radius;
   return m;
 }
 
@@ -1140,36 +1311,89 @@ export function buildBasket(M) {
   g.name = 'basket';
   const rBot = 0.20, rTop = 0.255, H = 0.40;
   const staves = [];
-  const n = 26;
+  const n = 30;
+  const R = rng(29);
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     const lean = Math.atan2(rTop - rBot, H);
     staves.push({
-      pos: [Math.cos(a) * (rBot + rTop) / 2, H / 2, Math.sin(a) * (rBot + rTop) / 2],
-      rot: [Math.sin(a) * lean, -a, -Math.cos(a) * lean],
+      // hand-woven: each stave sits a hair proud or shy of its neighbours
+      pos: [Math.cos(a) * (rBot + rTop) / 2, H / 2 + (R() - 0.5) * 0.004, Math.sin(a) * (rBot + rTop) / 2],
+      rot: [Math.sin(a) * lean, -a + (R() - 0.5) * 0.035, -Math.cos(a) * lean],
       color: i % 2 ? 0xd9bd93 : 0xcdae83
     });
   }
-  const stave = roundedBox(0.016, H + 0.02, 0.010, 0.004, 1);
+  // Thicker section: a 10 mm rod reads as an aliased wire at this distance,
+  // and carries no specular at all. 21 × 14 mm catches a real highlight.
+  const stave = roundedBox(0.021, H + 0.02, 0.0145, 0.0062, 3);
   boxUV(stave, 3);
   g.add(instanced(stave, M.plastic, staves, 'basketStaves'));
 
   const hoops = [];
-  for (const [y, rr] of [[0.03, rBot + 0.005], [0.15, 0.222], [0.28, 0.242], [H - 0.005, rTop]]) {
-    const t = new THREE.TorusGeometry(rr, 0.011, 6, 34);
+  for (const [y, rr, tr] of [
+    [0.03, rBot + 0.005, 0.0135], [0.15, 0.222, 0.0128],
+    [0.28, 0.242, 0.0132], [H - 0.012, rTop - 0.002, 0.0138]
+  ]) {
+    const t = new THREE.TorusGeometry(rr, tr, 9, 56);
     t.rotateX(Math.PI / 2);
     hoops.push(tint(xf(t, [0, y, 0]), 0xe3cba4));
   }
-  hoops.push(tint(lathe([[0, 0], [rBot, 0], [rBot, 0.012], [0, 0.012]], 24), 0xd9bd93));
+  // The rim is a rolled lip, not a cut edge: a fat torus sitting on top of a
+  // short collar, so the silhouette curves over instead of stopping dead.
+  const lip = new THREE.TorusGeometry(rTop, 0.0185, 12, 72);
+  lip.rotateX(Math.PI / 2);
+  hoops.push(tint(xf(lip, [0, H + 0.004, 0]), 0xe9d3ae));
+  hoops.push(tint(lathe([
+    [rTop - 0.006, H - 0.03], [rTop + 0.001, H - 0.012], [rTop + 0.002, H + 0.004]
+  ], 56), 0xdcc39c));
+  hoops.push(tint(lathe([[0, 0], [rBot, 0], [rBot, 0.012], [0, 0.012]], 32), 0xd9bd93));
   g.add(mesh(mergeAll(hoops, { colors: true }), M.plastic, 'basketHoops'));
 
-  // liner folded over the rim, and one sock that didn't make it in
-  const liner = tint(lathe([
-    [rTop - 0.02, H - 0.02], [rTop + 0.012, H + 0.005], [rTop - 0.005, H - 0.055],
+  /* --- contents: a wash that never got put away ------------------------ */
+  const soft = [];
+  // liner folded over the rim
+  soft.push(tint(lathe([
+    [rTop - 0.02, H - 0.02], [rTop + 0.020, H + 0.012], [rTop + 0.004, H - 0.055],
     [rTop - 0.06, H - 0.10], [rTop - 0.10, H - 0.14]
-  ], 26), 0xf3e4e6);
-  const sock = tint(xf(roundedBox(0.055, 0.13, 0.03, 0.014, 2), [rTop * 0.72, H + 0.02, rTop * 0.5], [0.5, 0.6, 0.25]), 0xd8e6ef);
-  g.add(mesh(mergeAll([liner, sock], { colors: true }), M.cloth, 'basketLiner'));
+  ], 30), 0xf3e4e6));
+  // the pile of laundry itself — squashed lumps filling the top of the basket
+  const lump = (x, y, z, sx, sy, sz, ry, col) =>
+    soft.push(tint(xf(new THREE.SphereGeometry(0.10, 12, 9), [x, y, z], [0, ry, 0], [sx, sy, sz]), col));
+  lump(0.00, H - 0.09, 0.00, 1.85, 0.62, 1.70, 0.0, 0xf6eef0);
+  lump(-0.07, H - 0.035, 0.05, 1.30, 0.60, 1.15, 0.7, 0xdfe9f2);
+  lump(0.09, H - 0.028, -0.04, 1.15, 0.55, 1.05, -0.4, 0xf7dfe4);
+  lump(0.02, H + 0.012, 0.07, 0.86, 0.48, 0.78, 0.3, 0xfaf3e6);
+  // a towel spilling over the near rim, and two socks on the way out
+  const spill = new THREE.PlaneGeometry(0.20, 0.34, 8, 16);
+  {
+    const p = spill.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const u = p.getX(i), t = (p.getY(i) + 0.17) / 0.34;    // 0 at the loose end
+      const drop = Math.max(0, 0.62 - t) / 0.62;
+      p.setXYZ(i,
+        u * (1 - drop * 0.18) + Math.sin(t * 9) * 0.006,
+        H + 0.02 - drop * drop * 0.30,
+        rTop - 0.02 + drop * 0.075 + Math.cos(u * 16) * 0.006);
+    }
+    spill.computeVertexNormals();
+  }
+  // cloth needs two sides, and M.cloth is front-facing: give the towel a
+  // reversed underside 4 mm behind, which also reads as real thickness
+  const spillBack = spill.clone();
+  spillBack.translate(0, -0.005, 0.005);
+  {
+    const ix = spillBack.getIndex().array;
+    for (let i = 0; i < ix.length; i += 3) { const t = ix[i]; ix[i] = ix[i + 2]; ix[i + 2] = t; }
+    spillBack.getIndex().needsUpdate = true;
+    spillBack.computeVertexNormals();
+  }
+  soft.push(tint(xf(spill, [0.10, 0, 0.02], [0, -0.55, 0]), 0xe9dff0));
+  soft.push(tint(xf(spillBack, [0.10, 0, 0.02], [0, -0.55, 0]), 0xd6c8de));
+  soft.push(tint(xf(roundedBox(0.055, 0.13, 0.032, 0.015, 3), [rTop * 0.72, H + 0.02, rTop * 0.5], [0.5, 0.6, 0.25]), 0xd8e6ef));
+  soft.push(tint(xf(roundedBox(0.05, 0.115, 0.030, 0.014, 3), [-rTop * 0.40, H + 0.055, rTop * 0.62], [1.15, -0.4, 0.5]), 0xf6d7c9));
+  const liner = mesh(mergeAll(soft, { colors: true }), M.cloth, 'basketLiner');
+  liner.castShadow = false;
+  g.add(liner);
   return g;
 }
 
@@ -1304,8 +1528,64 @@ export function buildPictures(M, list) {
   const artMesh = mesh(mergeAll(arts), artMat, 'pictureArt');
   artMesh.castShadow = false;
   g.add(artMesh);
+
+  /* --- glazing -------------------------------------------------------------
+   * A framed picture without glass is the tell that it was modelled and not
+   * observed. One additive pane per group carries a soft angled reflection of
+   * the window across every frame on the wall — one draw call for the lot. */
+  const panes = [];
+  for (const p of list) {
+    const t = p.tilt || 0;
+    const pane = new THREE.PlaneGeometry(p.w * 0.995, p.h * 0.995);
+    panes.push(xf(pane, [p.x, p.y, 0.0092], [0, 0, t]));
+  }
+  const glassMesh = new THREE.Mesh(mergeAll(panes), glazingMaterial());
+  glassMesh.name = 'pictureGlass';
+  glassMesh.castShadow = false;
+  glassMesh.receiveShadow = false;
+  glassMesh.renderOrder = 2;
+  g.add(glassMesh);
+
   g.userData.pick = [artMesh];
   return g;
+}
+
+let _glazingMat = null;
+/** Shared additive "sheet of glass" pane — an angled window reflection. */
+export function glazingMaterial() {
+  if (_glazingMat) return _glazingMat;
+  const tex = TEX.painted('glazing', 256, (g, S) => {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, S, S);
+    // two soft parallel bands raking down-right, plus a wide ambient sheen
+    const wide = g.createLinearGradient(0, 0, S, S);
+    wide.addColorStop(0, 'rgba(255,255,255,0.30)');
+    wide.addColorStop(0.55, 'rgba(255,255,255,0.05)');
+    wide.addColorStop(1, 'rgba(255,255,255,0.14)');
+    g.fillStyle = wide;
+    g.fillRect(0, 0, S, S);
+    g.save();
+    g.translate(S * 0.5, S * 0.5);
+    g.rotate(-0.62);
+    for (const [ox, w, a] of [[-S * 0.22, S * 0.16, 0.68], [S * 0.06, S * 0.07, 0.42]]) {
+      const gr = g.createLinearGradient(ox - w, 0, ox + w, 0);
+      gr.addColorStop(0, 'rgba(255,255,255,0)');
+      gr.addColorStop(0.5, `rgba(255,255,255,${a})`);
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr;
+      g.fillRect(ox - w, -S, w * 2, S * 2);
+    }
+    g.restore();
+  });
+  _glazingMat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    opacity: 0.20,
+    side: THREE.FrontSide
+  });
+  return _glazingMat;
 }
 
 /* --------------------------------------------------------------- clock --- */
@@ -1473,13 +1753,13 @@ export function buildHighchair(M) {
     }
   }
   // stretchers + footrest
-  for (const sz of [-1, 1]) frame.push(rbox(0.30, 0.024, 0.022, [0, 0.20, sz * 0.155], [0, 0, 0], 0.008, 2));
+  for (const sz of [-1, 1]) frame.push(rbox(0.30, 0.024, 0.022, [0, 0.20, sz * 0.155], [0, 0, 0], 0.0104, 2));
   frame.push(rbox(0.28, 0.020, 0.13, [0, 0.245, 0.14], [0, 0, 0], 0.006, 2));
-  frame.push(rbox(0.34, 0.028, 0.31, [0, legH, 0], [0, 0, 0], 0.01, 2));
+  frame.push(rbox(0.34, 0.028, 0.31, [0, legH, 0], [0, 0, 0], 0.0132, 2));
   // back rest, tilted, with two slats
-  frame.push(rbox(0.32, 0.30, 0.026, [0, legH + 0.16, -0.15], [-0.11, 0, 0], 0.012, 2));
+  frame.push(rbox(0.32, 0.30, 0.026, [0, legH + 0.16, -0.15], [-0.11, 0, 0], 0.0124, 2));
   for (const sx of [-1, 1]) {
-    frame.push(rbox(0.030, 0.32, 0.030, [sx * 0.15, legH + 0.16, -0.145], [-0.11, 0, 0], 0.01, 2));
+    frame.push(rbox(0.030, 0.32, 0.030, [sx * 0.15, legH + 0.16, -0.145], [-0.11, 0, 0], 0.0143, 2));
   }
   g.add(mesh(mergeAll(frame), M.beech, 'highchairFrame'));
 
@@ -1514,8 +1794,10 @@ export function buildPlayTable(M) {
   g.name = 'playTable';
   const H = 0.40, R = 0.30;
   const top = lathe([
-    [0, 0], [R - 0.02, 0], [R, 0.008], [R, 0.028], [R - 0.02, 0.036], [0, 0.036]
-  ], 32);
+    [0, 0], [R - 0.028, 0], [R - 0.008, 0.0026], [R - 0.0015, 0.0092],
+    [R, 0.017], [R - 0.0015, 0.0262], [R - 0.008, 0.0328],
+    [R - 0.028, 0.036], [0, 0.036]
+  ], 40);
   const parts = [xf(top, [0, H, 0])];
   const legProfile = [
     [0.021, 0], [0.024, 0.02], [0.018, 0.05], [0.022, 0.09],
@@ -1530,7 +1812,7 @@ export function buildPlayTable(M) {
 
   const stools = [];
   for (const [sx, sz, ry] of [[-0.46, 0.12, 0.4], [0.42, -0.20, -0.9]]) {
-    const seat = lathe([[0, 0], [0.115, 0], [0.12, 0.006], [0.115, 0.026], [0, 0.03]], 22);
+    const seat = lathe([[0, 0], [0.108, 0], [0.1174, 0.0028], [0.12, 0.0092], [0.1188, 0.0206], [0.1128, 0.0272], [0.102, 0.030], [0, 0.032]], 28);
     stools.push(xf(seat, [sx, 0.235, sz]));
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2 + ry;
@@ -1561,60 +1843,329 @@ export function buildDoorLeaf(M, { w = 0.86, h = 2.03 } = {}) {
   return g;
 }
 
-/* ------------------------------------------------------------- clutter --- */
+/* -------------------------------------------------------- block family --- */
 
 /**
- * The toys that end up on the floor. Two instanced meshes plus one shared soft
- * blob, so the whole mess costs three draw calls however many toys there are.
- * Toys pop in with a squash-and-settle rather than appearing, because things
- * that appear instantly read as bugs to a four-year-old.
+ * One block family for the whole game. These are the same object as the tower
+ * blocks in `fx/toys.js` — same painted-hardwood palette, same 15%-of-size
+ * bevel, same relief motif standing proud of the side faces, same maker's mark
+ * debossed underneath, same paint rubbed back along the edges. The difference
+ * is only that these are instanced, because the floor carries a dozen of them
+ * and the tower carries eight.
+ *
+ * Two geometries come back: `body` (per-instance paint colour, wear baked into
+ * the vertex colour as a multiplier) and `marks` (the cream motifs and the
+ * maker's mark, drawn with a white instance colour). Two draw calls, any
+ * number of blocks, per-instance colour and — because the four side faces
+ * carry four *different* motifs — per-instance symbol as the resting rotation
+ * changes which one faces the room.
+ */
+export const BLOCK_PAINTS = [
+  0xe8657f, 0xf0a63c, 0xf6cf4a, 0x86c96b, 0x63b8d8, 0xa88bd8, 0xef8f5f, 0x7fc7b0
+];
+
+function motifShape(kind, r) {
+  const s = new THREE.Shape();
+  if (kind === 'star') {
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+      const rr = i % 2 ? r * 0.46 : r;
+      const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+      i === 0 ? s.moveTo(x, y) : s.lineTo(x, y);
+    }
+    s.closePath();
+  } else if (kind === 'heart') {
+    s.moveTo(0, -r * 0.92);
+    s.bezierCurveTo(r * 1.15, -r * 0.08, r * 0.62, r * 0.98, 0, r * 0.44);
+    s.bezierCurveTo(-r * 0.62, r * 0.98, -r * 1.15, -r * 0.08, 0, -r * 0.92);
+  } else if (kind === 'circle') {
+    s.absarc(0, 0, r * 0.86, 0, Math.PI * 2, false);
+  } else if (kind === 'triangle') {
+    s.moveTo(0, r);
+    s.lineTo(r * 0.92, -r * 0.62);
+    s.lineTo(-r * 0.92, -r * 0.62);
+    s.closePath();
+  } else {                                     // flower
+    for (let i = 0; i < 5; i++) {
+      const a0 = -Math.PI / 2 + (i / 5) * Math.PI * 2;
+      const a1 = a0 + (Math.PI * 2) / 5;
+      const m = (a0 + a1) / 2;
+      if (i === 0) s.moveTo(Math.cos(a0) * r * 0.34, Math.sin(a0) * r * 0.34);
+      s.quadraticCurveTo(Math.cos(m) * r * 1.5, Math.sin(m) * r * 1.5,
+        Math.cos(a1) * r * 0.34, Math.sin(a1) * r * 0.34);
+    }
+    s.closePath();
+  }
+  return s;
+}
+
+/** Per-vertex edge proximity of a rounded box: 0 on the flats, 1 at a corner. */
+function bevelWear(geo, half, r) {
+  const p = geo.attributes.position;
+  const out = new Float32Array(p.count);
+  const inner = Math.max(1e-4, half - r);
+  for (let i = 0; i < p.count; i++) {
+    const tx = Math.min(1, Math.max(0, (Math.abs(p.getX(i)) - inner) / r));
+    const ty = Math.min(1, Math.max(0, (Math.abs(p.getY(i)) - inner) / r));
+    const tz = Math.min(1, Math.max(0, (Math.abs(p.getZ(i)) - inner) / r));
+    out[i] = Math.min(1, tx * ty + ty * tz + tz * tx);
+  }
+  return out;
+}
+
+/**
+ * Body + marks for one unit block (1 m cube — scale it per instance).
+ * `seed` picks which four motifs land on the four side faces.
+ */
+export function blockGeometry({ bevel = 0.15, seed = 3 } = {}) {
+  const kinds = ['star', 'heart', 'circle', 'triangle', 'flower'];
+  const body = roundedBox(1, 1, 1, bevel, 3);
+  boxUV(body, 1);
+
+  // paint rubbed back along every bevel: a vertex-colour multiplier, so it
+  // survives whatever paint colour the instance carries
+  const wear = bevelWear(body, 0.5, bevel);
+  const n = body.attributes.position.count;
+  const cols = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const w = Math.pow(wear[i], 1.5);
+    const f = 1 + w * 0.46;                     // vColor is a multiplier, >1 lifts
+    cols[i * 3] = f; cols[i * 3 + 1] = f * (1 - w * 0.05); cols[i * 3 + 2] = f * (1 - w * 0.12);
+  }
+  body.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+
+  const relief = 0.045;
+  const mr = 0.27;
+  const marks = [];
+  const faces = [
+    [0, 0, 0.5 - relief * 0.5, 0],
+    [0, 0, -(0.5 - relief * 0.5), Math.PI],
+    [0.5 - relief * 0.5, 0, 0, Math.PI / 2],
+    [-(0.5 - relief * 0.5), 0, 0, -Math.PI / 2]
+  ];
+  faces.forEach((f, k) => {
+    const g = new THREE.ExtrudeGeometry(motifShape(kinds[(seed + k) % kinds.length], mr), {
+      depth: relief, bevelEnabled: true, bevelSegments: 1,
+      bevelThickness: relief * 0.35, bevelSize: relief * 0.3, curveSegments: 8
+    });
+    g.translate(0, 0, -relief * 0.5);
+    g.rotateY(f[3]);
+    g.translate(f[0], f[1], f[2]);
+    boxUV(g, 1);
+    marks.push(tint(g, 0xfff6e6));
+  });
+
+  // maker's mark, debossed into the underside
+  const markR = 0.16;
+  const ring = new THREE.Shape();
+  ring.absarc(0, 0, markR, 0, Math.PI * 2, false);
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, markR * 0.66, 0, Math.PI * 2, true);
+  ring.holes.push(hole);
+  const shapes = [ring];
+  for (let k = 0; k < 3; k++) {
+    const a = -Math.PI / 2 + (k / 3) * Math.PI * 2;
+    const dot = new THREE.Shape();
+    dot.absarc(Math.cos(a) * markR * 0.34, Math.sin(a) * markR * 0.34, markR * 0.14, 0, Math.PI * 2, false);
+    shapes.push(dot);
+  }
+  for (const shp of shapes) {
+    const g = new THREE.ExtrudeGeometry(shp, { depth: 0.02, bevelEnabled: false, curveSegments: 10 });
+    g.translate(0, 0, -0.02);
+    g.rotateX(Math.PI / 2);
+    g.translate(0, -0.5 + 0.012, 0);
+    boxUV(g, 1);
+    marks.push(tint(g, 0x9a8b7a));
+  }
+
+  return { body, marks: mergeAll(marks, { colors: true }) };
+}
+
+/* --------------------------------------------------- wall electrics ----- */
+
+/**
+ * A light switch. Returns two geometry buckets so the plate can be merged into
+ * the room's white trim and the shadow gap into the dark mesh — both already
+ * exist, so a switch costs zero draw calls. Authored in the XY plane facing
+ * +Z; the caller places it on a wall.
+ */
+export function switchGeo({ w = 0.082, h = 0.118, tilt = 0.35 } = {}) {
+  const plate = [];
+  const dark = [];
+  plate.push(rbox(w, h, 0.010, [0, 0, 0.005], [0, 0, 0], 0.008, 8));
+  // recessed shadow line around the rocker
+  dark.push(rbox(w * 0.62, h * 0.52, 0.004, [0, 0, 0.010], [0, 0, 0], 0.002, 8));
+  // the rocker itself, flipped up — nobody's switch sits dead centre
+  plate.push(rbox(w * 0.56, h * 0.46, 0.013, [0, 0, 0.014], [tilt * 0.10, 0, 0], 0.004, 8));
+  // two screw heads
+  for (const sy of [-1, 1]) {
+    const s = lathe([[0, 0], [0.0035, 0], [0.0038, 0.0012], [0, 0.0016]], 8);
+    s.rotateX(-Math.PI / 2);
+    plate.push(xf(s, [0, sy * h * 0.40, 0.0102]));
+  }
+  return { plate: mergeAll(plate), dark: mergeAll(dark) };
+}
+
+/** A twin power outlet, same trick: plate into the trim, slots into the dark. */
+export function outletGeo({ w = 0.076, h = 0.108 } = {}) {
+  const plate = [rbox(w, h, 0.009, [0, 0, 0.0045], [0, 0, 0], 0.009, 8)];
+  const dark = [];
+  for (const sy of [-1, 1]) {
+    for (const sx of [-1, 1]) {
+      dark.push(rbox(0.0055, 0.017, 0.006, [sx * 0.0105, sy * h * 0.22, 0.0088], [0, 0, 0], 0.0012, 4));
+    }
+    // the shallow moulded recess each socket sits in
+    plate.push(rbox(w * 0.66, 0.030, 0.004, [0, sy * h * 0.22, 0.0106], [0, 0, 0], 0.006, 8));
+  }
+  return { plate: mergeAll(plate), dark: mergeAll(dark) };
+}
+
+/* ------------------------------------------------------------- clutter --- */
+
+const _mm = new THREE.Matrix4();
+
+/**
+ * The toys that end up on the floor. Real clutter is not a uniform scatter —
+ * it clumps, it drifts to edges, things land on their corners, and somebody
+ * always stacks two. Each hand-placed spot below seeds a *clump* of one to
+ * three toys with its own density, resting orientation and pile.
+ *
+ * Costs four draw calls however many toys there are: block bodies, block
+ * marks, balls, and one instanced contact-shadow sheet with a tight dark core
+ * under every single item.
  */
 export function buildClutter(M, spots, { seed = 77 } = {}) {
   const group = new THREE.Group();
   group.name = 'clutter';
   const R = rng(seed);
-  const blockCols = [0xef8a7a, 0xf5c26b, 0x8fc4b0, 0x8fb0d8, 0xc9a6e0];
-  const ballCols = [0xf3a3bd, 0xffd98a, 0x9fd4c4];
+  const ballCols = [0xf3a3bd, 0xffd98a, 0x9fd4c4, 0xa9c8ef];
 
-  const toys = spots.map((s, i) => ({
-    kind: i % 3 === 2 ? 'ball' : 'block',
-    x: s[0], z: s[1], rot: s[2] !== undefined ? s[2] : R() * 6.28,
-    tilt: (R() - 0.5) * 0.5,
-    size: 0.088 + R() * 0.030,
-    color: (i % 3 === 2 ? ballCols : blockCols)[i % 5 % (i % 3 === 2 ? 3 : 5)],
-    v: 0, target: 0, phase: R() * 6.28
-  }));
+  const toys = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const axis = new THREE.Vector3();
+  const qq = new THREE.Quaternion();
+  const qy = new THREE.Quaternion();
+
+  /** Resting orientation for a cube: flat, tipped on an edge, or on a corner. */
+  const restQuat = (mode, yaw) => {
+    const q = new THREE.Quaternion();
+    if (mode === 'corner') {
+      // a body diagonal points at the floor — only stable leaning on something
+      axis.set(1, 1, 1).normalize();
+      q.setFromUnitVectors(axis, new THREE.Vector3(0, -1, 0));
+    } else if (mode === 'edge') {
+      axis.set(Math.cos(yaw), 0, Math.sin(yaw));
+      q.setFromAxisAngle(axis, Math.PI / 4 + (R() - 0.5) * 0.25);
+    } else {
+      axis.set(Math.cos(yaw * 1.7), 0, Math.sin(yaw * 1.7));
+      q.setFromAxisAngle(axis, (R() - 0.5) * 0.10);
+    }
+    qy.setFromAxisAngle(up, yaw);
+    return q.premultiply(qy);
+  };
+
+  /** Support height of a unit cube under rotation q, scaled by `size`. */
+  const support = (q, size) => {
+    _mm.makeRotationFromQuaternion(q);
+    const e = _mm.elements;
+    return 0.5 * size * (Math.abs(e[1]) + Math.abs(e[5]) + Math.abs(e[9]));
+  };
+
+  spots.forEach((s, si) => {
+    const [cx, cz, opt] = [s[0], s[1], s[2] || {}];
+    const n = opt.n !== undefined ? opt.n : (R() < 0.42 ? 1 : R() < 0.8 ? 2 : 3);
+    const spread = opt.spread !== undefined ? opt.spread : 0.10 + R() * 0.13;
+    const pile = !!opt.pile;
+    let stackY = 0;
+    let stackX = cx, stackZ = cz;
+
+    for (let k = 0; k < n; k++) {
+      const wantBall = opt.ball !== undefined ? (k === opt.ball) : (!pile && R() < 0.30);
+      const a = R() * 6.283;
+      const rad = k === 0 ? 0 : spread * (0.45 + R() * 0.75);
+      const x = pile ? stackX + (R() - 0.5) * 0.014 : cx + Math.cos(a) * rad;
+      const z = pile ? stackZ + (R() - 0.5) * 0.014 : cz + Math.sin(a) * rad;
+      const size = wantBall ? 0.086 + R() * 0.038 : 0.078 + R() * 0.036;
+      const yaw = R() * 6.283;
+
+      let q, restY;
+      if (wantBall) {
+        q = new THREE.Quaternion().setFromAxisAngle(up, yaw);
+        restY = size * 0.5;
+      } else {
+        const roll = R();
+        const mode = pile ? 'flat' : roll < 0.14 ? 'corner' : roll < 0.42 ? 'edge' : 'flat';
+        q = restQuat(mode, yaw);
+        restY = support(q, size) - (mode === 'corner' ? size * 0.03 : 0);
+      }
+
+      toys.push({
+        kind: wantBall ? 'ball' : 'block',
+        x, z, quat: q, size,
+        base: pile ? stackY + restY : restY,
+        color: wantBall ? ballCols[(si + k) % ballCols.length]
+          : BLOCK_PAINTS[(si * 3 + k * 5) % BLOCK_PAINTS.length],
+        shadow: pile && k > 0 ? 0.35 : 1,
+        v: 0, target: 0, phase: R() * 6.28
+      });
+      if (pile) stackY += size * 0.98;
+    }
+  });
 
   const blocks = toys.filter(t => t.kind === 'block');
   const balls = toys.filter(t => t.kind === 'ball');
 
-  const blockGeo = roundedBox(1, 1, 1, 0.14, 2);
-  boxUV(blockGeo, 1);
-  const ballGeo = new THREE.SphereGeometry(0.5, 16, 12);
+  const B = blockGeometry({ bevel: 0.15, seed: 3 });
+  const ballGeo = new THREE.SphereGeometry(0.5, 26, 18);
 
-  const blockMesh = instanced(blockGeo, M.plastic, blocks.map(t => ({ color: t.color, scale: 0 })), 'clutterBlocks');
+  const blockMesh = instanced(B.body, M.blockWood, blocks.map(t => ({ color: t.color, scale: 0 })), 'clutterBlocks');
+  const markMesh = instanced(B.marks, M.blockWood, blocks.map(() => ({ color: 0xffffff, scale: 0 })), 'clutterBlockMarks');
   const ballMesh = instanced(ballGeo, M.plastic, balls.map(t => ({ color: t.color, scale: 0 })), 'clutterBalls');
-  blockMesh.frustumCulled = false;
-  ballMesh.frustumCulled = false;
-  group.add(blockMesh, ballMesh);
+  for (const m of [blockMesh, markMesh, ballMesh]) m.frustumCulled = false;
+  group.add(blockMesh, markMesh, ballMesh);
+
+  /* --- a real contact shadow under every single toy --------------------- */
+  const shGeo = new THREE.PlaneGeometry(1, 1);
+  shGeo.rotateX(-Math.PI / 2);
+  const shadows = new THREE.InstancedMesh(shGeo, shadowBlobMaterial(0x35202c), toys.length * 2);
+  shadows.frustumCulled = false;
+  shadows.renderOrder = -1;
+  shadows.name = 'clutterShadows';
+  group.add(shadows);
 
   const write = () => {
-    let bi = 0, si = 0;
+    let bi = 0, si = 0, sh = 0;
     for (const t of toys) {
       const v = t.v;
       const lift = Math.sin(Math.min(1, v) * Math.PI) * 0.06;      // little hop
       const squash = 1 + Math.sin(Math.min(1, v) * Math.PI) * 0.18;
-      _e.set(t.tilt * v, t.rot, t.tilt * 0.6 * v);
-      _q.setFromEuler(_e);
-      _v.set(t.x, t.size * 0.5 * v + lift, t.z);
+      _v.set(t.x, t.base * v + lift, t.z);
       const s = t.size * v;
       _s.set(s / squash, s * squash, s / squash);
-      _m4.compose(_v, _q, _s);
-      if (t.kind === 'block') blockMesh.setMatrixAt(bi++, _m4);
+      _m4.compose(_v, t.quat, _s);
+      if (t.kind === 'block') { blockMesh.setMatrixAt(bi, _m4); markMesh.setMatrixAt(bi, _m4); bi++; }
       else ballMesh.setMatrixAt(si++, _m4);
+
+      // wide haze + tight core, both shrinking as the toy is lifted away
+      const grounded = Math.max(0, 1 - lift * 9);
+      const rr = t.size * (0.92 + lift * 4);
+      _v.set(t.x, 0.005, t.z);
+      _q.identity();
+      _s.set(rr * 2.1, 1, rr * 2.1);
+      shadows.setMatrixAt(sh, _m4.compose(_v, _q, _s));
+      _c.setRGB(0.30 * v * grounded * t.shadow, 0.5, 1);
+      shadows.setColorAt(sh++, _c);
+      _v.y = 0.0056;
+      _s.set(rr * 1.02, 1, rr * 1.02);
+      shadows.setMatrixAt(sh, _m4.compose(_v, _q, _s));
+      _c.setRGB(0.62 * v * grounded * t.shadow, 2.2, 1);
+      shadows.setColorAt(sh++, _c);
     }
     blockMesh.instanceMatrix.needsUpdate = true;
+    markMesh.instanceMatrix.needsUpdate = true;
     ballMesh.instanceMatrix.needsUpdate = true;
+    shadows.instanceMatrix.needsUpdate = true;
+    if (shadows.instanceColor) shadows.instanceColor.needsUpdate = true;
   };
   write();
 

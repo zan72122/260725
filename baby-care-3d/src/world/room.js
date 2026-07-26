@@ -19,7 +19,6 @@
  * ========================================================================== */
 
 import * as THREE from 'three';
-import { contactShadow } from '../engine/lighting.js';
 import * as P from './props.js';
 import { WindowUnit } from './window.js';
 
@@ -37,15 +36,30 @@ const WIN = { z: -0.5, w: 1.46, h: 1.36, sill: 0.96 };
 
 /* --------------------------------------------------------------- profiles -- */
 
-// Skirting: a plain modern ogee. x = projection from the wall, y = height.
+// Skirting: a modern ogee board sitting on a quarter-round shoe moulding.
+// The shoe is the whole point — a board that meets the floor at a hard 90°
+// reads as a extruded rectangle, a shoe reads as joinery, and the reflex
+// curve between them catches a soft line instead of a hard one.
+// x = projection from the wall, y = height.
 const SKIRTING = [
-  [0, 0], [0.022, 0], [0.022, 0.062], [0.013, 0.078], [0.017, 0.090],
+  [0, 0],
+  [0.0340, 0.0000], [0.0338, 0.0055], [0.0326, 0.0107], [0.0303, 0.0154],
+  [0.0272, 0.0193], [0.0243, 0.0216], [0.0224, 0.0232],   // quarter-round shoe
+  [0.0220, 0.0270],                                        // shoe meets the board
+  [0.022, 0.062], [0.013, 0.078], [0.017, 0.090],
   [0.009, 0.104], [0.009, 0.116], [0, 0.116]
 ];
 // Picture rail, at 1.98 m — the height that makes a room feel designed.
 const RAIL = [
   [0, 0], [0.026, 0.005], [0.026, 0.018], [0.013, 0.032], [0.011, 0.044], [0, 0.044]
 ];
+// Chair rail (dado) at 0.90 m. Breaks the largest, emptiest surface in the
+// frame into two bands and gives the wall a horizontal to read against.
+const DADO = [
+  [0, 0], [0.014, 0.004], [0.020, 0.013], [0.021, 0.026],
+  [0.014, 0.038], [0.010, 0.046], [0.010, 0.055], [0, 0.058]
+];
+const DADO_Y = 0.90;
 
 export class Room {
   constructor({ tier = 2, fx = null } = {}) {
@@ -232,6 +246,15 @@ export class Room {
     trim.push(run(RAIL, RD, B_LEFT, [X0, 1.98, Z0]));
     trim.push(run(RAIL, RD, B_RIGHT, [X1, 1.98, Z1]));
 
+    // Chair rail. It runs the back wall (broken by the doorway) and the left
+    // wall up to the window reveal; the right wall is skipped because the
+    // wardrobe backs onto it and the rail would pass straight through.
+    trim.push(run(DADO, doorL - X0, B_BACK, [doorL, DADO_Y, Z0]));
+    trim.push(run(DADO, X1 - doorR, B_BACK, [X1, DADO_Y, Z0]));
+    // …and dies into the window reveal rather than running through the sill
+    trim.push(run(DADO, (WIN.z - 0.86) - Z0, B_LEFT, [X0, DADO_Y, Z0]));
+    trim.push(run(DADO, Z1 - (WIN.z + 0.86), B_LEFT, [X0, DADO_Y, WIN.z + 0.86]));
+
     // door architrave
     const CASE = [[0, 0], [0.024, 0.006], [0.026, 0.030], [0.016, 0.048], [0.014, 0.070], [0, 0.074]];
     const band = 0.074;
@@ -248,6 +271,24 @@ export class Room {
     trim.push(cm(DOOR.h + band, [[1, 0, 0], [0, 0, 1], [0, -1, 0]], [doorR, DOOR.h + band, Z0]));
     trim.push(cm(DOOR.w + band * 2, [[0, 1, 0], [0, 0, 1], [1, 0, 0]], [doorL - band, DOOR.h, Z0]));
 
+    /* --- electrics -------------------------------------------------------
+     * The wall is the largest surface in the frame; a switch and an outlet are
+     * the two marks that stop it reading as a backdrop. Both are authored
+     * facing +Z and split into a white part and a dark part so they merge into
+     * the trim and hall meshes that already exist — zero extra draw calls. */
+    const darkBits = [];
+    const sw = P.switchGeo();
+    // beside the door, at the height a grown-up's hand falls
+    trim.push(P.xf(sw.plate, [1.21, 1.06, Z0 + 0.0005]));
+    darkBits.push(P.xf(sw.dark, [1.21, 1.06, Z0 + 0.0005]));
+
+    const so = P.outletGeo();
+    // on the left wall just above the skirting, under the window
+    so.plate.rotateY(Math.PI / 2);
+    so.dark.rotateY(Math.PI / 2);
+    trim.push(P.xf(so.plate, [X0 + 0.0005, 0.245, -1.86]));
+    darkBits.push(P.xf(so.dark, [X0 + 0.0005, 0.245, -1.86]));
+
     const trimMesh = new THREE.Mesh(P.mergeAll(trim), M.trim);
     trimMesh.receiveShadow = true;
     trimMesh.castShadow = true;
@@ -263,6 +304,7 @@ export class Room {
     }
     hall.push(P.rbox(DOOR.w + 0.3, 0.04, hallD, [DOOR.x, DOOR.h + 0.28, Z0 - WALL - hallD / 2], [0, 0, 0], 0.004, 1));
     hall.push(P.rbox(DOOR.w + 0.3, 0.02, hallD, [DOOR.x, 0.005, Z0 - WALL - hallD / 2], [0, 0, 0], 0.004, 1));
+    hall.push(...darkBits);
     const hallMesh = new THREE.Mesh(P.mergeAll(hall), M.dark);
     hallMesh.receiveShadow = true;
     hallMesh.name = 'hall';
@@ -291,9 +333,29 @@ export class Room {
 
   /* -------------------------------------------------------- furniture --- */
 
-  _place(obj, x, y, z, ry = 0) {
+  /**
+   * Nothing in a real room is square to the wall. Every non-architectural prop
+   * gets a small *seeded* nudge — a centimetre of position, a degree or two of
+   * yaw, and for anything hung or free-standing a fraction of a degree of
+   * lean. It is the cheapest single change in this file and it is the one that
+   * stops the room reading as a showroom.
+   */
+  _jitter(obj, { pos = 0.014, yaw = 0.030, lean = 0.0038 } = {}) {
+    const R = this._jrng || (this._jrng = P.rng(9137));
+    obj.position.x += (R() - 0.5) * 2 * pos;
+    obj.position.z += (R() - 0.5) * 2 * pos;
+    obj.rotation.y += (R() - 0.5) * 2 * yaw;
+    if (lean) {
+      obj.rotation.x += (R() - 0.5) * 2 * lean;
+      obj.rotation.z += (R() - 0.5) * 2 * lean;
+    }
+    return obj;
+  }
+
+  _place(obj, x, y, z, ry = 0, jitter = {}) {
     obj.position.set(x, y, z);
     obj.rotation.y = ry;
+    if (jitter !== false) this._jitter(obj, jitter);
     this.group.add(obj);
     if (obj.userData.pick) this._pick.push(...obj.userData.pick);
     return obj;
@@ -304,53 +366,87 @@ export class Room {
     const S = this._shadowField;
 
     /* --- cot, with the mobile clamped to its far post -------------------- */
-    this.crib = this._place(P.buildCrib(M), -1.45, 0, -2.28);
-    S.add(-1.45, -2.28, 0.70, 0.40, { opacity: 0.55, softness: 0.75 });
-    this.mobile = this._place(P.buildMobile(M), -2.02, 0.78, -2.56, 0.35);
+    this.crib = this._place(P.buildCrib(M), -1.45, 0, -2.28, 0, { pos: 0.016, yaw: 0.026 });
+    S.pair(-1.45, -2.28, 0.70, 0.40, { opacity: 0.60, softness: 0.75, core: 0.5 });
+    // four feet: the dark cores that say the cot is standing, not floating
+    for (const sx of [-0.59, 0.59]) {
+      for (const sz of [-0.30, 0.30]) S.add(-1.45 + sx, -2.28 + sz, 0.055, 0.055, { opacity: 0.8, softness: 2.6 });
+    }
+    this.mobile = this._place(P.buildMobile(M), -2.02, 0.78, -2.56, 0.35, { pos: 0.006, yaw: 0.05, lean: 0 });
 
     /* --- changing dresser ------------------------------------------------ */
-    this.dresser = this._place(P.buildDresser(M), 0.15, 0, -2.52);
-    S.add(0.15, -2.52, 0.56, 0.30, { opacity: 0.55, softness: 0.9 });
+    this.dresser = this._place(P.buildDresser(M), 0.15, 0, -2.512, 0, { pos: 0.008, yaw: 0.022 });
+    S.pair(0.15, -2.52, 0.56, 0.30, { opacity: 0.62, softness: 0.9, core: 0.55 });
+    S.band(0.15, -2.30, 0.55, 0.045, { opacity: 0.5, softness: 1.6 });   // toe line
 
-    this.nightlight = this._place(P.buildNightlight(M), 0.56, 0.905, -2.40, 0.4);
+    this.nightlight = this._place(P.buildNightlight(M), 0.56, 0.905, -2.40, 0.4, { pos: 0.01, yaw: 0.3, lean: 0 });
+    S.add(0.56, -2.40, 0.055, 0.055, { opacity: 0.5, softness: 2.2, y: 0.885 });
 
     /* --- wardrobe -------------------------------------------------------- */
-    this.wardrobe = this._place(P.buildWardrobe(M), 2.41, 0, -1.55, -Math.PI / 2);
-    S.add(2.41, -1.55, 0.32, 0.56, { opacity: 0.58, softness: 0.95 });
+    this.wardrobe = this._place(P.buildWardrobe(M), 2.398, 0, -1.55, -Math.PI / 2, { pos: 0.009, yaw: 0.018 });
+    S.pair(2.41, -1.55, 0.32, 0.56, { opacity: 0.64, softness: 0.95, core: 0.5 });
 
     /* --- shelf (with its books, teddy, rings and lamp) ------------------- */
-    this.shelf = this._place(P.buildShelf(M), 0.10, 1.24, -2.66);
+    // hung by hand: a shade under a degree out of true, which is exactly what
+    // a spirit level would have caught and nobody did
+    this.shelf = this._place(P.buildShelf(M), 0.10, 1.24, -2.66, 0, { pos: 0, yaw: 0, lean: 0 });
+    this.shelf.position.x += 0.012;
+    this.shelf.rotation.z = -0.0092;
     this.lamp = this.shelf.userData.lamp;
+    // shelf-top contact: the props on it are grounded too
+    for (const [x, z, r, o] of [[-0.16, -2.66, 0.15, 0.42], [0.40, -2.66, 0.10, 0.40], [-0.20, -2.66, 0.11, 0.38]]) {
+      S.add(x, z, r, r * 0.7, { opacity: o, softness: 1.8, y: 1.258 });
+    }
+    S.add(-0.20, -2.66, 0.12, 0.09, { opacity: 0.42, softness: 1.9, y: 1.588 });
 
     /* --- toy box --------------------------------------------------------- */
-    this.toybox = this._place(P.buildToyBox(M), -2.30, 0, 1.05, Math.PI / 2);
-    S.add(-2.30, 1.05, 0.26, 0.40, { opacity: 0.5, softness: 0.8 });
+    this.toybox = this._place(P.buildToyBox(M), -2.30, 0, 1.05, Math.PI / 2, { pos: 0.015, yaw: 0.035 });
+    S.pair(-2.30, 1.05, 0.26, 0.40, { opacity: 0.56, softness: 0.8, core: 0.62 });
 
     /* --- high chair and play table --------------------------------------- */
-    this.highchair = this._place(P.buildHighchair(M), 1.72, 0, -0.35, 2.35);
-    S.add(1.72, -0.35, 0.26, 0.26, { opacity: 0.45, softness: 0.55 });
+    this.highchair = this._place(P.buildHighchair(M), 1.72, 0, -0.35, 2.35, { pos: 0.018, yaw: 0.045 });
+    S.add(1.72, -0.35, 0.26, 0.26, { opacity: 0.34, softness: 0.55 });
+    for (const [dx, dz] of [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]) {
+      S.add(1.72 + dx, -0.35 + dz, 0.045, 0.045, { opacity: 0.78, softness: 3.0 });
+    }
 
-    this.table = this._place(P.buildPlayTable(M), 1.45, 0, 0.78, 0.4);
-    S.add(1.45, 0.78, 0.33, 0.33, { opacity: 0.42, softness: 0.6 });
-    S.add(1.02, 0.95, 0.16, 0.16, { opacity: 0.35, softness: 0.5 });
-    S.add(1.86, 0.60, 0.16, 0.16, { opacity: 0.35, softness: 0.5 });
+    this.table = this._place(P.buildPlayTable(M), 1.45, 0, 0.78, 0.4, { pos: 0.02, yaw: 0.05 });
+    S.add(1.45, 0.78, 0.33, 0.33, { opacity: 0.34, softness: 0.6 });
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4 + 0.4;
+      S.add(1.45 + Math.cos(a) * 0.21, 0.78 + Math.sin(a) * 0.21, 0.04, 0.04, { opacity: 0.75, softness: 3.2 });
+    }
+    S.pair(1.02, 0.95, 0.16, 0.16, { opacity: 0.42, softness: 0.5, core: 0.55 });
+    S.pair(1.86, 0.60, 0.16, 0.16, { opacity: 0.42, softness: 0.5, core: 0.55 });
 
     /* --- laundry basket, plant, pouffe ----------------------------------- */
-    this.basket = this._place(P.buildBasket(M), 1.02, 0, -2.36, 0.5);
-    S.add(1.02, -2.36, 0.27, 0.27, { opacity: 0.5, softness: 0.7 });
+    this.basket = this._place(P.buildBasket(M), 1.02, 0, -2.36, 0.5, { pos: 0.02, yaw: 0.12 });
+    S.pair(1.02, -2.36, 0.235, 0.235, { opacity: 0.62, softness: 0.7, core: 0.86 });
 
-    this.plant = this._place(P.buildPlant(M), 2.25, 0, 1.42, 0.9);
-    S.add(2.25, 1.42, 0.30, 0.30, { opacity: 0.45, softness: 0.6 });
+    this.plant = this._place(P.buildPlant(M), 2.25, 0, 1.42, 0.9, { pos: 0.02, yaw: 0.2 });
+    S.pair(2.25, 1.42, 0.19, 0.19, { opacity: 0.6, softness: 0.6, core: 0.8 });
 
-    this.pouffe = this._place(P.buildPouffe(M), -1.62, 0, 0.62, 0.3);
-    S.add(-1.62, 0.62, 0.32, 0.32, { opacity: 0.42, softness: 1.1 });
+    this.pouffe = this._place(P.buildPouffe(M), -1.62, 0, 0.62, 0.3, { pos: 0.025, yaw: 0.25 });
+    S.pair(-1.62, 0.62, 0.30, 0.30, { opacity: 0.5, softness: 1.1, core: 0.82 });
 
     /* --- rug ------------------------------------------------------------- */
     this.rug = P.buildRug(M, { radius: 1.18 });
+    // a rug is dropped, not laid out: it sits a few degrees off the room grid
     this.rug.position.set(0.05, 0, 0.35);
+    this.rug.rotation.y = 0.14;
     this.group.add(this.rug);
-    // the rug's own soft occlusion, wider and much fainter than a prop's
-    S.add(0.05, 0.35, 1.30, 1.30, { opacity: 0.16, softness: 2.4, y: 0.002 });
+    // the rug's own soft occlusion, wider and much fainter than a prop's …
+    S.add(0.05, 0.35, 1.30, 1.30, { opacity: 0.14, softness: 2.4, y: 0.002 });
+    // … plus the dark line right under its bound edge, which is what makes a
+    // rug sit *on* a floor instead of being printed on it
+    S.ring(0.05, 0.35, 1.33, 1.33, 0.885, { opacity: 0.40, softness: 2.6, y: 0.0022 });
+
+    /* --- where the walls meet the floor ----------------------------------- */
+    // A skirting board with no shadow line at its foot is the tell. One soft
+    // band per wall run, riding in the same instanced sheet as everything else.
+    S.band(0, Z0 + 0.055, RW / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3 });
+    S.band(X0 + 0.055, Z0 + RD / 2, RD / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3, rot: Math.PI / 2 });
+    S.band(X1 - 0.055, Z0 + RD / 2, RD / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3, rot: Math.PI / 2 });
   }
 
   /* --------------------------------------------------------- dressing --- */
@@ -359,24 +455,28 @@ export class Room {
     const M = this.M;
     const wallZ = Z0 + 0.022;
 
-    // pictures over the cot, hung a degree or two off true
+    // Pictures over the cot. The whole point of this group is that it is *not*
+    // level: the big one hangs 3.2° down to the left (the nail has turned), the
+    // small ones a degree either way, and the spacing between them is uneven
+    // because they were hung one at a time by eye.
     this.pictures = P.buildPictures(M, [
-      { x: -0.40, y: 0.06, w: 0.44, h: 0.34, art: 0, tilt: 0.018 },
-      { x: 0.10, y: 0.20, w: 0.30, h: 0.38, art: 3, tilt: -0.030 },
-      { x: 0.11, y: -0.22, w: 0.34, h: 0.26, art: 2, tilt: 0.012 }
+      { x: -0.405, y: 0.055, w: 0.44, h: 0.34, art: 0, tilt: 0.031 },
+      { x: 0.115, y: 0.212, w: 0.30, h: 0.38, art: 3, tilt: -0.056 },
+      { x: 0.098, y: -0.232, w: 0.34, h: 0.26, art: 2, tilt: 0.017 }
     ]);
     this.pictures.position.set(-1.42, 1.52, wallZ);
     this.group.add(this.pictures);
     this._pick.push(...(this.pictures.userData.pick || []));
 
     // a fourth picture on the right-hand wall, seen edge-on from the camera
-    this.picture2 = P.buildPictures(M, [{ x: 0, y: 0, w: 0.34, h: 0.42, art: 1, tilt: -0.02 }]);
-    this.picture2.position.set(X1 - 0.022, 1.60, 0.35);
+    this.picture2 = P.buildPictures(M, [{ x: 0, y: 0, w: 0.34, h: 0.42, art: 1, tilt: -0.038 }]);
+    this.picture2.position.set(X1 - 0.022, 1.603, 0.362);
     this.picture2.rotation.y = -Math.PI / 2;
     this.group.add(this.picture2);
 
     this.clock = P.buildClock(M, { r: 0.125 });
-    this.clock.position.set(1.02, 1.66, wallZ + 0.01);
+    this.clock.position.set(1.026, 1.658, wallZ + 0.01);
+    this.clock.rotation.z = 0.024;      // knocked when the battery was changed
     this.group.add(this.clock);
 
     // bunting slung across the back-left corner
@@ -389,20 +489,26 @@ export class Room {
   /* ---------------------------------------------------------- clutter --- */
 
   _buildClutter() {
-    // hand-placed so nothing ever lands inside a piece of furniture
+    /* Hand-placed clump centres, so nothing ever lands inside a piece of
+       furniture — but each one seeds a *cluster*, not a single toy. Real
+       clutter has density: two or three things together where a child was
+       sitting, one lone block drifted to a wall, a pile someone started
+       stacking and abandoned, and a couple half-on the rug's bound edge. */
     const spots = [
-      [-0.62, 0.92], [0.52, 1.18], [-1.22, 0.10], [0.92, 0.62], [-0.28, -0.38],
-      [0.38, -0.18], [1.08, 1.42], [-1.58, 1.44], [0.70, -0.92], [-0.86, -1.05]
+      [-0.72, 0.95, { n: 3, spread: 0.16 }],       // where somebody was playing
+      [-0.50, 1.12, { n: 3, pile: true }],         // an abandoned stack of three
+      [1.00, 1.13, { n: 2, spread: 0.13 }],        // half on, half off the rug rim
+      [-1.06, -0.05, { n: 1 }],                    // one that rolled to the edge
+      [0.34, -0.62, { n: 2, spread: 0.12 }],
+      [1.06, 0.10, { n: 1 }],
+      [-1.62, 1.34, { n: 2, spread: 0.20 }],       // drifted out onto bare floor
+      [0.50, -1.34, { n: 2, spread: 0.17 }],
+      [-0.88, -1.06, { n: 1 }]
     ];
     this._clutterRig = P.buildClutter(this.M, spots, { seed: 77 });
     this._clutterRig.group.position.set(0, 0, 0);
     this.group.add(this._clutterRig.group);
     this._pick.push(...this._clutterRig.meshes);
-
-    // one shared blob under the mess, from the engine's own contact shadow
-    this._clutterShadow = contactShadow(1.7, 0.0, 2.6);
-    this._clutterShadow.position.set(0.0, 0.006, 0.35);
-    this.group.add(this._clutterShadow);
   }
 
   /* ----------------------------------------------------------- lights --- */
@@ -470,7 +576,8 @@ export class Room {
       'lampStem', 'toyboxPull', 'stools', 'basketStaves', 'basketHoops',
       'basketLiner', 'plantSoil', 'plantLeaves', 'pouffeSeams', 'pictureFrames',
       'pictureArt', 'clockCase', 'clockHand', 'cribPiping', 'highchairPad',
-      'curtainRings', 'buntingFlags', 'buntingCord', 'snowLedge'
+      'curtainRings', 'buntingFlags', 'buntingCord', 'snowLedge',
+      'clutterBlockMarks', 'clutterShadows', 'pictureGlass', 'basketLiner'
     ]);
     this.group.traverse(o => {
       if ((o.isMesh || o.isPoints) && NO_CAST.has(o.name)) o.castShadow = false;
@@ -591,12 +698,9 @@ export class Room {
     this.clock.userData.minute.rotation.z = -(mins % 60) / 60 * Math.PI * 2;
     this.clock.userData.hour.rotation.z = -((mins % 720) / 720) * Math.PI * 2;
 
-    // toys settling in or being tidied away
-    if (this._clutterRig.update(dt)) {
-      let v = 0;
-      for (const toy of this._clutterRig.toys) v = Math.max(v, toy.v);
-      this._clutterShadow.userData.setOpacity(v * 0.20);
-    }
+    // toys settling in or being tidied away — each one carries its own
+    // contact shadow now, written inside the rig's update()
+    this._clutterRig.update(dt);
 
     /* --- the window's bounce light tracks the sky it is bouncing --------- */
     const k = 1 - Math.exp(-dt * 2.2);

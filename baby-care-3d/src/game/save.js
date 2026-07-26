@@ -16,6 +16,12 @@
  *   stars:    <int>                                    // lifetime stars
  *   stickers: [<stickerId>, ...]                       // unlocked, in order
  *   outfit:   { top, bottom, socks, shoes, hat, bib, diaper }
+ *             each slot is either `false` (nothing worn) or a garment value
+ *             that `character/outfit.js` understands: a palette name
+ *             ('mint','cream','sky',…), a hex number, or `true` for "the
+ *             default colour for this slot". The historical sentinel string
+ *             'none' is migrated to `false` — it used to slip through the
+ *             colour resolver and silently *build* a garment.
  *   dirt:     { face, hands, feet, body, hair }        // 0..1 each
  *   wet:      0..1
  *   weather:  'clear' | 'rain' | 'snow'
@@ -32,8 +38,42 @@ const LEGACY_KEYS = ['babycare3d_save_v2', 'babycare3d_save_v1'];
 
 const clamp01 = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
 const int = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.max(0, Math.round(v)) : d);
-const str = (v, d) => (typeof v === 'string' && v ? v : d);
 const bool = (v, d = false) => (typeof v === 'boolean' ? v : d);
+
+/** Slots on the body, in the order `character/outfit.js` layers them. */
+export const OUTFIT_SLOTS = ['diaper', 'top', 'bottom', 'socks', 'shoes', 'hat', 'bib'];
+
+/** Legacy / sloppy spellings of "this slot is empty". */
+const EMPTY_GARMENT = new Set(['none', 'None', 'NONE', 'off', 'null', '']);
+
+/**
+ * Coerce one outfit slot.
+ *   false | null | 'none' | ''  → false   (nothing worn)
+ *   true | <hex number> | name  → kept verbatim
+ *   anything else / missing     → `d`, the default for that slot
+ */
+export function garment(v, d = false) {
+  if (v === false || v === null) return false;
+  if (v === true) return true;
+  if (typeof v === 'number' && isFinite(v)) return v;
+  if (typeof v === 'string') return EMPTY_GARMENT.has(v.trim()) ? false : v;
+  return d;
+}
+
+/**
+ * The baby is never born naked. Anything that resolves to "no garment in any
+ * slot" is not a state the game can start in — the dressing-up screen exists
+ * to *change* clothes, not to conjure the first pair.
+ */
+export const DEFAULT_OUTFIT = Object.freeze({
+  top: 'mint',        // palette name from character/outfit.js
+  bottom: false,      // a onesie covers the hips; no separate bottoms
+  socks: false,
+  shoes: false,
+  hat: false,
+  bib: false,
+  diaper: true        // always, under everything
+});
 
 export const DEFAULT_SAVE = Object.freeze({
   v: SAVE_VERSION,
@@ -41,7 +81,7 @@ export const DEFAULT_SAVE = Object.freeze({
   meters: { food: 0.8, clean: 0.85, happy: 0.85, energy: 0.9 },
   stars: 0,
   stickers: [],
-  outfit: { top: 'onesie-cream', bottom: 'none', socks: 'none', shoes: 'none', hat: 'none', bib: false, diaper: true },
+  outfit: { ...DEFAULT_OUTFIT },
   dirt: { face: 0, hands: 0, feet: 0, body: 0, hair: 0 },
   wet: 0,
   weather: 'clear',
@@ -107,19 +147,31 @@ export function migrate(raw, stickerIds = []) {
     out.stickers = stickerIds.slice(0, int(raw.stickerCount, 0));
   }
 
-  /* outfit — v1 stored { outfitColor:<hex int>, hat:<string> }. */
+  /* outfit — v1 stored { outfitColor:<hex int>, hat:<string> }.
+     Every slot is coerced through `garment()`, so an older save that spelled
+     "empty" as the string 'none' migrates to `false` instead of resolving to a
+     fallback colour and dressing the baby in phantom socks and a hat. */
   if (raw.outfit && typeof raw.outfit === 'object') {
     const o = raw.outfit;
-    out.outfit.top = str(o.top, out.outfit.top);
-    out.outfit.bottom = str(o.bottom, out.outfit.bottom);
-    out.outfit.socks = str(o.socks, out.outfit.socks);
-    out.outfit.shoes = str(o.shoes, out.outfit.shoes);
-    out.outfit.hat = str(o.hat, out.outfit.hat);
-    out.outfit.bib = bool(o.bib, out.outfit.bib);
-    out.outfit.diaper = bool(o.diaper, out.outfit.diaper);
+    for (const slot of OUTFIT_SLOTS) {
+      // `undefined` (slot absent from an older schema) keeps the default.
+      out.outfit[slot] = o[slot] === undefined
+        ? out.outfit[slot]
+        : garment(o[slot], out.outfit[slot]);
+    }
+  } else if (typeof raw.outfit === 'string' && raw.outfit) {
+    // A call site once patched `{ outfit: 'onesie' }` — a bare garment id.
+    out.outfit.top = raw.outfit;
   } else if (v < 2) {
-    if (typeof raw.outfitColor === 'number') out.outfit.top = 'onesie-' + raw.outfitColor.toString(16).padStart(6, '0');
-    if (typeof raw.hat === 'string' && raw.hat !== 'none') out.outfit.hat = raw.hat;
+    if (typeof raw.outfitColor === 'number') out.outfit.top = raw.outfitColor;
+    if (typeof raw.hat === 'string') out.outfit.hat = garment(raw.hat, false);
+  }
+
+  /* Nothing worn at all is never a state we restore into. A bath or a
+     mid-dressing quit can legitimately strip the baby *during* a session, but
+     the next boot starts from the default outfit rather than a naked hero. */
+  if (!OUTFIT_SLOTS.some((slot) => out.outfit[slot] !== false)) {
+    out.outfit = { ...DEFAULT_OUTFIT };
   }
 
   if (raw.dirt && typeof raw.dirt === 'object') {

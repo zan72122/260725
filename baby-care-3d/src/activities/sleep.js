@@ -27,6 +27,9 @@ import {
   hitProxy, anchorPoint, snd
 } from '../fx/toys.js';
 
+/** Pyjama fabric colour, kept in step with the `pyjamas` garment in dress.js. */
+const PAJAMA_COLOR = 0xb9a7f0;
+
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 
@@ -215,8 +218,76 @@ export class SleepActivity {
     this._buildLighting();
     this._buildSky();
     this._buildProps();
+    this._buildShots();
 
     res.claim(this.group);
+  }
+
+  /**
+   * D2 — the cot is the one place a body-root-relative framing cannot work.
+   * The baby *lies* here, so a preset composed for a seated baby aims a metre
+   * above the mattress; and the cot's own rails sit between any low camera and
+   * the face. So this scene hands the rig a pivot that rides the baby's head
+   * and re-composes the three shots that matter around it:
+   *
+   *   crib-face  portrait over the near rail — the money shot
+   *   face       the same framing, so a `goTo('face')` from anywhere lands here
+   *   crib       wider "checking on the baby" angle taking in the quilt
+   *
+   * The pivot carries the baby's yaw, so +Z is the direction the crown points
+   * and the offsets stay readable regardless of which way the cot is turned.
+   * `restorePresets()` in app.setActivity puts the defaults back on exit.
+   */
+  _buildShots() {
+    const ctx = this.ctx;
+
+    this.shotPivot = new THREE.Object3D();
+    this.shotPivot.name = 'sleep-shot-pivot';
+    this._syncShotPivot();
+    this.group.add(this.shotPivot);
+
+    const rig = ctx.cameraRig;
+    if (!rig?.overridePreset) return;
+    rig.setSubject?.(this.shotPivot);
+    rig.overridePreset('crib-face', {
+      space: 'subject',
+      pos: [0.20, 0.34, -0.26], target: [0.00, -0.02, 0.03],
+      fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
+    });
+    rig.overridePreset('face', {
+      space: 'subject',
+      pos: [0.20, 0.34, -0.26], target: [0.00, -0.02, 0.03],
+      fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
+    });
+    rig.overridePreset('crib', {
+      space: 'subject',
+      pos: [0.34, 0.50, -0.42], target: [0.02, -0.06, -0.06],
+      fov: 36, focusRange: 0.18, dof: 1.15, handheld: 0.50, roll: 0.5
+    });
+    rig.overridePreset('closeup', {
+      space: 'subject',
+      pos: [0.28, 0.42, -0.34], target: [0.01, -0.04, -0.02],
+      fov: 34, focusRange: 0.15, dof: 1.20, handheld: 0.55, roll: 0.5
+    });
+  }
+
+  /**
+   * Park the pivot on the head. Falls back to the pillow end of the mattress
+   * before the rig has posed, so the very first snap is never wild.
+   */
+  _syncShotPivot() {
+    if (!this.shotPivot) return;
+    const b = this.ctx.baby;
+    let head = null;
+    try { head = b?.headWorldPos?.(); } catch (e) { head = null; }
+    if (!head || !Number.isFinite(head.x)) {
+      head = this._v.set(this.cribPos.x - 0.09, this.surfaceY + 0.062, this.cribPos.z);
+    }
+    // The pivot lives under this.group, which is at the identity — world and
+    // local coincide, so a straight copy is correct and stays correct.
+    this.shotPivot.position.copy(head);
+    this.shotPivot.rotation.set(0, this.ctx.baby?.group?.rotation.y ?? -Math.PI / 2, 0);
+    this.shotPivot.updateMatrixWorld(true);
   }
 
   _maskAnchor(name) {
@@ -888,6 +959,11 @@ export class SleepActivity {
     b?.lookAt?.(null);
     b?.setOutfit?.({ top: 'onesie' });
 
+    // The app snaps the camera the instant enter() returns, so the shot pivot
+    // has to already be sitting on the head the baby *now* has.
+    b?.group?.updateMatrixWorld?.(true);
+    this._syncShotPivot();
+
     this._setLamp(true, false);
     this._setCurtains(0.7, false);
     ctx.room?.setLamp?.(true);
@@ -935,6 +1011,11 @@ export class SleepActivity {
     ctx.ui?.hidePrompt?.();
     try { this.lullaby?.stop?.(); } catch (e) { /* ignore */ }
     this.lullaby = null;
+
+    // Hand the rig back before the scene graph goes away — the shot pivot is
+    // about to be removed and nothing may keep resolving presets against it.
+    ctx.cameraRig?.setSubject?.(null);
+    this.shotPivot = null;
 
     this.pickables.length = 0;
     this.book?.dispose?.();
@@ -1037,7 +1118,7 @@ export class SleepActivity {
     const ctx = this.ctx;
     this.brushing = true;
     this.teeth.group.visible = true;
-    ctx.cameraRig?.goTo?.('face', 0.9);
+    ctx.cameraRig?.goTo?.('crib-face', 0.9);
     ctx.baby?.setMood?.('surprised');
     ctx.ui?.prompt?.('はを こしこし してね', { icon: 'brush' });
     snd(ctx, 'play.chime', { gain: 0.5 });
@@ -1106,8 +1187,12 @@ export class SleepActivity {
     const ctx = this.ctx;
     this.todo.pajama = true;
     snd(ctx, 'ui.swipe', { gain: 0.5 });
-    ctx.baby?.setOutfit?.({ top: 'pajama', bottom: 'pajama', socks: null, shoes: null, hat: null });
-    ctx.state?.patch?.({ outfit: { top: 'pajama', bottom: 'pajama' } });
+    // Explicit colour, not the name 'pajama': outfit.js resolves garment values
+    // against PALETTE, which has no such key, so the name silently fell through
+    // to the default and the pyjamas rendered as the stock mint day-top.
+    // This hex matches the pyjama garment in dress.js.
+    ctx.baby?.setOutfit?.({ top: PAJAMA_COLOR, bottom: PAJAMA_COLOR, socks: null, shoes: null, hat: null });
+    ctx.state?.patch?.({ outfit: { top: PAJAMA_COLOR, bottom: PAJAMA_COLOR } });
     this.pajamaProp.visible = false;
     const chest = ctx.baby?.focusPoint?.() || this.cribPos.clone().setY(this.surfaceY + 0.08);
     ctx.fx?.burst?.('sparkle', chest, 10);
@@ -1784,6 +1869,10 @@ export class SleepActivity {
     // the とんとん target rides the baby's chest
     const chest = this.ctx.baby?.focusPoint?.();
     if (chest) this.patTarget.position.copy(chest);
+
+    // and the camera pivot rides the head, so every cot shot stays composed
+    // on the face however the sleep pose settles
+    this._syncShotPivot();
 
     this._stageUpdate(dt);
     this._quiltUpdate(dt);

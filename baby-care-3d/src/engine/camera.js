@@ -20,10 +20,19 @@
  * rig, freezes the handheld phase at t = 0 and cancels any shake, so two runs
  * produce identical pixels. `rig.still = true` does the same without moving.
  *
- * Framing note: the built-in presets are composed around the world origin,
- * where the baby sits (floor y = 0, ~0.62 m standing / ~0.40 m sitting). An
- * activity whose prop lives somewhere else should re-register the preset with
- * `addPreset(name, …)` against its own anchor rather than fight the defaults.
+ * Framing note — presets are *subject-relative*. `pos`/`target` on a preset
+ * whose `space` is `'subject'` are offsets in the subject's own frame
+ * (position + yaw), resolved every frame against whatever `setSubject()` names
+ * — by default the baby root. That is what lets one `face` preset frame the
+ * baby on the rug, on the changing podium in front of the wardrobe and in the
+ * highchair without three sets of hand-tuned world coordinates. Room framings
+ * (`wide`, `title`) declare `space: 'world'` and stay absolute, because they
+ * compose the *set*, not the character.
+ *
+ * `addPreset()` defaults to `'world'` so the documented contract keeps working
+ * for callers that hand over an anchor's world position. Activities that want
+ * a scoped override use `overridePreset()`, which `restorePresets()` undoes
+ * when the activity is torn down.
  * ========================================================================== */
 
 import * as THREE from 'three';
@@ -35,62 +44,85 @@ import * as THREE from 'three';
  * pass' DOF (smaller = shallower). `dof` scales the pass' overall blur
  * strength, `handheld` scales the breathing, `roll` the horizon wobble.
  *
- * Compositions are built on thirds: the look target sits *above* the subject
- * so the baby lands on the lower third with headroom, and is nudged laterally
- * so nothing is dead-centre.
+ * For `space: 'subject'` presets the numbers read as: +X is the subject's
+ * left, +Y is up from the subject's *origin* (a baby root sits on the floor),
+ * +Z is the direction the subject faces. Compositions are built on thirds: the
+ * look target sits above the subject's origin so the baby lands with headroom,
+ * and is nudged laterally so nothing is dead-centre.
  */
 const BUILTIN = {
   // Establishing shot. Adult eye height, gentle down-tilt, whole room reads.
+  // Composes the set, so it stays in world space.
   wide: {
+    space: 'world',
     pos: [2.05, 1.42, 2.85], target: [-0.10, 0.62, -0.05],
     fov: 40, focusRange: 0.50, dof: 0.80, handheld: 1.00, roll: 1.0
   },
 
-  // Dressing / general "look at what the baby is doing" framing.
+  // General "look at what the baby is doing" framing, composed for a seated
+  // baby (~0.40 m). Activities with a standing baby override it.
   closeup: {
+    space: 'subject',
     pos: [0.46, 0.55, 0.78], target: [-0.03, 0.30, 0.00],
-    fov: 34, focusRange: 0.10, dof: 1.20, handheld: 0.80, roll: 0.7
+    fov: 34, focusRange: 0.14, dof: 1.20, handheld: 0.80, roll: 0.7
   },
 
-  // Portrait. Eyes land on the upper third; focus is paper thin.
+  // Portrait. Eyes land on the upper third, crown ~14% down from the top
+  // edge, and there is lateral room for a raised arm on either side.
   face: {
-    pos: [0.26, 0.44, 0.46], target: [0.025, 0.315, 0.00],
-    fov: 30, focusRange: 0.05, dof: 1.35, handheld: 0.55, roll: 0.5
+    space: 'subject',
+    pos: [0.285, 0.465, 0.565], target: [-0.020, 0.315, 0.00],
+    fov: 30, focusRange: 0.12, dof: 1.35, handheld: 0.55, roll: 0.5
   },
 
   // Looking down into the cot — the classic "checking on the baby" angle.
+  // Composed around a baby *lying* on the mattress; sleep.js re-aims it at the
+  // head so the cot's own geometry can never occlude the shot.
   crib: {
-    pos: [0.44, 1.10, 0.62], target: [-0.02, 0.56, -0.02],
-    fov: 34, focusRange: 0.09, dof: 1.15, handheld: 0.50, roll: 0.5
+    space: 'subject',
+    pos: [0.34, 0.52, -0.40], target: [0.02, 0.02, 0.02],
+    fov: 36, focusRange: 0.16, dof: 1.15, handheld: 0.50, roll: 0.5
+  },
+
+  // Portrait of a sleeping baby, seen over the cot rail. The money shot.
+  'crib-face': {
+    space: 'subject',
+    pos: [0.20, 0.34, -0.26], target: [0.00, -0.02, 0.03],
+    fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
   },
 
   // Bath: kneeling beside the tub, tilted down over the rim.
   tub: {
-    pos: [0.50, 0.80, 0.72], target: [0.00, 0.34, 0.00],
-    fov: 36, focusRange: 0.10, dof: 1.10, handheld: 0.70, roll: 0.7
+    space: 'subject',
+    pos: [0.50, 0.62, 0.80], target: [0.00, 0.20, 0.02],
+    fov: 36, focusRange: 0.16, dof: 1.10, handheld: 0.70, roll: 0.7
   },
 
   // Highchair. Near eye-level with the baby so feeding feels face-to-face.
   table: {
-    pos: [0.42, 1.05, 0.92], target: [-0.04, 0.78, 0.00],
-    fov: 34, focusRange: 0.12, dof: 1.00, handheld: 0.75, roll: 0.7
+    space: 'subject',
+    pos: [0.40, 0.62, 0.86], target: [-0.03, 0.30, 0.02],
+    fov: 34, focusRange: 0.16, dof: 1.00, handheld: 0.75, roll: 0.7
   },
 
   // Floor play — camera on the rug, looking very slightly *up* at the baby.
   // The low hero angle is what makes a 40 cm subject feel like the star.
   floor: {
-    pos: [0.92, 0.26, 1.15], target: [-0.06, 0.34, 0.00],
-    fov: 44, focusRange: 0.20, dof: 0.90, handheld: 1.00, roll: 1.0
+    space: 'subject',
+    pos: [0.86, 0.28, 1.06], target: [-0.04, 0.34, 0.00],
+    fov: 42, focusRange: 0.24, dof: 0.90, handheld: 1.00, roll: 1.0
   },
 
   // Tidying / playmat: near top-down, reads the floor plane clearly.
   overhead: {
-    pos: [0.30, 1.95, 0.78], target: [0.00, 0.15, -0.02],
+    space: 'subject',
+    pos: [0.30, 1.60, 0.72], target: [0.00, 0.15, -0.02],
     fov: 42, focusRange: 0.35, dof: 0.80, handheld: 0.60, roll: 0.4
   },
 
   // Title card: long lens, subject well off-centre, heavy breathing.
   title: {
+    space: 'world',
     pos: [1.62, 0.72, 1.86], target: [-0.22, 0.42, -0.12],
     fov: 28, focusRange: 0.16, dof: 1.30, handheld: 1.80, roll: 1.6
   }
@@ -167,6 +199,14 @@ const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _look = new THREE.Vector3();
 
+// subject-frame resolution scratch
+const _sPos = new THREE.Vector3();
+const _sQuat = new THREE.Quaternion();
+const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _YAXIS = new THREE.Vector3(0, 1, 0);
+const _gPos = new THREE.Vector3();
+const _gTgt = new THREE.Vector3();
+
 /* ------------------------------------------------------------- the rig --- */
 
 export class CameraRig {
@@ -179,8 +219,19 @@ export class CameraRig {
     this.camera = camera;
     this.pipeline = pipeline;
 
+    // --- subject ------------------------------------------------------------
+    // Subject-space presets resolve against this transform. `defaultSubject`
+    // is the baby root (app.js hands it over at boot); an activity can point
+    // the rig at its own prop with setSubject() and drop back with
+    // setSubject(null).
+    this.defaultSubject = null;
+    this.subject = null;
+    this._subjectYaw = true;
+
     /** @type {Object<string, object>} */
     this.presets = {};
+    /** Restore set: what `restorePresets()` puts back. */
+    this._base = {};
     for (const name of Object.keys(BUILTIN)) this.addPreset(name, BUILTIN[name]);
 
     const first = this.presets.wide;
@@ -188,8 +239,9 @@ export class CameraRig {
     this.goal = first;
 
     // --- live (eased) state ------------------------------------------------
-    this.pos = first.pos.clone();
-    this.target = first.target.clone();
+    this._resolve(first, _gPos, _gTgt);
+    this.pos = _gPos.clone();
+    this.target = _gTgt.clone();
     this.fov = first.fov;
     this.focus = first.focusRange;
     this.dof = first.dof;
@@ -230,21 +282,100 @@ export class CameraRig {
   /**
    * Register or replace a framing. `pos`/`target` accept arrays or Vector3s so
    * an activity can hand over an anchor's world position directly.
+   *
+   * `space` defaults to `'world'` — absolute metres, which is what a caller
+   * handing over an anchor position means. Pass `space: 'subject'` for offsets
+   * resolved against the active subject's position + yaw.
+   *
+   * A preset added this way survives `restorePresets()`. Use
+   * `overridePreset()` for a framing that belongs to one activity only.
    */
   addPreset(name, def = {}) {
-    const p = {
-      pos: _toVec(def.pos, 0, 1.4, 2.6),
-      target: _toVec(def.target, 0, 0.4, 0),
-      fov: def.fov ?? 38,
-      focusRange: def.focusRange ?? 0.30,
-      dof: def.dof ?? 1.0,
-      handheld: def.handheld ?? 1.0,
-      roll: def.roll ?? 1.0
-    };
+    const p = _makePreset(def);
     this.presets[name] = p;
+    this._base[name] = p;
     // Re-registering the preset we are currently sitting on should re-aim.
     if (this.presetName === name && this.goal) this.goal = p;
     return p;
+  }
+
+  /**
+   * Register a framing for as long as the current activity is on screen.
+   * `restorePresets()` puts the previous definition back — so an activity can
+   * re-compose `face` or `tub` around its own props without permanently
+   * clobbering the shot for everyone else.
+   */
+  overridePreset(name, def = {}) {
+    const p = _makePreset(def);
+    this.presets[name] = p;
+    if (this.presetName === name && this.goal) this.goal = p;
+    return p;
+  }
+
+  /** Drop every scoped override. Called by app.js between activities. */
+  restorePresets() {
+    this.presets = Object.assign(Object.create(null), this._base);
+    const cur = this.presets[this.presetName];
+    if (cur) this.goal = cur;
+    return this;
+  }
+
+  /* ------------------------------------------------------------ subject -- */
+
+  /**
+   * The transform every `space:'subject'` preset is composed around. Set once
+   * at boot to the baby root; an activity points it at its own root/anchor
+   * while it owns the screen and calls `setSubject(null)` on the way out.
+   *
+   * Only the subject's *yaw* is used — a subject that pitches or rolls (a baby
+   * lying down, a tipping prop) must never tip the horizon. `yaw: false` keeps
+   * the offsets axis-aligned to the world for a subject whose facing is
+   * meaningless.
+   */
+  setSubject(object3D, { yaw = true } = {}) {
+    this.subject = object3D && object3D.isObject3D ? object3D : null;
+    this._subjectYaw = yaw !== false;
+    return this;
+  }
+
+  /** The fallback subject — app.js hands over the baby root at boot. */
+  setDefaultSubject(object3D) {
+    this.defaultSubject = object3D && object3D.isObject3D ? object3D : null;
+    return this;
+  }
+
+  /** The Object3D subject-space presets are currently resolved against. */
+  get activeSubject() { return this.subject || this.defaultSubject; }
+
+  /** Write the subject's position + yaw into the module scratch. */
+  _subjectFrame() {
+    const s = this.activeSubject;
+    if (!s) { _sPos.set(0, 0, 0); _sQuat.identity(); return; }
+    s.updateWorldMatrix(true, false);
+    s.getWorldPosition(_sPos);
+    if (!this._subjectYaw) { _sQuat.identity(); return; }
+    s.getWorldQuaternion(_sQuat);
+    _euler.setFromQuaternion(_sQuat, 'YXZ');
+    _sQuat.setFromAxisAngle(_YAXIS, _euler.y);
+  }
+
+  /** Resolve a preset's stored offsets into world-space pos/target. */
+  _resolve(p, outPos, outTarget) {
+    if (!p) return;
+    if (p.space === 'world') {
+      outPos.copy(p.pos);
+      outTarget.copy(p.target);
+      return;
+    }
+    this._subjectFrame();
+    outPos.copy(p.pos).applyQuaternion(_sQuat).add(_sPos);
+    outTarget.copy(p.target).applyQuaternion(_sQuat).add(_sPos);
+  }
+
+  /** World-space eye/aim the active preset resolves to right now. */
+  resolved(out = { pos: new THREE.Vector3(), target: new THREE.Vector3() }) {
+    this._resolve(this.goal, out.pos, out.target);
+    return out;
   }
 
   /** The framing currently being approached (read-only convenience). */
@@ -283,7 +414,8 @@ export class CameraRig {
       // Inline framing: merge over the current preset so callers can pass only
       // the fields they care about (e.g. just a new target).
       const base = this.goal || this.presets.wide;
-      p = this.addPreset('__inline__', {
+      p = this.overridePreset('__inline__', {
+        space: presetNameOrObject.space ?? base.space,
         pos: presetNameOrObject.pos ?? base.pos,
         target: presetNameOrObject.target ?? base.target,
         fov: presetNameOrObject.fov ?? base.fov,
@@ -307,8 +439,12 @@ export class CameraRig {
     }
 
     // --- snap ---------------------------------------------------------------
-    this.pos.copy(p.pos);
-    this.target.copy(p.target);
+    // Resolve first: a subject-space preset has no meaning until it has been
+    // pushed through the subject transform, and the harness relies on the snap
+    // landing on *exactly* the framing the preset describes.
+    this._resolve(p, _gPos, _gTgt);
+    this.pos.copy(_gPos);
+    this.target.copy(_gTgt);
     this.fov = p.fov;
     this.focus = p.focusRange;
     this.dof = p.dof;
@@ -369,11 +505,15 @@ export class CameraRig {
 
     const w = this._omega;
 
+    // Re-resolve every frame: the subject can walk, be lifted into a highchair
+    // or be laid down in a cot, and the framing has to follow it.
+    this._resolve(g, _gPos, _gTgt);
+
     // Position and aim ride separate springs; aiming settles slightly faster
     // so the frame locks onto the subject before the move finishes, which is
     // exactly how an operator works.
-    _springVec(this.pos, this._posV, g.pos, w, h);
-    _springVec(this.target, this._tgtV, g.target, w * 1.25, h);
+    _springVec(this.pos, this._posV, _gPos, w, h);
+    _springVec(this.target, this._tgtV, _gTgt, w * 1.25, h);
 
     let s = springStep(this.fov, this._fovV, g.fov, w, h);
     this.fov = s[0]; this._fovV = s[1];
@@ -487,6 +627,19 @@ export class CameraRig {
 }
 
 /* --------------------------------------------------------------- utils --- */
+
+function _makePreset(def = {}) {
+  return {
+    space: def.space === 'subject' ? 'subject' : 'world',
+    pos: _toVec(def.pos, 0, 1.4, 2.6),
+    target: _toVec(def.target, 0, 0.4, 0),
+    fov: def.fov ?? 38,
+    focusRange: def.focusRange ?? 0.30,
+    dof: def.dof ?? 1.0,
+    handheld: def.handheld ?? 1.0,
+    roll: def.roll ?? 1.0
+  };
+}
 
 function _toVec(v, dx, dy, dz) {
   if (!v) return new THREE.Vector3(dx, dy, dz);
