@@ -1,0 +1,359 @@
+/* ============================================================================
+ * lighting.js — Lighting rig + procedural IBL
+ * ----------------------------------------------------------------------------
+ * Three ideas do most of the work here:
+ *   1. A hand-built "light box" scene is baked through PMREMGenerator so every
+ *      PBR surface gets real image-based ambient instead of a flat hemisphere.
+ *   2. A key / fill / rim / bounce rig borrowed straight from product
+ *      photography — that's what makes toys look photographed, not rendered.
+ *   3. Time-of-day presets crossfade the whole rig, so evening bath time and
+ *      midday play read as genuinely different rooms.
+ * ========================================================================== */
+
+import * as THREE from 'three';
+
+/* ------------------------------------------------------------- IBL ------- */
+
+/**
+ * Build a small emissive box scene that stands in for a real HDRI.
+ * Warm ceiling bounce, a big cool window on -X, soft pastel walls.
+ */
+function buildEnvScene(mood) {
+  const scene = new THREE.Scene();
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  geo.deleteAttribute('uv');
+
+  const panel = (color, intensity, pos, scale, rot) => {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).multiplyScalar(intensity),
+      side: THREE.BackSide
+    }));
+    m.position.set(...pos);
+    m.scale.set(...scale);
+    if (rot) m.rotation.set(...rot);
+    scene.add(m);
+    return m;
+  };
+
+  const area = (color, intensity, pos, scale, rot) => {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).multiplyScalar(intensity)
+    }));
+    m.position.set(...pos);
+    m.scale.set(...scale);
+    if (rot) m.rotation.set(...rot);
+    scene.add(m);
+    return m;
+  };
+
+  // Enclosing room shell — this is the ambient floor of the whole image.
+  panel(mood.envWall, mood.envWallI, [0, 0, 0], [22, 12, 22]);
+  // Ceiling: warm bounce from the room's own lights.
+  area(mood.envCeil, mood.envCeilI, [0, 5.6, 0], [16, 0.1, 16]);
+  // Floor bounce: picks up the rug colour, fills the underside of the baby.
+  area(mood.envFloor, mood.envFloorI, [0, -5.6, 0], [16, 0.1, 16]);
+  // The window — the single strongest source, deliberately off-axis.
+  area(mood.envWindow, mood.envWindowI, [-6.6, 1.4, 1.2], [0.1, 5.2, 6.4]);
+  // Soft opposite fill so rims never go pitch black.
+  area(mood.envFill, mood.envFillI, [6.4, 0.8, -1.0], [0.1, 4.0, 5.0]);
+  // Two small warm sources standing in for lamps / practicals.
+  area(mood.envLamp, mood.envLampI, [2.6, 2.4, 3.4], [1.2, 1.2, 0.1]);
+  area(mood.envLamp, mood.envLampI * 0.6, [-2.2, 2.0, -3.6], [1.4, 1.0, 0.1]);
+
+  return scene;
+}
+
+/* --------------------------------------------------------- mood presets -- */
+
+export const MOODS = {
+  day: {
+    envWall: 0xf2e4ef, envWallI: 0.1925,
+    envCeil: 0xfff4e6, envCeilI: 0.4375,
+    envFloor: 0xffd9e6, envFloorI: 0.1575,
+    envWindow: 0xdff0ff, envWindowI: 1.2,
+    envFill: 0xffe9d6, envFillI: 0.385,
+    envLamp: 0xffd9a0, envLampI: 0.24,
+
+    keyColor: 0xfff2df, keyIntensity: 2.9838, keyPos: [-4.4, 5.2, 3.4],
+    fillColor: 0xd8ecff, fillIntensity: 0.4335, fillPos: [4.6, 2.6, 3.0],
+    rimColor: 0xffe2c4, rimIntensity: 1.0024, rimPos: [1.2, 4.0, -5.0],
+    hemiSky: 0xdff0ff, hemiGround: 0xffd9c9, hemiIntensity: 0.1513,
+    envIntensity: 0.3024,
+    grade: { saturation: 1.12, contrast: 1.05, warmth: 0.03, vignette: 0.26, exposure: 1.0 },
+    fog: { color: 0xf6e9f2, density: 0.008 }
+  },
+
+  golden: {   // late afternoon — the "play" and "feed" hero look
+    envWall: 0xf6e0dc, envWallI: 0.175,
+    envCeil: 0xffeacd, envCeilI: 0.3675,
+    envFloor: 0xffd0b8, envFloorI: 0.175,
+    envWindow: 0xffd8a8, envWindowI: 1.36,
+    envFill: 0xffdcc0, envFillI: 0.315,
+    envLamp: 0xffc98a, envLampI: 0.36,
+
+    keyColor: 0xffdcae, keyIntensity: 3.2725, keyPos: [-5.0, 3.4, 2.6],
+    fillColor: 0xcfe4ff, fillIntensity: 0.3162, fillPos: [4.4, 2.4, 3.2],
+    rimColor: 0xffcf9a, rimIntensity: 1.4107, rimPos: [0.4, 3.4, -5.2],
+    hemiSky: 0xffe6cc, hemiGround: 0xffc9a8, hemiIntensity: 0.1375,
+    envIntensity: 0.3024,
+    grade: { saturation: 1.14, contrast: 1.06, warmth: 0.07, vignette: 0.32, exposure: 1.02 },
+    fog: { color: 0xf9e3d6, density: 0.012 }
+  },
+
+  evening: {  // bath time
+    envWall: 0xe6dcf0, envWallI: 0.147,
+    envCeil: 0xffeedd, envCeilI: 0.315,
+    envFloor: 0xe8d2e2, envFloorI: 0.1225,
+    envWindow: 0xa8b8e8, envWindowI: 0.352,
+    envFill: 0xffe0c0, envFillI: 0.28,
+    envLamp: 0xffc98a, envLampI: 0.8,
+
+    keyColor: 0xffe0b8, keyIntensity: 2.5025, keyPos: [-3.2, 4.4, 2.8],
+    fillColor: 0xb8c8f0, fillIntensity: 0.2805, fillPos: [4.0, 2.2, 2.6],
+    rimColor: 0xc9d8ff, rimIntensity: 1.1138, rimPos: [1.6, 3.6, -4.6],
+    hemiSky: 0xc8d4f0, hemiGround: 0xffd0b0, hemiIntensity: 0.1155,
+    envIntensity: 0.2873,
+    grade: { saturation: 1.08, contrast: 1.07, warmth: 0.05, vignette: 0.38, exposure: 0.98 },
+    fog: { color: 0xe9dced, density: 0.016 }
+  },
+
+  night: {    // sleep
+    envWall: 0x39406b, envWallI: 0.175,
+    envCeil: 0x4a5590, envCeilI: 0.1925,
+    envFloor: 0x3a3560, envFloorI: 0.105,
+    envWindow: 0x8fa8e8, envWindowI: 0.256,
+    envFill: 0x5f6bb0, envFillI: 0.175,
+    envLamp: 0xffc078, envLampI: 1.28,
+
+    keyColor: 0xffcb8a, keyIntensity: 1.4437, keyPos: [-1.6, 2.6, 2.0],
+    fillColor: 0x8098e0, fillIntensity: 0.2805, fillPos: [3.4, 2.6, 2.2],
+    rimColor: 0x9fb4ff, rimIntensity: 1.1138, rimPos: [1.0, 3.4, -4.4],
+    hemiSky: 0x6f80c8, hemiGround: 0x4a4070, hemiIntensity: 0.0963,
+    envIntensity: 0.257,
+    grade: { saturation: 0.98, contrast: 1.10, warmth: -0.02, vignette: 0.50, exposure: 1.06 },
+    fog: { color: 0x3b3f66, density: 0.030 }
+  }
+};
+
+/* ------------------------------------------------------------- the rig --- */
+
+export class LightingRig {
+  constructor(renderer, scene) {
+    this.renderer = renderer;
+    this.scene = scene;
+    this._pmrem = new THREE.PMREMGenerator(renderer);
+    this._pmrem.compileEquirectangularShader();
+    this._envCache = new Map();
+    this._current = null;
+    this._target = null;
+    this._blend = 1;
+
+    const root = new THREE.Group();
+    root.name = 'LightingRig';
+    scene.add(root);
+    this.root = root;
+
+    // --- key: the window. Big soft shadow, high resolution. ---------------
+    const key = new THREE.DirectionalLight(0xffffff, 1);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far = 22;
+    const s = 4.2;
+    key.shadow.camera.left = -s; key.shadow.camera.right = s;
+    key.shadow.camera.top = s; key.shadow.camera.bottom = -s;
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.022;
+    key.shadow.radius = 2.2;          // PCF kernel spread
+    key.shadow.blurSamples = 16;
+    // Tight frustum around the play area keeps texel density high; a 7.5m box
+    // at 2048 was giving ~5mm texels, which is why contact looked mushy.
+    key.shadow.camera.updateProjectionMatrix();
+    root.add(key, key.target);
+    this.key = key;
+
+    // --- fill: cool, no shadow, kills the dead black side of the face -----
+    const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+    root.add(fill, fill.target);
+    this.fill = fill;
+
+    // --- rim: behind and above; this is the single biggest "AAA" tell -----
+    const rim = new THREE.DirectionalLight(0xffffff, 1.2);
+    root.add(rim, rim.target);
+    this.rim = rim;
+
+    // --- hemisphere: ground bounce for the underside of everything --------
+    const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.5);
+    root.add(hemi);
+    this.hemi = hemi;
+
+    // --- practical: a warm point light that lives inside the night lamp ---
+    const practical = new THREE.PointLight(0xffc078, 0, 6, 2);
+    practical.castShadow = false;
+    root.add(practical);
+    this.practical = practical;
+
+    scene.fog = new THREE.FogExp2(0xf6e9f2, 0.008);
+  }
+
+  _env(name) {
+    if (!this._envCache.has(name)) {
+      const envScene = buildEnvScene(MOODS[name]);
+      const rt = this._pmrem.fromScene(envScene, 0.035);
+      envScene.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+      this._envCache.set(name, rt.texture);
+    }
+    return this._envCache.get(name);
+  }
+
+  /** Snap immediately to a mood. */
+  apply(name) {
+    const m = MOODS[name];
+    if (!m) return;
+    this._current = name;
+    this._target = null;
+    this._blend = 1;
+    this._write(m, 1, m);
+    this.scene.environment = this._env(name);
+    this.scene.environmentIntensity = m.envIntensity;
+    this._moodName = name;
+  }
+
+  /** Crossfade toward a mood over `seconds`. */
+  transitionTo(name, seconds = 1.6) {
+    if (!MOODS[name] || name === this._current) return;
+    this._from = MOODS[this._current] || MOODS.day;
+    this._target = name;
+    this._blend = 0;
+    this._blendSpeed = 1 / Math.max(0.001, seconds);
+    // The env map itself pops at the midpoint; with everything else fading it
+    // is imperceptible, and cross-blending two PMREMs isn't worth the VRAM.
+    this._envSwapped = false;
+  }
+
+  _write(a, t, b) {
+    const lerp = THREE.MathUtils.lerp;
+    const col = (out, ca, cb) => out.setHex(ca).lerp(_tmpColor.setHex(cb), t);
+
+    col(this.key.color, a.keyColor, b.keyColor);
+    this.key.intensity = lerp(a.keyIntensity, b.keyIntensity, t);
+    this.key.position.set(
+      lerp(a.keyPos[0], b.keyPos[0], t),
+      lerp(a.keyPos[1], b.keyPos[1], t),
+      lerp(a.keyPos[2], b.keyPos[2], t));
+
+    col(this.fill.color, a.fillColor, b.fillColor);
+    this.fill.intensity = lerp(a.fillIntensity, b.fillIntensity, t);
+    this.fill.position.set(
+      lerp(a.fillPos[0], b.fillPos[0], t),
+      lerp(a.fillPos[1], b.fillPos[1], t),
+      lerp(a.fillPos[2], b.fillPos[2], t));
+
+    col(this.rim.color, a.rimColor, b.rimColor);
+    this.rim.intensity = lerp(a.rimIntensity, b.rimIntensity, t);
+    this.rim.position.set(
+      lerp(a.rimPos[0], b.rimPos[0], t),
+      lerp(a.rimPos[1], b.rimPos[1], t),
+      lerp(a.rimPos[2], b.rimPos[2], t));
+
+    col(this.hemi.color, a.hemiSky, b.hemiSky);
+    col(this.hemi.groundColor, a.hemiGround, b.hemiGround);
+    this.hemi.intensity = lerp(a.hemiIntensity, b.hemiIntensity, t);
+
+    if (this.scene.fog) {
+      col(this.scene.fog.color, a.fog.color, b.fog.color);
+      this.scene.fog.density = lerp(a.fog.density, b.fog.density, t);
+    }
+    this.scene.environmentIntensity = lerp(a.envIntensity, b.envIntensity, t);
+  }
+
+  /** Blended grade parameters for the current transition. */
+  currentGrade() {
+    const a = this._from || MOODS[this._current] || MOODS.day;
+    const b = MOODS[this._target] || a;
+    const t = this._target ? this._blend : 1;
+    const L = THREE.MathUtils.lerp;
+    return {
+      saturation: L(a.grade.saturation, b.grade.saturation, t),
+      contrast: L(a.grade.contrast, b.grade.contrast, t),
+      warmth: L(a.grade.warmth, b.grade.warmth, t),
+      vignette: L(a.grade.vignette, b.grade.vignette, t),
+      exposure: L(a.grade.exposure, b.grade.exposure, t)
+    };
+  }
+
+  update(dt) {
+    if (!this._target) return false;
+    this._blend = Math.min(1, this._blend + dt * this._blendSpeed);
+    const a = this._from, b = MOODS[this._target];
+    this._write(a, this._blend, b);
+    if (!this._envSwapped && this._blend > 0.5) {
+      this.scene.environment = this._env(this._target);
+      this._envSwapped = true;
+    }
+    if (this._blend >= 1) {
+      this._current = this._target;
+      this._moodName = this._target;
+      this._target = null;
+    }
+    return true;
+  }
+
+  /** Aim every light at a world point (usually the baby's chest). */
+  aimAt(v) {
+    this.key.target.position.copy(v);
+    this.fill.target.position.copy(v);
+    this.rim.target.position.copy(v);
+    this.key.target.updateMatrixWorld();
+    this.fill.target.updateMatrixWorld();
+    this.rim.target.updateMatrixWorld();
+  }
+
+  dispose() {
+    for (const t of this._envCache.values()) t.dispose();
+    this._envCache.clear();
+    this._pmrem.dispose();
+  }
+}
+
+const _tmpColor = new THREE.Color();
+
+/* ------------------------------------------------- contact shadow blob --- */
+
+/**
+ * A cheap, always-correct soft contact shadow that sits under a prop.
+ * VSM shadow maps go soft at distance; this restores the tight dark core
+ * right where an object meets the floor, which is what sells contact.
+ */
+export function contactShadow(radius = 0.5, opacity = 0.42, softness = 1.8) {
+  const geo = new THREE.PlaneGeometry(radius * 2, radius * 2);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      uOpacity: { value: opacity },
+      uSoftness: { value: softness },
+      uColor: { value: new THREE.Color(0x4a2b3c) }
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec2 vUv;
+      uniform float uOpacity, uSoftness;
+      uniform vec3 uColor;
+      void main() {
+        float d = length(vUv - 0.5) * 2.0;
+        float a = pow(max(0.0, 1.0 - d), uSoftness) * uOpacity;
+        gl_FragColor = vec4(uColor, a);
+      }`
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = -Math.PI / 2;
+  m.renderOrder = -1;
+  m.userData.setOpacity = v => { mat.uniforms.uOpacity.value = v; };
+  return m;
+}

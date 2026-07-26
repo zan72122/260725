@@ -1,0 +1,10 @@
+node_modules/
+package-lock.json
+package.json
+
+# Reference imagery gathered for internal critique only — never redistributed.
+baby-care-3d/docs/reference/
+
+# Harness output that is regenerated on demand.
+baby-care-3d/docs/shots/console.log
+baby-care-3d/docs/review/

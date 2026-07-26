@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" }}
+</script></head>
+<body style="margin:0"><canvas id="c" style="width:100vw;height:100vh;display:block"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { RenderPipeline } from '../src/engine/render.js';
+import { LightingRig } from '../src/engine/lighting.js';
+import * as MAT from '../src/engine/materials.js';
+
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 60);
+cam.position.set(0.9, 0.9, 1.8); cam.lookAt(0, 0.35, 0);
+const pipe = new RenderPipeline(document.getElementById('c'), scene, cam, 2);
+const rig = new LightingRig(pipe.renderer, scene);
+rig.apply('day');
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(8,8), MAT.makeCarpet({color:0xffd7e6, repeat:6}));
+floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(8,4), MAT.makeWall({repeat:5}));
+wall.position.set(0,2,-2); wall.receiveShadow = true; scene.add(wall);
+
+const skinBall = new THREE.Mesh(new THREE.SphereGeometry(0.35, 96, 64), MAT.makeSkin({}));
+skinBall.position.set(-0.55, 0.35, 0); skinBall.castShadow = true; scene.add(skinBall);
+
+const woodBox = new THREE.Mesh(new THREE.BoxGeometry(0.45,0.45,0.45), MAT.makeWood({planks:0, repeat:1}));
+woodBox.position.set(0.25, 0.225, 0.2); woodBox.castShadow = true; woodBox.receiveShadow = true; scene.add(woodBox);
+
+const cloth = new THREE.Mesh(new THREE.SphereGeometry(0.24, 64, 48), MAT.makeCloth({color:0xa8d8ff, repeat:2}));
+cloth.position.set(0.7, 0.24, -0.35); cloth.castShadow = true; scene.add(cloth);
+
+const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.12,0.34,48,1), MAT.makeGlass({tint:0xfff6e8}));
+glass.position.set(-0.05, 0.17, 0.7); glass.castShadow = true; scene.add(glass);
+
+const cer = new THREE.Mesh(new THREE.TorusKnotGeometry(0.16,0.055,128,24), MAT.makeCeramic({color:0xffc0d8}));
+cer.position.set(0.95, 0.35, 0.5); cer.castShadow = true; scene.add(cer);
+
+pipe.focusOn(new THREE.Vector3(0,0.35,0), 0.28);
+rig.aimAt(new THREE.Vector3(0,0.35,0));
+
+let n=0;
+function loop(){ pipe.render(1/60); if(++n===12) window.__SMOKE_OK__=true; requestAnimationFrame(loop); }
+loop();
+window.addEventListener('error', e => { window.__SMOKE_ERR__ = e.message + '\n' + (e.error?.stack||''); });
+</script></body></html>
