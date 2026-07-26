@@ -378,7 +378,7 @@ export function makeWood({
             float rh = wdHash(row * 7.31 + 3.7);
             /* Board *lengths* vary per course, not just their phase. With a
              * fixed pitch the joints landed on a lattice: staggered between
-             * rows, but every row's joints exactly `uJoint` apart, which the
+             * rows, but every row's joints exactly uJoint apart, which the
              * eye assembled — together with the plank seams running the other
              * way — into a grid. The floor read as square tiles rather than as
              * boards. A ±25% per-course length is what a real pack of flooring
@@ -387,7 +387,12 @@ export function makeWood({
             float bx = uv.x / pitch + rh * 4.17;
             float board = floor(bx);
             float bh = wdHash(board * 19.13 + row * 5.77);
-            joint = 1.0 - smoothstep(0.0, 0.010, min(fract(bx), 1.0 - fract(bx)));
+            /* Width is in *board lengths*, so 0.012 on a 1.2 m board was a
+             * 15 mm black band on each side of every joint — a 30 mm dark
+             * cross-line, which is what the remaining regular banding across
+             * the floor actually was. A butt joint in a fitted floor is a
+             * hairline: 0.0025 of a board is ~3 mm. */
+            joint = 1.0 - smoothstep(0.0, 0.0025, min(fract(bx), 1.0 - fract(bx)));
             return vec2(uv.x + bh * 6.31 + rh * 2.19, uv.y);
           }
         `)
@@ -399,7 +404,7 @@ export function makeWood({
           // as strong as the plank seam, so the two read as equal partners in a
           // grid instead of "long boards, occasionally jointed". A butt joint
           // in a fitted floor is a hairline; it should be just visible.
-          diffuseColor.rgb *= 1.0 - wdJoint * 0.26;
+          diffuseColor.rgb *= 1.0 - wdJoint * 0.30;
         `)
         .replace('#include <roughnessmap_fragment>', /* glsl */`
           float roughnessFactor = roughness;
@@ -407,7 +412,7 @@ export function makeWood({
             vec4 texelRoughness = texture2D( roughnessMap, wdUv );
             roughnessFactor *= texelRoughness.g;
           #endif
-          roughnessFactor = clamp(roughnessFactor + wdJoint * 0.25, 0.04, 1.0);
+          roughnessFactor = clamp(roughnessFactor + wdJoint * 0.16, 0.04, 1.0);
         `);
     };
     mat.customProgramCacheKey = () => 'wood-detile';

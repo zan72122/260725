@@ -150,7 +150,7 @@ const GradeShader = {
        * exposed" and not "lit" — which is the thing that separates a hobby
        * render from a shipped one.
        *
-       * 1.18 is applied here rather than in the grade's `uSaturation` on
+       * 1.18 is applied here rather than in the grade's uSaturation on
        * purpose: at this point we are still working per-channel on the tone
        * curve's own output, so it undoes AgX's desaturation where AgX did it
        * (the highlights) instead of pushing the shadows around too.
