@@ -1687,7 +1687,10 @@ export class FeedActivity {
   _updateSuck(dt) {
     const ctx = this.ctx;
     const it = this.item;
-    it.t += dt;
+    // A harness-staged pose holds its progress: the shot list warms the clock
+    // for a few seconds, and a bottle that kept draining would be empty by the
+    // time the frame is taken.
+    if (!it.frozen) it.t += dt;
     const k = S.clamp(it.t / it.total, 0, 1);
 
     // lock the vessel to the mouth
@@ -1705,6 +1708,8 @@ export class FeedActivity {
       obj.rotation.set(-0.12, 0, 0.06);
       this._setPackDent(k);
     }
+
+    if (it.frozen) return;
 
     it.gulp -= dt;
     if (it.gulp <= 0) {
@@ -2087,7 +2092,8 @@ export class FeedActivity {
     if (it) {
       if (it.state === 'eating') {
         this._mouthLocal(this._tmp);
-        it.obj.position.lerp(this._tmp.add(new THREE.Vector3(0, -0.012, 0.045)), Math.min(1, dt * 9));
+        this._tmp.y -= 0.012; this._tmp.z += 0.045;
+        it.obj.position.lerp(this._tmp, Math.min(1, dt * 9));
         it.t -= dt;
         if (it.t <= 0 && it.state === 'eating') { it.t = 0.6; this._doBite(); }
       } else if (it.state === 'sucking') {
@@ -2152,8 +2158,6 @@ export class FeedActivity {
       }
     }
 
-    // the milk surface has to keep re-levelling while the bottle is tilted
-    if (this.item?.id === 'bottle' && this.item.state === 'sucking') this._setMilk(this.milkLevel);
   }
 
   _crumbLanded(c) {
@@ -2211,6 +2215,7 @@ export class FeedActivity {
     this._syncBubbles();
     this.bib.visible = !this.bibOn;
     this.item = this._newItem(id);
+    this.item.frozen = true;          // hold the pose through the harness warm
     this.request = id;
 
     this._mouthLocal(this._tmp);

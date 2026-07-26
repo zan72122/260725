@@ -1017,7 +1017,7 @@ export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
       const wob = Math.sin(a * 5) * 0.015;
       if (rr > 0.93 + wob) c.copy(edge);
       else if (rr > 0.62 + wob && rr < 0.74 + wob) c.copy(band);
-      else if (rr < 0.24 + wob) c.copy(band);
+      else if (rr < 0.24 + wob * 0.35) c.copy(band);   // medallion stays round
       else c.copy(base);
       col.push(c.r, c.g, c.b);
     }

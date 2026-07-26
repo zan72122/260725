@@ -1624,7 +1624,9 @@ export class DressActivity {
     } else if (step === 'wash' || step === 'dry') {
       this._setGarmentState(g, step === 'wash' ? 'washing' : 'drying');
       g.from = g.group.position.clone();
-      this.laundry = { g, phase: step === 'wash' ? 'wash' : 'dry', t: step === 'wash' ? 2.0 : 2.0 };
+      // start each staged phase early enough that a few seconds of harness
+      // warm-up still lands inside it
+      this.laundry = { g, phase: step === 'wash' ? 'wash' : 'dry', t: step === 'wash' ? 0.6 : 1.6 };
       if (step === 'wash') {
         g.group.visible = false;
         for (const m of this.load) m.visible = true;

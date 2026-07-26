@@ -484,7 +484,10 @@ export class Room {
   }
 
   pickables() {
-    return [...this._pick, ...(this.window ? this.window.pickables() : []), this.rug, this.floor];
+    // meshes only: a Group in the list is silently ignored by a non-recursive
+    // raycast, which is exactly the kind of bug that eats an afternoon
+    return [...this._pick, ...(this.window ? this.window.pickables() : []), this.rug, this.floor]
+      .filter(o => o && (o.isMesh || o.isPoints));
   }
 
   /** 'day' | 'golden' | 'evening' | 'night' — room-side dressing only; the
