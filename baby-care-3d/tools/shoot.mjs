@@ -38,7 +38,7 @@ const OUT = resolve(ROOT, arg('out', 'docs/shots'));
 const WIDTH = parseInt(arg('w', '1440'), 10);
 const HEIGHT = parseInt(arg('h', '900'), 10);
 const ONLY = arg('only', '') ? arg('only', '').split(',').map(s => s.trim()) : null;
-const TIMEOUT = parseInt(arg('timeout', '120000'), 10);
+const TIMEOUT = parseInt(arg('timeout', '300000'), 10);
 const VERBOSE = flag('verbose');
 
 /* ------------------------------------------------------- static server --- */
@@ -168,7 +168,7 @@ try {
     }, shot);
 
     const file = join(OUT, `${label}.png`);
-    await page.screenshot({ path: file, animations: 'disabled' });
+    await page.screenshot({ path: file, animations: 'disabled', timeout: 180000 });
     manifest.push({ id: label, file: `${label}.png`, scene: shot.scene, note: shot.note || '' });
     console.log(`${((Date.now() - started) / 1000).toFixed(1)}s`);
   }

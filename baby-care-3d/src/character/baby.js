@@ -355,7 +355,14 @@ export class Baby {
       const pole = R.bones['arm' + side].getWorldPosition(new THREE.Vector3());
       pole.x += (side === 'L' ? 0.22 : -0.22);
       pole.z -= 0.18;
-      solveTwoBoneIK(R.bones['arm' + side], R.bones['forearm' + side], R.bones['hand' + side], t, pole, 1);
+      // Callers mean "put the *palm* here", so aim the wrist at the target
+      // minus the palm socket's current offset from it.
+      const sock = R.sockets[side === 'L' ? 'leftHand' : 'rightHand'];
+      sock.updateWorldMatrix(true, false);
+      const wrist = R.bones['hand' + side].getWorldPosition(new THREE.Vector3());
+      const off = sock.getWorldPosition(new THREE.Vector3()).sub(wrist);
+      solveTwoBoneIK(R.bones['arm' + side], R.bones['forearm' + side],
+        R.bones['hand' + side], t.clone().sub(off), pole, 1);
     }
     for (const side of ['L', 'R']) {
       const t = this._ikTargets['foot' + side];

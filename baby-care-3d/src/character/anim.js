@@ -16,8 +16,6 @@
 
 import * as THREE from 'three';
 
-const D = Math.PI / 180;
-
 /* --------------------------------------------------------------- poses ---- */
 
 /**
@@ -49,7 +47,7 @@ export const POSES = {
     footL: [-0.30, 0, 0], footR: [-0.30, 0, 0]
   },
   lie: {
-    _root: { y: 0.0780, rx: -Math.PI / 2 },
+    _root: { y: -0.1770, rx: -Math.PI / 2 },
     hips: [0.05, 0, 0], spine: [-0.04, 0, 0], chest: [-0.06, 0, 0],
     neck: [0.10, 0, 0], head: [0.12, 0, 0],
     shoulderL: [0, 0, 0.16], shoulderR: [0, 0, -0.16],
@@ -61,7 +59,7 @@ export const POSES = {
     footL: [-0.15, 0, 0], footR: [-0.15, 0, 0]
   },
   sleep: {
-    _root: { y: 0.0780, rx: -Math.PI / 2 },
+    _root: { y: -0.1770, rx: -Math.PI / 2 },
     hips: [0.03, 0, 0], spine: [-0.02, 0, 0], chest: [-0.04, 0, 0],
     neck: [0.06, 0, 0], head: [0.10, 0.28, 0],
     shoulderL: [0, 0, 0.20], shoulderR: [0, 0, -0.20],
@@ -73,16 +71,21 @@ export const POSES = {
     footL: [-0.10, 0, 0], footR: [-0.10, 0, 0]
   },
   crawl: {
-    _root: { y: -0.1450, rx: 1.02 },
-    hips: [-0.14, 0, 0], spine: [-0.20, 0, 0], chest: [-0.26, 0, 0],
-    neck: [-0.34, 0, 0], head: [-0.52, 0, 0],
-    shoulderL: [0, 0, 0.06], shoulderR: [0, 0, -0.06],
-    armL: [-1.18, 0, 0.16], armR: [-1.18, 0, -0.16],
-    forearmL: [-0.14, 0, 0.06], forearmR: [-0.14, 0, -0.06],
-    handL: [0.62, 0, 0], handR: [0.62, 0, 0],
-    thighL: [-1.32, 0.08, -0.44], thighR: [-1.32, -0.08, 0.44],
-    shinL: [1.48, 0, 0], shinR: [1.48, 0, 0],
-    footL: [-0.42, 0, 0], footR: [-0.42, 0, 0]
+    // Torso pitched ~77° forward with the head craned back to look ahead;
+    // arms vertical under the shoulders, thighs vertical, shins folded back
+    // along the floor. Everything is expressed against a straight-down bind,
+    // so it composes correctly with the whole-body pitch.
+    _root: { y: -0.1300, rx: 1.35, z: 0.030 },
+    // spine chain contributes +0.19, so limbs cancel 1.35 + 0.19 to hang plumb
+    hips: [0.05, 0, 0], spine: [0.08, 0, 0], chest: [0.06, 0, 0],
+    neck: [-0.65, 0, 0], head: [-0.89, 0, 0],
+    shoulderL: [0, 0, 0.04], shoulderR: [0, 0, -0.04],
+    armL: [-1.70, 0, 0.14], armR: [-1.70, 0, -0.14],
+    forearmL: [-0.16, 0, 0.06], forearmR: [-0.16, 0, -0.06],
+    handL: [-1.41, 0, 0], handR: [-1.41, 0, 0],
+    thighL: [-1.40, 0.10, -0.34], thighR: [-1.40, -0.10, 0.34],
+    shinL: [1.55, 0, 0], shinR: [1.55, 0, 0],
+    footL: [-0.30, 0, 0], footR: [-0.30, 0, 0]
   },
   stand_up: null,   // alias filled below
   held: {
@@ -111,6 +114,23 @@ export const POSES = {
   }
 };
 POSES.stand_up = POSES.stand;
+
+/**
+ * The bind pose is an A-pose (arms out ~20°, forward ~15°) because the
+ * implicit body surface would otherwise weld the dangling hands to the hips.
+ * Poses above are authored as if the arms hung straight down, so every pose
+ * gets this constant correction folded in once, here.
+ */
+const BIND_ARM = { x: 0.16, z: -0.30 };
+for (const pose of Object.values(POSES)) {
+  if (!pose || pose.__armFixed) continue;
+  for (const [name, sgn] of [['armL', 1], ['armR', -1]]) {
+    const a = pose[name] || (pose[name] = [0, 0, 0]);
+    a[0] += BIND_ARM.x;
+    a[2] += BIND_ARM.z * sgn;
+  }
+  pose.__armFixed = true;
+}
 
 /* ------------------------------------------------------------ gestures ---- */
 
@@ -273,10 +293,16 @@ class Spring3 {
   step(target, dt, freq) {
     const w = 2 * Math.PI * freq;
     const k = w * w, c = 2 * this.zeta * w;
-    for (let i = 0; i < 3; i++) {
-      const a = (target[i] - this.x[i]) * k - this.v[i] * c;
-      this.v[i] += a * dt;
-      this.x[i] += this.v[i] * dt;
+    // Substep: a 2 Hz pose blend is fine at 60 fps but an 8 Hz one is not, and
+    // an unstable spring throws the whole baby across the room.
+    const n = Math.min(8, Math.max(1, Math.ceil(w * dt / 0.25)));
+    const h = dt / n;
+    for (let s = 0; s < n; s++) {
+      for (let i = 0; i < 3; i++) {
+        const a = (target[i] - this.x[i]) * k - this.v[i] * c;
+        this.v[i] += a * h;
+        this.x[i] += this.v[i] * h;
+      }
     }
     return this.x;
   }
@@ -286,6 +312,8 @@ class Spring3 {
 /* ------------------------------------------------------------- Animator --- */
 
 const ZERO = [0, 0, 0];
+const HIP_PIVOT = 0.262;          // hips anchor height — the body's turning point
+const _pivot = new THREE.Vector3();
 
 export class Animator {
   constructor(rig) {
@@ -435,8 +463,14 @@ export class Animator {
     this._prevRootV = (this.rootPos.y - prevY) / Math.max(1e-4, dt);
 
     const rrot = this.rootSpring.step([r.rx || 0, noise1(t * 0.16, 12) * 0.020 * E, noise1(t * 0.13, 19) * 0.016 * E], dt, this.freq);
-    rig.bones.root.position.copy(this.rootPos);
     rig.bones.root.rotation.set(rrot[0], rrot[1], rrot[2]);
+    // Whole-body pitch (lying down, crawling) has to pivot about the hips, not
+    // about the floor origin, or the baby swings through the ground.
+    _pivot.set(0, HIP_PIVOT, 0).applyEuler(rig.bones.root.rotation);
+    rig.bones.root.position.set(
+      this.rootPos.x - _pivot.x,
+      this.rootPos.y + HIP_PIVOT - _pivot.y,
+      this.rootPos.z - _pivot.z);
 
     /* --- head lag --------------------------------------------------------- */
     // The neck resists the chest's angular velocity: a heavy infant head is

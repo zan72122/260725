@@ -183,7 +183,7 @@ function tint(geo, colorOrFn) {
 }
 
 /** Strip everything merge-incompatible so mergeGeometries never console.errors. */
-function normalise(geo) {
+function normalise(geo, useColor) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   if (g !== geo) geo.dispose();
   for (const key of Object.keys(g.attributes)) {
@@ -194,17 +194,41 @@ function normalise(geo) {
   if (!g.attributes.uv) {
     g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
   }
-  if (!g.attributes.color) tint(g, 0xffffff);
+  if (useColor && !g.attributes.color) tint(g, 0xffffff);
+  if (!useColor && g.attributes.color) g.deleteAttribute('color');
   g.clearGroups();
   return g;
 }
 
-function mergeAll(list) {
-  const parts = list.map(normalise);
+/**
+ * Merge a batch of geometries into one. Draw calls are the scarce resource in
+ * this project (budget ~180 for the whole frame), so every prop that shares a
+ * material is collapsed to a single mesh at build time.
+ */
+export function mergeAll(list) {
+  if (list.length === 1) { const g = list[0]; g.computeBoundingSphere(); return g; }
+  const useColor = list.some((g) => !!g.attributes.color);
+  const parts = list.map((g) => normalise(g, useColor));
   const merged = mergeGeometries(parts, false);
   for (const p of parts) p.dispose();
   if (merged) merged.computeBoundingSphere();
   return merged;
+}
+
+/** Bake a local transform into a geometry so it can be merged in place. */
+const _bakeM = new THREE.Matrix4();
+const _bakeQ = new THREE.Quaternion();
+const _bakeE = new THREE.Euler();
+const _bakeV = new THREE.Vector3();
+const _bakeS = new THREE.Vector3();
+export function bake(geo, pos = [0, 0, 0], rot = [0, 0, 0], scale = [1, 1, 1]) {
+  _bakeV.set(pos[0], pos[1], pos[2]);
+  _bakeE.set(rot[0], rot[1], rot[2]);
+  _bakeQ.setFromEuler(_bakeE);
+  _bakeS.set(scale[0], scale[1], scale[2]);
+  _bakeM.compose(_bakeV, _bakeQ, _bakeS);
+  geo.applyMatrix4(_bakeM);
+  return geo;
 }
 
 /* ------------------------------------------------------------- shapes ---- */
@@ -975,27 +999,23 @@ export function makeXylophone(res, {
   railProfile.lineTo(railLen / 2, 0.011);
   railProfile.lineTo(-railLen / 2, 0.017);
   railProfile.closePath();
+  const frameParts = [];
   for (const sz of [-1, 1]) {
-    const g = res.geo(new THREE.ExtrudeGeometry(railProfile, {
+    const g = new THREE.ExtrudeGeometry(railProfile, {
       depth: 0.022, bevelEnabled: true, bevelSize: 0.0015, bevelThickness: 0.0015, bevelSegments: 1
-    }));
-    g.translate(0, 0, -0.011);
-    const rail = new THREE.Mesh(g, woodMat);
-    rail.position.set(0, 0.014, sz * 0.031);
-    rail.castShadow = true;
-    rail.receiveShadow = true;
-    group.add(rail);
+    });
+    frameParts.push(bake(g, [0, 0.014, sz * 0.031 - 0.011]));
   }
-  const baseGeo = res.geo(roundedBoxGeometry(railLen + 0.03, 0.014, 0.105, 0.005, 4));
-  const base = new THREE.Mesh(baseGeo, woodMat);
-  base.position.y = 0.007;
-  base.castShadow = true;
-  base.receiveShadow = true;
-  group.add(base);
+  frameParts.push(bake(roundedBoxGeometry(railLen + 0.03, 0.014, 0.105, 0.005, 4), [0, 0.007, 0]));
+  const frame = new THREE.Mesh(res.geo(mergeAll(frameParts)), woodMat);
+  frame.castShadow = true;
+  frame.receiveShadow = true;
+  group.add(frame);
 
   // L ∝ 1/√f for a bar of constant thickness — the lengths are the real ratios.
   const f0 = notes[0].freq;
   const L0 = 0.128;
+  const grommets = [];
 
   notes.forEach((note, i) => {
     const L = L0 * Math.sqrt(f0 / note.freq);
@@ -1043,15 +1063,16 @@ export function makeXylophone(res, {
 
     // rubber grommets at the nodal points — where a real bar is suspended
     for (const nodeS of [0.2242, 0.7758]) {
-      const gm = new THREE.Mesh(
-        res.geo(new THREE.TorusGeometry(0.0045, 0.0022, 6, 10)), rubberMat);
-      gm.rotation.x = Math.PI / 2;
-      gm.position.set(bar.position.x, 0.030, (nodeS - 0.5) * L);
-      group.add(gm);
+      grommets.push(bake(new THREE.TorusGeometry(0.0045, 0.0022, 6, 10),
+        [bar.position.x, 0.030, (nodeS - 0.5) * L], [Math.PI / 2, 0, 0]));
     }
 
     bars.push({ mesh: bar, note, uniforms, L, amp: 0, phase: 0, freq: note.freq });
   });
+
+  const grommetMesh = new THREE.Mesh(res.geo(mergeAll(grommets)), rubberMat);
+  grommetMesh.castShadow = true;
+  group.add(grommetMesh);
 
   // beater: turned wooden shaft, moulded nylon head with a parting line
   const beater = new THREE.Group();
@@ -1109,9 +1130,10 @@ export function makeDrum(res, { radius = 0.085 } = {}) {
   const shellH = 0.075;
 
   const shellMat = res.mat(MAT.makeWood({ light: 0xc9553f, dark: 0x8c2f22, seed: 14, ringScale: 22, clearcoat: 0.6 }));
-  const shell = new THREE.Mesh(
-    res.geo(new THREE.CylinderGeometry(radius, radius * 0.94, shellH, 30, 1, true)), shellMat);
-  shell.position.y = shellH / 2;
+  const shell = new THREE.Mesh(res.geo(mergeAll([
+    bake(new THREE.CylinderGeometry(radius, radius * 0.94, shellH, 30, 1, true), [0, shellH / 2, 0]),
+    bake(new THREE.CylinderGeometry(radius * 0.96, radius * 0.96, 0.006, 26), [0, 0.003, 0])
+  ])), shellMat);
   shell.castShadow = true;
   shell.receiveShadow = true;
   shell.material.side = THREE.DoubleSide;
@@ -1152,26 +1174,17 @@ export function makeDrum(res, { radius = 0.085 } = {}) {
   proxy.position.y = shellH;
   group.add(proxy);
 
-  // rim hoop + tension lugs
+  // rim hoop + tension lugs, all one piece of hardware
   const metal = res.mat(MAT.makeMetal({ color: 0xe4e8ec, roughness: 0.3 }).clone());
-  const hoop = new THREE.Mesh(
-    res.geo(new THREE.TorusGeometry(radius * 1.0, 0.006, 8, 34)), metal);
-  hoop.rotation.x = Math.PI / 2;
-  hoop.position.y = shellH;
-  hoop.castShadow = true;
-  group.add(hoop);
+  const hw = [bake(new THREE.TorusGeometry(radius, 0.006, 8, 34), [0, shellH, 0], [Math.PI / 2, 0, 0])];
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    const lug = new THREE.Mesh(
-      res.geo(new THREE.CylinderGeometry(0.0045, 0.0055, 0.016, 8)), metal);
-    lug.position.set(Math.cos(a) * radius * 1.005, shellH - 0.012, Math.sin(a) * radius * 1.005);
-    group.add(lug);
+    hw.push(bake(new THREE.CylinderGeometry(0.0045, 0.0055, 0.016, 8),
+      [Math.cos(a) * radius * 1.005, shellH - 0.012, Math.sin(a) * radius * 1.005]));
   }
-  const foot = new THREE.Mesh(
-    res.geo(new THREE.CylinderGeometry(radius * 0.96, radius * 0.96, 0.006, 26)), shellMat);
-  foot.position.y = 0.003;
-  foot.receiveShadow = true;
-  group.add(foot);
+  const hardware = new THREE.Mesh(res.geo(mergeAll(hw)), metal);
+  hardware.castShadow = true;
+  group.add(hardware);
 
   group.userData.tag = 'drum';
 
@@ -1202,32 +1215,30 @@ export function makeToyBox(res, { w = 0.34, h = 0.20, d = 0.24 } = {}) {
   const wood = res.mat(MAT.makeWood({ light: 0xe7c79a, dark: 0xb0824d, seed: 6, planks: 3, ringScale: 24, clearcoat: 0.4, repeat: 1 }));
   const t = 0.014;
 
-  const panel = (sx, sy, sz, px, py, pz, ry = 0) => {
-    const g = res.geo(roundedBoxGeometry(sx, sy, sz, 0.004, 3));
-    const m = new THREE.Mesh(g, wood);
-    m.position.set(px, py, pz);
-    m.rotation.y = ry;
-    m.castShadow = true;
-    m.receiveShadow = true;
-    group.add(m);
-    return m;
-  };
+  const panels = [];
+  const panel = (sx, sy, sz, px, py, pz) =>
+    panels.push(bake(roundedBoxGeometry(sx, sy, sz, 0.004, 3), [px, py, pz]));
 
   panel(w, t, d, 0, t / 2, 0);                            // floor
   panel(w, h, t, 0, h / 2 + t, -d / 2 + t / 2);           // back
   panel(w, h * 0.72, t, 0, h * 0.36 + t, d / 2 - t / 2);  // front (lower, so you can see in)
   panel(t, h, d, -w / 2 + t / 2, h / 2 + t, 0);
   panel(t, h, d, w / 2 - t / 2, h / 2 + t, 0);
+  const carcass = new THREE.Mesh(res.geo(mergeAll(panels)), wood);
+  carcass.castShadow = true;
+  carcass.receiveShadow = true;
+  group.add(carcass);
 
   // rope handles
   const ropeMat = res.mat(MAT.makeCloth({ color: 0xe8dcc4, weave: 'knit', threads: 60, repeat: 2, seed: 33 }));
+  const ropes = [];
   for (const sx of [-1, 1]) {
-    const rope = new THREE.Mesh(res.geo(new THREE.TorusGeometry(0.028, 0.005, 6, 18, Math.PI)), ropeMat);
-    rope.position.set(sx * (w / 2 - t * 0.5), h * 0.72, 0);
-    rope.rotation.set(0, Math.PI / 2, Math.PI);
-    rope.castShadow = true;
-    group.add(rope);
+    ropes.push(bake(new THREE.TorusGeometry(0.028, 0.005, 6, 18, Math.PI),
+      [sx * (w / 2 - t * 0.5), h * 0.72, 0], [0, Math.PI / 2, Math.PI]));
   }
+  const ropeMesh = new THREE.Mesh(res.geo(mergeAll(ropes)), ropeMat);
+  ropeMesh.castShadow = true;
+  group.add(ropeMesh);
 
   // a painted star appliqué on the front panel
   const starGeo = res.geo(new THREE.ExtrudeGeometry(starShape(0.038), {
@@ -1266,35 +1277,40 @@ export function makeTeddy(res, { scale = 1 } = {}) {
   }));
   const eyeMat = res.mat(MAT.makePlastic({ color: 0x2a1c16, matte: 0.06, clearcoat: 1.0, seed: 68 }));
 
-  const ball = (r, mat, x, y, z, sx = 1, sy = 1, sz = 1) => {
-    const m = new THREE.Mesh(res.geo(new THREE.SphereGeometry(r, 18, 14)), mat);
-    m.position.set(x, y, z);
-    m.scale.set(sx, sy, sz);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    group.add(m);
-    return m;
-  };
+  // Everything of one material becomes one mesh: a soft toy should not cost
+  // twenty draw calls.
+  const furG = [], innerG = [], eyeG = [];
+  const ball = (bin, r, x, y, z, sx = 1, sy = 1, sz = 1, rz = 0) =>
+    bin.push(bake(new THREE.SphereGeometry(r, 16, 12), [x, y, z], [0, 0, rz], [sx, sy, sz]));
 
-  ball(0.052, fur, 0, 0.052, 0, 1.0, 0.94, 0.92);            // body
-  const head = ball(0.040, fur, 0, 0.118, 0.004, 1.0, 0.95, 0.98);
-  ball(0.016, fur, -0.030, 0.146, -0.004);                    // ears
-  ball(0.016, fur, 0.030, 0.146, -0.004);
-  ball(0.009, inner, -0.030, 0.147, 0.004, 1, 1, 0.5);
-  ball(0.009, inner, 0.030, 0.147, 0.004, 1, 1, 0.5);
-  ball(0.019, inner, 0, 0.106, 0.031, 1.15, 0.8, 0.8);        // muzzle
-  ball(0.0075, eyeMat, -0.015, 0.124, 0.033, 1, 1, 0.7);      // eyes
-  ball(0.0075, eyeMat, 0.015, 0.124, 0.033, 1, 1, 0.7);
-  ball(0.0085, eyeMat, 0, 0.112, 0.048, 1.25, 0.9, 0.8);      // nose
+  ball(furG, 0.052, 0, 0.052, 0, 1.0, 0.94, 0.92);            // body
+  ball(furG, 0.040, 0, 0.118, 0.004, 1.0, 0.95, 0.98);        // head
+  ball(furG, 0.016, -0.030, 0.146, -0.004);                   // ears
+  ball(furG, 0.016, 0.030, 0.146, -0.004);
+  ball(innerG, 0.009, -0.030, 0.147, 0.004, 1, 1, 0.5);
+  ball(innerG, 0.009, 0.030, 0.147, 0.004, 1, 1, 0.5);
+  ball(innerG, 0.019, 0, 0.106, 0.031, 1.15, 0.8, 0.8);       // muzzle
+  ball(eyeG, 0.0075, -0.015, 0.124, 0.033, 1, 1, 0.7);        // eyes
+  ball(eyeG, 0.0075, 0.015, 0.124, 0.033, 1, 1, 0.7);
+  ball(eyeG, 0.0085, 0, 0.112, 0.048, 1.25, 0.9, 0.8);        // nose
 
   // arms + legs
   for (const sx of [-1, 1]) {
-    const arm = ball(0.020, fur, sx * 0.050, 0.070, 0.010, 1, 1.5, 1);
-    arm.rotation.z = sx * -0.5;
-    const paw = ball(0.012, inner, sx * 0.062, 0.044, 0.016);
-    paw.scale.set(1, 0.8, 1);
-    ball(0.023, fur, sx * 0.030, 0.018, 0.014, 1, 0.85, 1.25);
-    ball(0.014, inner, sx * 0.030, 0.014, 0.038, 1, 0.7, 1);
+    ball(furG, 0.020, sx * 0.050, 0.070, 0.010, 1, 1.5, 1, sx * -0.5);
+    ball(innerG, 0.012, sx * 0.062, 0.044, 0.016, 1, 0.8, 1);
+    ball(furG, 0.023, sx * 0.030, 0.018, 0.014, 1, 0.85, 1.25);
+    ball(innerG, 0.014, sx * 0.030, 0.014, 0.038, 1, 0.7, 1);
+  }
+
+  const head = new THREE.Object3D();
+  head.position.set(0, 0.118, 0.004);
+  group.add(head);
+
+  for (const [geos, mat] of [[furG, fur], [innerG, inner], [eyeG, eyeMat]]) {
+    const m = new THREE.Mesh(res.geo(mergeAll(geos)), mat);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
   }
 
   // a real stitched seam down the body — the detail that says "sewn, not moulded"
@@ -1471,7 +1487,9 @@ const SPREAD_ART = [
 ];
 
 function spreadTexture(index) {
-  return TEX.painted(`book-spread-${index}`, 1024, (g, s) => {
+  // 512 across a two-page spread on an 11 cm book: plenty at reading distance,
+  // and four spreads stay inside a sensible texture budget.
+  return TEX.painted(`book-spread-${index}`, 512, (g, s) => {
     const w = s / 2, h = s * 0.72, top = (s - h) / 2;
     g.fillStyle = '#e6d4bc';
     g.fillRect(0, 0, s, s);
@@ -1503,27 +1521,20 @@ export function makePictureBook(res, { width = 0.11, depth = 0.14, spreads = 4 }
   const coverMat = res.mat(MAT.makeCloth({ color: 0xd8607f, weave: 'plain', threads: 150, repeat: 2, seed: 81, roughness: 0.85 }));
   const blockMat = res.mat(MAT.makePaint({ color: 0xf6ecdc, gloss: 0.1, seed: 82, repeat: 3 }));
 
-  // covers, opened flat
+  // covers, opened flat, plus the spine
+  const coverParts = [];
+  const blockParts = [];
   for (const sx of [-1, 1]) {
-    const g = res.geo(roundedBoxGeometry(width, 0.006, depth, 0.002, 3));
-    const m = new THREE.Mesh(g, coverMat);
-    m.position.set(sx * (width / 2 + 0.001), 0.003, 0);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    group.add(m);
+    coverParts.push(bake(roundedBoxGeometry(width, 0.006, depth, 0.002, 3),
+      [sx * (width / 2 + 0.001), 0.003, 0]));
+    blockParts.push(bake(roundedBoxGeometry(width * 0.97, 0.010, depth * 0.96, 0.0015, 2),
+      [sx * (width / 2 + 0.001), 0.011, 0]));
   }
-  const spine = new THREE.Mesh(
-    res.geo(new THREE.CylinderGeometry(0.006, 0.006, depth, 10, 1, false, 0, Math.PI)), coverMat);
-  spine.rotation.set(Math.PI / 2, 0, 0);
-  spine.position.y = 0.003;
-  spine.castShadow = true;
-  group.add(spine);
-
-  // page blocks on each side
-  for (const sx of [-1, 1]) {
-    const g = res.geo(roundedBoxGeometry(width * 0.97, 0.010, depth * 0.96, 0.0015, 2));
-    const m = new THREE.Mesh(g, blockMat);
-    m.position.set(sx * (width / 2 + 0.001), 0.011, 0);
+  coverParts.push(bake(
+    new THREE.CylinderGeometry(0.006, 0.006, depth, 10, 1, false, 0, Math.PI),
+    [0, 0.003, 0], [Math.PI / 2, 0, 0]));
+  for (const [parts, mat] of [[coverParts, coverMat], [blockParts, blockMat]]) {
+    const m = new THREE.Mesh(res.geo(mergeAll(parts)), mat);
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
@@ -1669,23 +1680,17 @@ export function makeToothbrush(res) {
   const gripMat = res.mat(MAT.makePlastic({ color: 0xf6cf4a, matte: 0.75, clearcoat: 0.1, seed: 92 }));
   const bristleMat = res.mat(MAT.makePlastic({ color: 0xfdfaf4, matte: 0.55, clearcoat: 0.2, seed: 93 }));
 
-  const handle = new THREE.Mesh(
-    res.geo(new THREE.CylinderGeometry(0.0055, 0.0075, 0.062, 12)), handleMat);
-  handle.castShadow = true;
-  group.add(handle);
+  const body = new THREE.Mesh(res.geo(mergeAll([
+    bake(new THREE.CylinderGeometry(0.0055, 0.0075, 0.062, 12)),
+    bake(new THREE.CylinderGeometry(0.0032, 0.0052, 0.020, 10), [0, 0.040, 0]),
+    bake(roundedBoxGeometry(0.011, 0.0045, 0.020, 0.002, 3), [0, 0.058, 0])
+  ])), handleMat);
+  body.castShadow = true;
+  group.add(body);
   const grip = new THREE.Mesh(
     res.geo(new THREE.CylinderGeometry(0.0072, 0.0072, 0.020, 12)), gripMat);
   grip.position.y = -0.018;
   group.add(grip);
-  const neck = new THREE.Mesh(
-    res.geo(new THREE.CylinderGeometry(0.0032, 0.0052, 0.020, 10)), handleMat);
-  neck.position.y = 0.040;
-  group.add(neck);
-  const head = new THREE.Mesh(
-    res.geo(roundedBoxGeometry(0.011, 0.0045, 0.020, 0.002, 3)), handleMat);
-  head.position.y = 0.058;
-  head.castShadow = true;
-  group.add(head);
 
   // bristle tufts, merged into a single mesh
   const tufts = [];
@@ -1713,27 +1718,22 @@ export function makeTeeth(res, { width = 0.030, count = 8, plaque = 10 } = {}) {
   const gum = res.mat(MAT.makePlastic({ color: 0xe08a92, matte: 0.5, clearcoat: 0.35, seed: 96 }));
   const plaqueMat = res.mat(MAT.makePlastic({ color: 0xe8d17a, matte: 0.85, clearcoat: 0.05, seed: 97 }));
 
-  const gumGeo = res.geo(new THREE.TorusGeometry(width * 0.5, 0.0035, 6, 20, Math.PI));
   const specks = [];
-  const teeth = [];
+  const gumG = [], toothG = [];
 
   for (const row of [1, -1]) {
-    const gumMesh = new THREE.Mesh(gumGeo, gum);
-    gumMesh.rotation.set(Math.PI / 2, 0, row > 0 ? 0 : Math.PI);
-    gumMesh.position.y = row * 0.0065;
-    group.add(gumMesh);
+    gumG.push(bake(new THREE.TorusGeometry(width * 0.5, 0.0035, 6, 20, Math.PI),
+      [0, row * 0.0065, 0], [Math.PI / 2, 0, row > 0 ? 0 : Math.PI]));
     for (let i = 0; i < count; i++) {
       const a = Math.PI * (0.12 + 0.76 * (i / (count - 1)));
-      const x = Math.cos(a) * width * 0.5;
-      const z = Math.sin(a) * width * 0.5 * 0.55;
-      const t = new THREE.Mesh(
-        res.geo(roundedBoxGeometry(0.0032, 0.0055, 0.0028, 0.0009, 2)), enamel);
-      t.position.set(x, row * 0.0035, z);
-      t.rotation.y = -a + Math.PI / 2;
-      group.add(t);
-      teeth.push(t);
+      toothG.push(bake(roundedBoxGeometry(0.0032, 0.0055, 0.0028, 0.0009, 2),
+        [Math.cos(a) * width * 0.5, row * 0.0035, Math.sin(a) * width * 0.5 * 0.55],
+        [0, -a + Math.PI / 2, 0]));
     }
   }
+  const gums = new THREE.Mesh(res.geo(mergeAll(gumG)), gum);
+  const teeth = new THREE.Mesh(res.geo(mergeAll(toothG)), enamel);
+  group.add(gums, teeth);
 
   const speckGeo = res.geo(new THREE.SphereGeometry(0.0016, 7, 5));
   for (let i = 0; i < plaque; i++) {
@@ -1795,42 +1795,29 @@ export function makeCrib(res, { w = 0.86, d = 0.52, railH = 0.42, mattressY = 0.
   }
   postProfile.push(new THREE.Vector2(0.014, postH + 0.012));
   postProfile.push(new THREE.Vector2(0.0001, postH + 0.020));
-  const postGeo = res.geo(new THREE.LatheGeometry(postProfile, 14));
+  const parts = [];
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      const p = new THREE.Mesh(postGeo, wood);
-      p.position.set(sx * (w / 2), 0, sz * (d / 2));
-      p.castShadow = true;
-      p.receiveShadow = true;
-      group.add(p);
+      parts.push(bake(new THREE.LatheGeometry(postProfile, 14),
+        [sx * (w / 2), 0, sz * (d / 2)]));
     }
   }
 
   // slats + rails on all four sides
-  const slatGeo = res.geo(new THREE.CylinderGeometry(0.0072, 0.0072, railH - 0.02, 8));
   const addSide = (len, axis, offset) => {
     const n = Math.max(4, Math.round(len / 0.072));
     for (let i = 1; i < n; i++) {
       const t = -len / 2 + (i / n) * len;
-      const s = new THREE.Mesh(slatGeo, wood);
-      s.position.set(
+      parts.push(bake(new THREE.CylinderGeometry(0.0072, 0.0072, railH - 0.02, 7), [
         axis === 'x' ? t : offset,
         mattressY + railH / 2 + 0.01,
         axis === 'x' ? offset : t
-      );
-      s.castShadow = true;
-      s.receiveShadow = true;
-      group.add(s);
+      ]));
     }
     for (const y of [mattressY + 0.012, mattressY + railH]) {
-      const r = new THREE.Mesh(
-        res.geo(new THREE.CylinderGeometry(0.011, 0.011, len, 10)), wood);
-      r.rotation.z = axis === 'x' ? Math.PI / 2 : 0;
-      if (axis === 'z') r.rotation.x = Math.PI / 2;
-      r.position.set(axis === 'x' ? 0 : offset, y, axis === 'x' ? offset : 0);
-      r.castShadow = true;
-      r.receiveShadow = true;
-      group.add(r);
+      parts.push(bake(new THREE.CylinderGeometry(0.011, 0.011, len, 9),
+        [axis === 'x' ? 0 : offset, y, axis === 'x' ? offset : 0],
+        axis === 'x' ? [0, 0, Math.PI / 2] : [Math.PI / 2, 0, 0]));
     }
   };
   addSide(w, 'x', -d / 2);
@@ -1839,11 +1826,13 @@ export function makeCrib(res, { w = 0.86, d = 0.52, railH = 0.42, mattressY = 0.
   addSide(d, 'z', w / 2);
 
   // mattress deck
-  const deck = new THREE.Mesh(res.geo(roundedBoxGeometry(w - 0.03, 0.016, d - 0.03, 0.004, 3)), wood);
-  deck.position.y = mattressY - 0.008;
-  deck.receiveShadow = true;
-  deck.castShadow = true;
-  group.add(deck);
+  parts.push(bake(roundedBoxGeometry(w - 0.03, 0.016, d - 0.03, 0.004, 3),
+    [0, mattressY - 0.008, 0]));
+
+  const frame = new THREE.Mesh(res.geo(mergeAll(parts)), wood);
+  frame.castShadow = true;
+  frame.receiveShadow = true;
+  group.add(frame);
 
   return { group, w, d, mattressY, railH, inner: { w: w - 0.05, d: d - 0.05 } };
 }
@@ -1856,8 +1845,15 @@ export function makeMattress(res, { w = 0.80, d = 0.46, h = 0.055 } = {}) {
   }));
   const pipeMat = res.mat(MAT.makeCloth({ color: 0xbcd6ea, weave: 'knit', threads: 90, repeat: 6, seed: 18 }));
 
-  const body = new THREE.Mesh(res.geo(roundedBoxGeometry(w, h, d, h * 0.36, 6)), tick);
-  body.position.y = h / 2;
+  const bodyParts = [bake(roundedBoxGeometry(w, h, d, h * 0.36, 6), [0, h / 2, 0])];
+  // quilting: shallow tufting buttons on a grid, merged into the tick itself
+  for (let i = -2; i <= 2; i++) {
+    for (let j = -1; j <= 1; j++) {
+      bodyParts.push(bake(new THREE.SphereGeometry(0.0045, 8, 6),
+        [i * w * 0.19, h - 0.0035, j * d * 0.28], [0, 0, 0], [1, 0.35, 1]));
+    }
+  }
+  const body = new THREE.Mesh(res.geo(mergeAll(bodyParts)), tick);
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
@@ -1877,17 +1873,6 @@ export function makeMattress(res, { w = 0.80, d = 0.46, h = 0.055 } = {}) {
   const pipe = new THREE.Mesh(res.geo(new THREE.TubeGeometry(curve, 96, 0.0038, 6, true)), pipeMat);
   pipe.castShadow = true;
   group.add(pipe);
-
-  // quilting: shallow tufting buttons on a diamond grid
-  const tuftGeo = res.geo(new THREE.SphereGeometry(0.0045, 8, 6));
-  for (let i = -2; i <= 2; i++) {
-    for (let j = -1; j <= 1; j++) {
-      const t = new THREE.Mesh(tuftGeo, tick);
-      t.position.set(i * w * 0.19, h - 0.0035, j * d * 0.28);
-      t.scale.set(1, 0.35, 1);
-      group.add(t);
-    }
-  }
 
   return { group, w, d, h, top: h };
 }
@@ -1928,4 +1913,4 @@ export function makePillow(res, { w = 0.20, d = 0.14, h = 0.038 } = {}) {
   return { group, w, d, h };
 }
 
-export { starShape, heartShape, circleShape, mergeAll, tint };
+export { starShape, heartShape, circleShape, tint };

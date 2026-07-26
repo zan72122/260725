@@ -23,7 +23,7 @@ import * as MAT from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
 import {
   Resources, RopeMesh, makeCrib, makeMattress, makePillow, makeTeddy,
-  makePictureBook, makeToothbrush, makeTeeth, roundedBoxGeometry,
+  makePictureBook, makeToothbrush, makeTeeth, roundedBoxGeometry, mergeAll, bake,
   hitProxy, anchorPoint, snd
 } from '../fx/toys.js';
 
@@ -187,6 +187,7 @@ export class SleepActivity {
     this._snoreTimer = 0;
     this._starTimer = 1e9;
     this._m4 = new THREE.Matrix4();
+    this._pinV = new THREE.Vector3();
     this.projectorForced = null;
   }
 
@@ -275,7 +276,7 @@ export class SleepActivity {
     this.quiltDepth = depth;
     this.xFoot = this.cribPos.x + 0.30;
     this.xHeadOpen = this.cribPos.x + 0.04;    // folded back over the legs
-    this.xHeadCover = this.cribPos.x - 0.145;  // pulled up over the chest
+    this.xHeadCover = this.cribPos.x - 0.105;  // pulled up to just under the chin
 
     const rest = new THREE.PlaneGeometry(span, depth, NX, NZ);
     rest.rotateX(-Math.PI / 2);
@@ -358,10 +359,25 @@ export class SleepActivity {
     this.nativeCloth = null;
     try {
       this.nativeCloth = this.ctx.physics?.addCloth?.(simMesh, {
-        segmentsX: NX, segmentsY: NZ, stiffness: 0.92, damping: 0.03,
-        gravity: -3.8, pins: this._pinIndices()
+        cols: NX, rows: NZ,
+        stiffness: 0.92, shear: 0.55, bend: 0.22, damping: 0.03,
+        gravityScale: 0.42, thickness: 0.008, maxStretch: 1.06,
+        pins: this._pinIndices()
       }) || null;
+      // The contract fixes the call, not the handle shape — only take over the
+      // solver's particle buffer if it really exposes one.
+      if (this.nativeCloth && !(this.nativeCloth.p && this.nativeCloth.pin)) {
+        this.nativeCloth = null;
+      }
     } catch (e) { this.nativeCloth = null; }
+    // Trust, then verify: if the engine cloth turns out not to move the control
+    // mesh, the local solver takes over so the quilt always drapes and breathes.
+    // Probe a free vertex that sits outside every collider and next to the
+    // tucked foot edge: gravity alone must sag it. If it has not moved at all
+    // after half a second, nothing is simulating and we take over.
+    this._clothProbe = this.nativeCloth ? 0.5 : 0;
+    this._probeIndex = (0 * (NX + 1) + (NX - 1)) * 3 + 1;
+    this._probeStart = simGeo.attributes.position.array[this._probeIndex];
     res.onDispose(() => {
       if (this.nativeCloth) {
         try {
@@ -421,29 +437,21 @@ export class SleepActivity {
     this.stand = stand;
 
     const topH = 0.336;
-    const top = new THREE.Mesh(res.geo(roundedBoxGeometry(0.30, 0.022, 0.26, 0.006, 4)), wood);
-    top.position.y = topH;
-    top.castShadow = true;
-    top.receiveShadow = true;
-    stand.add(top);
-
-    const shelf = new THREE.Mesh(res.geo(roundedBoxGeometry(0.25, 0.014, 0.22, 0.004, 3)), wood);
-    shelf.position.y = 0.15;
-    shelf.castShadow = true;
-    shelf.receiveShadow = true;
-    stand.add(shelf);
-
+    const parts = [
+      bake(roundedBoxGeometry(0.30, 0.022, 0.26, 0.006, 4), [0, topH, 0]),
+      bake(roundedBoxGeometry(0.25, 0.014, 0.22, 0.004, 3), [0, 0.15, 0])
+    ];
     // tapered turned legs
-    const legGeo = res.geo(new THREE.CylinderGeometry(0.010, 0.014, topH, 10));
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const leg = new THREE.Mesh(legGeo, wood);
-        leg.position.set(sx * 0.125, topH / 2, sz * 0.105);
-        leg.castShadow = true;
-        leg.receiveShadow = true;
-        stand.add(leg);
+        parts.push(bake(new THREE.CylinderGeometry(0.010, 0.014, topH, 10),
+          [sx * 0.125, topH / 2, sz * 0.105]));
       }
     }
+    const body = new THREE.Mesh(res.geo(mergeAll(parts)), wood);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    stand.add(body);
     this.standTop = this.standPos.y + topH + 0.011;
   }
 
@@ -467,15 +475,13 @@ export class SleepActivity {
       const r = 0.042 * (1 - t * 0.55) + 0.006 * Math.exp(-Math.pow((t - 0.75) / 0.15, 2));
       baseProfile.push(new THREE.Vector2(Math.max(0.004, r), y));
     }
-    const base = new THREE.Mesh(res.geo(new THREE.LatheGeometry(baseProfile, 18)), brass);
-    base.castShadow = true;
-    base.receiveShadow = true;
-    lamp.add(base);
-
-    const stem = new THREE.Mesh(res.geo(new THREE.CylinderGeometry(0.006, 0.008, 0.075, 10)), brass);
-    stem.position.y = 0.082;
-    stem.castShadow = true;
-    lamp.add(stem);
+    const stand2 = new THREE.Mesh(res.geo(mergeAll([
+      bake(new THREE.LatheGeometry(baseProfile, 18)),
+      bake(new THREE.CylinderGeometry(0.006, 0.008, 0.075, 10), [0, 0.082, 0])
+    ])), brass);
+    stand2.castShadow = true;
+    stand2.receiveShadow = true;
+    lamp.add(stand2);
 
     // linen drum shade — thin enough to glow from the inside
     const shadeMat = res.mat(MAT.makeCloth({
@@ -609,13 +615,12 @@ export class SleepActivity {
     shellMat.emissive = new THREE.Color(0x93b4ff);
     shellMat.emissiveIntensity = 0.0;
     shellMat.emissiveMap = cookie;
-    const shell = new THREE.Mesh(res.geo(new THREE.SphereGeometry(0.048, 20, 16)), shellMat);
+    const shell = new THREE.Mesh(res.geo(mergeAll([
+      bake(new THREE.SphereGeometry(0.048, 20, 16)),
+      bake(new THREE.CylinderGeometry(0.036, 0.042, 0.022, 16), [0, -0.042, 0])
+    ])), shellMat);
     shell.castShadow = true;
     proj.add(shell);
-    const foot = new THREE.Mesh(
-      res.geo(new THREE.CylinderGeometry(0.036, 0.042, 0.022, 16)), shellMat);
-    foot.position.y = -0.042;
-    proj.add(foot);
     this.projShell = shellMat;
 
     const spot = new THREE.SpotLight(0xbcd0ff, 0.0, 4.2, 0.95, 0.75, 1.4);
@@ -888,8 +893,10 @@ export class SleepActivity {
     ctx.room?.setLamp?.(true);
 
     ctx.audio?.unlock?.();
-    try { this.lullaby = ctx.audio?.loop?.('lullaby', { gain: 0.3 }) || null; } catch (e) { this.lullaby = null; }
-    snd(ctx, 'yawn', { gain: 0.5 });
+    try {
+      this.lullaby = ctx.audio?.loop?.('sleep.musicbox', { gain: 0.26 }) || null;
+    } catch (e) { this.lullaby = null; }
+    snd(ctx, 'baby.yawn', { gain: 0.5 });
 
     ctx.ui?.prompt?.('はみがき しようね', { icon: 'brush' });
     ctx.ui?.meter?.('energy', clamp(this.sleepiness, 0, 1));
@@ -1013,7 +1020,7 @@ export class SleepActivity {
       case 'quilt':
         // the quilt doubles as the pull-up handle
         this.coverTarget = Math.min(1, this.coverTarget + 0.28);
-        snd(this.ctx, 'cloth', { gain: 0.5 });
+        snd(this.ctx, 'dress.rustle', { gain: 0.5 });
         this._pat(got.hit.point);
         return;
       default: return;
@@ -1024,7 +1031,7 @@ export class SleepActivity {
 
   _startBrushing() {
     if (this.todo.teeth || this.brushing) {
-      snd(this.ctx, 'tap');
+      snd(this.ctx, 'ui.tap');
       return;
     }
     const ctx = this.ctx;
@@ -1033,7 +1040,7 @@ export class SleepActivity {
     ctx.cameraRig?.goTo?.('face', 0.9);
     ctx.baby?.setMood?.('surprised');
     ctx.ui?.prompt?.('はを こしこし してね', { icon: 'brush' });
-    snd(ctx, 'chime', { gain: 0.5 });
+    snd(ctx, 'play.chime', { gain: 0.5 });
   }
 
   _brushMove(p) {
@@ -1059,8 +1066,9 @@ export class SleepActivity {
     const now = (this._brushSoundAt || 0);
     if (removed > 0 || this.t - now > 0.17) {
       this._brushSoundAt = this.t;
-      snd(ctx, 'brush', { rate: 0.9 + (this.t % 0.3) });
-      ctx.fx?.burst?.('bubble', hit.clone(), removed > 0 ? 4 : 2, { spread: 0.03 });
+      snd(ctx, 'sleep.toothbrush', { rate: 0.9 + (this.t % 0.3) });
+      ctx.fx?.burst?.('bubble', hit.clone(), removed > 0 ? 4 : 2,
+        { spread: 0.9, speed: [0.05, 0.22], radius: 0.012 });
     }
     if (removed > 0) ctx.fx?.burst?.('sparkle', hit.clone(), 3);
 
@@ -1074,15 +1082,16 @@ export class SleepActivity {
     this.todo.teeth = true;
     const mouth = ctx.baby?.mouthWorldPos?.() || this.cribPos.clone().setY(this.surfaceY + 0.1);
 
-    snd(ctx, 'spit');
-    ctx.fx?.burst?.('splash', mouth.clone().add(new THREE.Vector3(0, -0.03, 0.05)), 8, { spread: 0.06 });
+    snd(ctx, 'sleep.spit');
+    ctx.fx?.burst?.('splash', mouth.clone().add(new THREE.Vector3(0, -0.03, 0.05)), 8,
+      { spread: 0.85, speed: [0.3, 0.9], radius: 0.02 });
     ctx.ui?.prompt?.('ぺっ！ ぴかぴか！', { icon: 'sparkle' });
 
     this._after(0.55, () => {
       this.teeth.group.visible = false;
       this.brush.group.position.copy(this.brushHome);
       this.brush.group.rotation.set(Math.PI / 2, 0, 0.7);
-      snd(ctx, 'sparkle');
+      snd(ctx, 'sleep.twinkle');
       ctx.fx?.burst?.('sparkle', mouth.clone(), 8);
       ctx.baby?.setMood?.('happy');
       ctx.cameraRig?.goTo?.('crib', 1.0);
@@ -1093,29 +1102,29 @@ export class SleepActivity {
   /* -------------------------------------------------------- パジャマ ----- */
 
   _wearPajamas() {
-    if (this.todo.pajama) { snd(this.ctx, 'tap'); return; }
+    if (this.todo.pajama) { snd(this.ctx, 'ui.tap'); return; }
     const ctx = this.ctx;
     this.todo.pajama = true;
-    snd(ctx, 'whoosh', { gain: 0.5 });
+    snd(ctx, 'ui.swipe', { gain: 0.5 });
     ctx.baby?.setOutfit?.({ top: 'pajama', bottom: 'pajama', socks: null, shoes: null, hat: null });
     ctx.state?.patch?.({ outfit: { top: 'pajama', bottom: 'pajama' } });
     this.pajamaProp.visible = false;
     const chest = ctx.baby?.focusPoint?.() || this.cribPos.clone().setY(this.surfaceY + 0.08);
     ctx.fx?.burst?.('sparkle', chest, 10);
     ctx.baby?.setMood?.('happy');
-    snd(ctx, 'chime');
+    snd(ctx, 'play.chime');
     this._stepDone('pajama');
   }
 
   /* -------------------------------------------------------- カーテン ----- */
 
   _closeCurtains() {
-    if (this.todo.curtains) { snd(this.ctx, 'tap'); return; }
+    if (this.todo.curtains) { snd(this.ctx, 'ui.tap'); return; }
     this.todo.curtains = true;
     // left just ajar, so the moon (and later the shooting star) still reach in
     this._setCurtains(0.25, true);
-    snd(this.ctx, 'curtain', { gain: 0.7 });
-    snd(this.ctx, 'whoosh', { gain: 0.4 });
+    snd(this.ctx, 'sleep.curtain', { gain: 0.7 });
+    snd(this.ctx, 'ui.swipe', { gain: 0.4 });
     this._stepDone('curtains');
   }
 
@@ -1132,7 +1141,7 @@ export class SleepActivity {
     if (!on) this.todo.lamp = true;
     if (byPlayer) {
       this.ctx.room?.setLamp?.(this.lampOn);
-      snd(this.ctx, 'click');
+      snd(this.ctx, 'sleep.switch');
       if (!on) {
         this.ctx.ui?.prompt?.('おやすみの あかりに しようね', { icon: 'moon' });
         this._stepDone('lamp');
@@ -1142,7 +1151,7 @@ export class SleepActivity {
 
   _toggleProjector() {
     this.projectorForced = !this.projectorForced;
-    snd(this.ctx, 'click', { rate: 1.2 });
+    snd(this.ctx, 'sleep.switch', { rate: 1.2 });
     this.ctx.fx?.burst?.('star',
       this.starSpot.getWorldPosition(new THREE.Vector3()), 6);
   }
@@ -1152,7 +1161,7 @@ export class SleepActivity {
     this._addSleep(0.05);
     const t = this.todo;
     if (t.teeth && t.pajama && t.curtains && t.lamp) {
-      snd(this.ctx, 'tada', { gain: 0.6 });
+      snd(this.ctx, 'ui.star', { gain: 0.6 });
       this.ctx.ui?.prompt?.('したく かんぺき！', { icon: 'star' });
       this.ctx.ui?.star?.(1);
       const head = this.ctx.baby?.headWorldPos?.();
@@ -1170,7 +1179,7 @@ export class SleepActivity {
     if (!this.bookOpen) {
       this.bookOpen = true;
       this.bookPagesRead = 0;
-      snd(ctx, 'pageTurn');
+      snd(ctx, 'sleep.page');
       ctx.ui?.prompt?.('ページを めくってね', { icon: 'book' });
       ctx.baby?.lookAt?.(this.bookRead.clone());
       this._addSleep(0.03);
@@ -1184,13 +1193,13 @@ export class SleepActivity {
       ctx.fx?.burst?.('sparkle', this.bookRead.clone(), 3);
       if (this.bookPagesRead >= this.book.spreads) {
         this.bookOpen = false;
-        snd(ctx, 'chime', { gain: 0.5 });
+        snd(ctx, 'play.chime', { gain: 0.5 });
         this._addSleep(0.06);
         ctx.baby?.lookAt?.(null);
         ctx.ui?.prompt?.('おしまい。 とんとん しようか', { icon: 'pat' });
       }
     });
-    snd(ctx, 'pageTurn', { rate: 0.95 + this.bookPagesRead * 0.03 });
+    snd(ctx, 'sleep.page', { rate: 0.95 + this.bookPagesRead * 0.03 });
   }
 
   _bookUpdate(dt) {
@@ -1212,7 +1221,7 @@ export class SleepActivity {
   _pat(point) {
     const ctx = this.ctx;
     if (this.asleep) {
-      snd(ctx, 'pat', { gain: 0.3 });
+      snd(ctx, 'sleep.pat', { gain: 0.3 });
       return;
     }
     const now = performance.now();
@@ -1230,15 +1239,15 @@ export class SleepActivity {
       this.sleepiness = Math.max(0, this.sleepiness - 0.13);
       ctx.baby?.setMood?.('surprised');
       ctx.baby?.blink?.();
-      snd(ctx, 'boing', { gain: 0.5 });
-      snd(ctx, 'pat', { rate: 1.5, gain: 0.5 });
+      snd(ctx, 'baby.squeal', { gain: 0.5 });
+      snd(ctx, 'sleep.pat', { rate: 1.5, gain: 0.5 });
       ctx.ui?.prompt?.('もっと ゆっくり…', { icon: 'pat' });
       this.patRing.mat.color.set(0xffb0a0);
       this._after(1.1, () => { if (!this.asleep) ctx.baby?.setMood?.('neutral'); });
       return;
     }
 
-    snd(ctx, 'pat', { rate: 0.95, gain: 0.6 });
+    snd(ctx, 'sleep.pat', { rate: 0.95, gain: 0.6 });
     ctx.fx?.burst?.('heart', (point || chest).clone(), 1);
     this.patRing.mat.color.set(0xffd9ec);
 
@@ -1263,18 +1272,18 @@ export class SleepActivity {
         ctx.fx?.burst?.('zzz', ctx.baby?.headWorldPos?.() || chest, 1);
       }
     }
-    this._addSleep(0.045 * bonus);
+    this._addSleep(0.032 * bonus);
   }
 
   /* --------------------------------------------------------- くまさん ---- */
 
   _giveTeddy() {
-    if (this.teddyGiven) { snd(this.ctx, 'tap'); return; }
+    if (this.teddyGiven) { snd(this.ctx, 'ui.tap'); return; }
     const ctx = this.ctx;
     this.teddyGiven = true;
     this.teddyFrom = this.teddy.group.position.clone();
     this.teddyT = 0;
-    snd(ctx, 'pofu', { gain: 0.6 });
+    snd(ctx, 'play.balloon', { gain: 0.6 });
     ctx.baby?.setMood?.('shy');
     ctx.ui?.prompt?.('くまさんと いっしょ…', { icon: 'teddy' });
     const chest = ctx.baby?.focusPoint?.() || this.cribPos.clone().setY(this.surfaceY + 0.08);
@@ -1338,7 +1347,7 @@ export class SleepActivity {
 
     const head = ctx.baby?.headWorldPos?.();
     if (head) ctx.fx?.burst?.('zzz', head, 3);
-    snd(ctx, 'chime', { gain: 0.4 });
+    snd(ctx, 'play.chime', { gain: 0.4 });
     this._starTimer = this.t + (instant ? 1.0 : 2.2);
     this._snoreTimer = 1.8;
     this._zzzTimer = 1.0;
@@ -1415,14 +1424,14 @@ export class SleepActivity {
       const head = baby?.headWorldPos?.();
       if (stage === 1) {
         baby?.gesture?.('yawn');
-        snd(ctx, 'yawn', { gain: 0.5 });
+        snd(ctx, 'baby.yawn', { gain: 0.5 });
         if (head) ctx.fx?.burst?.('zzz', head, 1);
       } else if (stage === 2) {
         baby?.gesture?.('rub-eyes');
-        snd(ctx, 'rub', { gain: 0.4 });
+        snd(ctx, 'dress.rustle', { gain: 0.4 });
       } else if (stage === 3) {
         baby?.gesture?.('yawn');
-        snd(ctx, 'yawn', { rate: 0.9, gain: 0.35 });
+        snd(ctx, 'baby.yawn', { rate: 0.9, gain: 0.35 });
         if (head) ctx.fx?.burst?.('zzz', head, 1);
       } else if (stage === 4) {
         if (head) ctx.fx?.burst?.('zzz', head, 1);
@@ -1471,7 +1480,7 @@ export class SleepActivity {
       this._snoreTimer -= dt;
       if (this._snoreTimer <= 0) {
         this._snoreTimer = 3.6;
-        snd(ctx, 'snore', { gain: 0.35 });
+        snd(ctx, 'sleep.snore', { gain: 0.35 });
       }
     }
 
@@ -1486,7 +1495,7 @@ export class SleepActivity {
         baby?.lookAt?.(lampPos);
         baby?.gesture?.('point');
         baby?.setMood?.('sulk');
-        snd(ctx, 'fuss', { gain: 0.4 });
+        snd(ctx, 'baby.whine', { gain: 0.4 });
         ctx.fx?.burst?.('sparkle', lampPos, 4);
         ctx.ui?.prompt?.('でんきを けそう', { icon: 'lamp' });
         this._after(2.4, () => {
@@ -1520,32 +1529,41 @@ export class SleepActivity {
     this.coverAmount += (this.coverTarget - this.coverAmount) * Math.min(1, dt * 1.6);
     const xHead = lerp(this.xHeadOpen, this.xHeadCover, this.coverAmount);
     const yHead = this.surfaceY + 0.035 + this.coverAmount * 0.028;
-    const setPin = (i, x, y, z) => {
-      if (this.nativeCloth) return [x, y, z];
-      this.sim.pin(i, x, y, z);
-      return null;
-    };
-    const pins = [];
+
+    // The solver's own particle buffer is the source of truth — writing into
+    // the geometry instead would be thrown away on its next write-back.
+    const native = this.nativeCloth;
+    const buf = native ? native.p : this.sim.cur;
+    const yFoot = this.surfaceY + 0.012;
+
     for (let r = 0; r <= NZ; r++) {
       const z = this.cribPos.z + (r / NZ - 0.5) * this.quiltDepth;
       const iHead = r * cols;
       const iFoot = r * cols + NX;
-      setPin(iHead, xHead, yHead, z);
-      setPin(iFoot, this.xFoot, this.surfaceY + 0.012, z);
-      pins.push([iHead, xHead, yHead, z], [iFoot, this.xFoot, this.surfaceY + 0.012, z]);
+      if (native) {
+        native.pin(iHead, this._pinV.set(xHead, yHead, z));
+        native.pin(iFoot, this._pinV.set(this.xFoot, yFoot, z));
+      } else {
+        this.sim.pin(iHead, xHead, yHead, z);
+        this.sim.pin(iFoot, this.xFoot, yFoot, z);
+      }
     }
 
     /* --- step ------------------------------------------------------------ */
-    const simAttr = this.simMesh.geometry.attributes.position;
-    const buf = simAttr.array;
-    if (this.nativeCloth) {
-      for (const [i, x, y, z] of pins) { buf[i * 3] = x; buf[i * 3 + 1] = y; buf[i * 3 + 2] = z; }
-      this._collide(buf);
-    } else {
-      this.sim.step(dt);
-      this._collide(this.sim.cur);
-      buf.set(this.sim.cur);
+    if (native && this._clothProbe > 0) {
+      this._clothProbe -= dt;
+      if (this._clothProbe <= 0
+        && Math.abs(buf[this._probeIndex] - this._probeStart) < 1e-6) {
+        this.nativeCloth = null;
+        this.sim.cur.set(buf);
+        this.sim.prev.set(buf);
+      }
     }
+    if (!native) this.sim.step(dt);
+    this._collide(buf);
+
+    const simAttr = this.simMesh.geometry.attributes.position;
+    simAttr.array.set(buf);
     simAttr.needsUpdate = true;
     this.simMesh.geometry.computeVertexNormals();
 
@@ -1571,23 +1589,29 @@ export class SleepActivity {
     this.piping.update(this._borderPoints);
   }
 
-  /** Push cloth particles out of the baby and off the mattress. */
+  /**
+   * Lay the cloth over the baby and on top of the mattress.
+   *
+   * A blanket is never *under* the child, so the collision is resolved straight
+   * up onto the top of each sphere rather than along the shortest exit — a
+   * radial push would happily flick a flat quilt to the underside of the chest
+   * and the drape would read inside-out.
+   */
   _collide(buf) {
     const floor = this.surfaceY + 0.004;
     for (let i = 0; i < buf.length; i += 3) {
-      let x = buf[i], y = buf[i + 1], z = buf[i + 2];
+      let y = buf[i + 1];
+      const x = buf[i], z = buf[i + 2];
       for (const c of this.colliders) {
-        const dx = x - c.p.x, dy = y - c.p.y, dz = z - c.p.z;
-        const d = Math.hypot(dx, dy, dz);
-        if (d < c.r && d > 1e-6) {
-          const k = c.r / d;
-          x = c.p.x + dx * k;
-          y = c.p.y + dy * k;
-          z = c.p.z + dz * k;
-        }
+        const dx = x - c.p.x, dz = z - c.p.z;
+        const h2 = dx * dx + dz * dz;
+        const r2 = c.r * c.r;
+        if (h2 >= r2) continue;
+        const top = c.p.y + Math.sqrt(r2 - h2);
+        if (y < top) y = top;
       }
       if (y < floor) y = floor;
-      buf[i] = x; buf[i + 1] = y; buf[i + 2] = z;
+      buf[i + 1] = y;
     }
   }
 
@@ -1665,7 +1689,7 @@ export class SleepActivity {
         for (const h of s.history) h.copy(s.from);
         s.trail.visible = true;
         s.head.visible = true;
-        snd(this.ctx, 'twinkle', { gain: 0.4 });
+        snd(this.ctx, 'sleep.shooting-star', { gain: 0.55 });
       }
       return;
     }

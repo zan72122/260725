@@ -4,10 +4,11 @@
  * A real bone hierarchy with hand-computed skin weights. Three things here are
  * worth more than they cost:
  *
- *   • Hierarchy-aware falloff. Pure distance weighting makes the head bone
- *     grab the shoulders (they are close in space, far in the skeleton). Every
- *     weight is damped by graph distance from the vertex's nearest bone, which
- *     removes that class of artefact completely.
+ *   • Part-affinity falloff. Pure distance weighting makes the upper-arm bone
+ *     grab the ribcage (with the arms at the sides they are millimetres apart)
+ *     and the flank webs the moment the arm lifts. Every weight is gated by
+ *     the implicit part the vertex actually belongs to, which the anatomy
+ *     builder hands over — that removes the whole class of artefact.
  *   • A spatial smoothing pass. Two iterations of neighbourhood averaging turn
  *     an analytically-correct-but-lumpy weight field into one that deforms
  *     smoothly across the whole surface.
@@ -27,32 +28,45 @@ const mir = (p, s) => [p[0] * s, p[1], p[2]];
  * the hierarchy is built). `seg` is the segment used for skin weighting,
  * `sig` its falloff radius, `w` a manual weight multiplier.
  */
+/**
+ * Which SDF parts a bone may deform. Distance alone is not enough: with the
+ * arms hanging at the sides (the natural infant bind pose) the upper-arm bone
+ * is physically *closer* to the ribcage than the chest bone is, and a pure
+ * distance solve turns the flank into a bat wing the moment the arm lifts.
+ * Gating each bone by the part its skin actually belongs to fixes that at the
+ * source, and is only possible because the anatomy build already tells us
+ * which implicit volume every vertex came from.
+ * `gate` shrinks the cross-part term to a ball around the joint, so the
+ * deltoid still follows the arm while the ribs do not.
+ */
 export function boneTable() {
   const B = [
     { name: 'root', parent: null, pos: [0, 0, 0], sig: 0 },
-    { name: 'hips', parent: 'root', pos: A.hips, tail: A.spine, sig: 0.062 },
-    { name: 'spine', parent: 'hips', pos: A.spine, tail: A.chest, sig: 0.058 },
-    { name: 'chest', parent: 'spine', pos: A.chest, tail: A.neck, sig: 0.058 },
-    { name: 'neck', parent: 'chest', pos: A.neck, tail: A.head, sig: 0.030 },
-    { name: 'head', parent: 'neck', pos: A.head, tail: A.crown, sig: 0.085 },
+    { name: 'hips', parent: 'root', pos: A.hips, tail: A.spine, sig: 0.062, aff: { torso: 1, legL: 0.55, legR: 0.55 } },
+    { name: 'spine', parent: 'hips', pos: A.spine, tail: A.chest, sig: 0.058, aff: { torso: 1 } },
+    { name: 'chest', parent: 'spine', pos: A.chest, tail: A.neck, sig: 0.058, aff: { torso: 1, head: 0.5 } },
+    { name: 'neck', parent: 'chest', pos: A.neck, tail: A.head, sig: 0.030, aff: { head: 1, torso: 0.8 } },
+    { name: 'head', parent: 'neck', pos: A.head, tail: A.crown, sig: 0.085, aff: { head: 1 } },
     { name: 'headEnd', parent: 'head', pos: A.crown, sig: 0 },
     // soft-body bone: only the front of the belly, so it can wobble on its own
-    { name: 'belly', parent: 'spine', pos: A.belly, sig: 0, mask: 'belly' }
+    { name: 'belly', parent: 'spine', pos: A.belly, sig: 0, mask: 'belly', aff: { torso: 1 } }
   ];
   for (const s of [1, -1]) {
     const k = s > 0 ? 'L' : 'R';
     B.push(
-      { name: 'shoulder' + k, parent: 'chest', pos: mir(A.shoulder, s), tail: mir(A.arm, s), sig: 0.032 },
-      { name: 'arm' + k, parent: 'shoulder' + k, pos: mir(A.arm, s), tail: mir(A.forearm, s), sig: 0.040 },
-      { name: 'elbow' + k, parent: 'arm' + k, pos: mir(A.forearm, s), sig: 0, mask: 'joint', maskR: 0.030, helper: 'forearm' + k },
-      { name: 'forearm' + k, parent: 'arm' + k, pos: mir(A.forearm, s), tail: mir(A.hand, s), sig: 0.034 },
-      { name: 'hand' + k, parent: 'forearm' + k, pos: mir(A.hand, s), tail: mir(A.handEnd, s), sig: 0.030 },
+      { name: 'shoulder' + k, parent: 'chest', pos: mir(A.shoulder, s), tail: mir(A.arm, s), sig: 0.032, aff: { torso: 1, ['arm' + k]: 1 } },
+      { name: 'arm' + k, parent: 'shoulder' + k, pos: mir(A.arm, s), tail: mir(A.forearm, s), sig: 0.038,
+        aff: { ['arm' + k]: 1, torso: 0.85 }, gate: { p: mir(A.arm, s), r: 0.026 } },
+      { name: 'elbow' + k, parent: 'arm' + k, pos: mir(A.forearm, s), sig: 0, mask: 'joint', maskR: 0.030, helper: 'forearm' + k, aff: { ['arm' + k]: 1 } },
+      { name: 'forearm' + k, parent: 'arm' + k, pos: mir(A.forearm, s), tail: mir(A.hand, s), sig: 0.034, aff: { ['arm' + k]: 1, ['hand' + k]: 0.9 } },
+      { name: 'hand' + k, parent: 'forearm' + k, pos: mir(A.hand, s), tail: mir(A.handEnd, s), sig: 0.030, aff: { ['hand' + k]: 1, ['arm' + k]: 0.6 } },
       { name: 'handEnd' + k, parent: 'hand' + k, pos: mir(A.handEnd, s), sig: 0 },
-      { name: 'thigh' + k, parent: 'hips', pos: mir(A.thigh, s), tail: mir(A.shin, s), sig: 0.052 },
-      { name: 'knee' + k, parent: 'thigh' + k, pos: mir(A.shin, s), sig: 0, mask: 'joint', maskR: 0.040, helper: 'shin' + k },
-      { name: 'shin' + k, parent: 'thigh' + k, pos: mir(A.shin, s), tail: mir(A.foot, s), sig: 0.042 },
-      { name: 'foot' + k, parent: 'shin' + k, pos: mir(A.foot, s), tail: mir(A.toe, s), sig: 0.040 },
-      { name: 'toe' + k, parent: 'foot' + k, pos: mir(A.toe, s), sig: 0.018 }
+      { name: 'thigh' + k, parent: 'hips', pos: mir(A.thigh, s), tail: mir(A.shin, s), sig: 0.048,
+        aff: { ['leg' + k]: 1, torso: 0.85 }, gate: { p: mir(A.thigh, s), r: 0.040 } },
+      { name: 'knee' + k, parent: 'thigh' + k, pos: mir(A.shin, s), sig: 0, mask: 'joint', maskR: 0.040, helper: 'shin' + k, aff: { ['leg' + k]: 1 } },
+      { name: 'shin' + k, parent: 'thigh' + k, pos: mir(A.shin, s), tail: mir(A.foot, s), sig: 0.042, aff: { ['leg' + k]: 1, ['foot' + k]: 0.9 } },
+      { name: 'foot' + k, parent: 'shin' + k, pos: mir(A.foot, s), tail: mir(A.toe, s), sig: 0.040, aff: { ['foot' + k]: 1, ['leg' + k]: 0.6 } },
+      { name: 'toe' + k, parent: 'foot' + k, pos: mir(A.toe, s), sig: 0.018, aff: { ['foot' + k]: 1 } }
     );
   }
   return B;
@@ -69,27 +83,6 @@ function distToSeg(px, py, pz, a, b) {
   return Math.hypot(px - (a[0] + bx * t), py - (a[1] + by * t), pz - (a[2] + bz * t));
 }
 
-/** BFS hop distance between every pair of bones over the parent/child graph. */
-function hopMatrix(table) {
-  const n = table.length;
-  const idx = {}; table.forEach((b, i) => { idx[b.name] = i; });
-  const adj = Array.from({ length: n }, () => []);
-  table.forEach((b, i) => {
-    if (b.parent != null) { const p = idx[b.parent]; adj[i].push(p); adj[p].push(i); }
-  });
-  const H = [];
-  for (let i = 0; i < n; i++) {
-    const d = new Int16Array(n).fill(99);
-    d[i] = 0; const q = [i];
-    while (q.length) {
-      const c = q.shift();
-      for (const v of adj[c]) if (d[v] > d[c] + 1) { d[v] = d[c] + 1; q.push(v); }
-    }
-    H.push(d);
-  }
-  return { H, idx };
-}
-
 /**
  * Compute skinIndex / skinWeight attributes for a geometry.
  * Returns nothing; the attributes are written onto the geometry.
@@ -98,10 +91,22 @@ export function computeSkinWeights(geometry, table, { smooth = 2 } = {}) {
   const pos = geometry.attributes.position.array;
   const nv = pos.length / 3;
   const n = table.length;
-  const { H } = hopMatrix(table);
 
   const raw = new Float32Array(nv * n);
   const dist = new Float64Array(n);
+
+  // per-vertex SDF part weights, handed over by the anatomy builder
+  const parts = geometry.userData.parts;
+  const partNames = geometry.userData.partNames || [];
+  const pIdx = {}; partNames.forEach((g, i) => { pIdx[g] = i; });
+  const nG = partNames.length;
+  // pre-resolve each bone's affinity into (partIndex, factor) pairs
+  const affs = table.map(b => {
+    if (!b.aff || !nG) return null;
+    const out = [];
+    for (const g in b.aff) if (g in pIdx) out.push([pIdx[g], b.aff[g]]);
+    return out.length ? out : null;
+  });
 
   for (let v = 0; v < nv; v++) {
     const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
@@ -126,7 +131,22 @@ export function computeSkinWeights(geometry, table, { smooth = 2 } = {}) {
         w = Math.exp(-q * q) * 0.55;
       } else if (b.sig > 0) {
         const q = dist[i] / b.sig;
-        w = Math.exp(-q * q) * Math.pow(0.26, H[near][i]);
+        w = Math.exp(-q * q);
+      }
+      // affinity gate
+      const aff = affs[i];
+      if (w > 0 && aff && parts) {
+        let mask = 0;
+        for (const [gi, f] of aff) {
+          let fac = f;
+          // cross-part reach (deltoid, buttock) only near the joint itself
+          if (b.gate && partNames[gi] === 'torso') {
+            const d = Math.hypot(x - b.gate.p[0], y - b.gate.p[1], z - b.gate.p[2]) / b.gate.r;
+            fac *= Math.exp(-d * d);
+          }
+          mask += parts[v * nG + gi] * fac;
+        }
+        w *= Math.min(1, mask) * 0.97 + 0.03;
       }
       raw[v * n + i] = w;
       sum += w;
@@ -156,9 +176,23 @@ export function computeSkinWeights(geometry, table, { smooth = 2 } = {}) {
           for (const u of arr) {
             const d2 = (pos[u * 3] - pos[v * 3]) ** 2 + (pos[u * 3 + 1] - pos[v * 3 + 1]) ** 2 + (pos[u * 3 + 2] - pos[v * 3 + 2]) ** 2;
             if (d2 > cell * cell * 1.6) continue;
+            let wt = Math.exp(-d2 / (cell * cell * 0.55));
+            // Only blend weights between vertices that belong to the same
+            // anatomical part. Without this the buried shell of an arm (which
+            // legitimately carries arm weights) bleeds into the ribcage it is
+            // hiding inside, and the flank webs when the arm lifts.
+            if (parts && nG) {
+              let dp = 0, la = 0, lb = 0;
+              for (let i = 0; i < nG; i++) {
+                const a = parts[v * nG + i], b2 = parts[u * nG + i];
+                dp += a * b2; la += a * a; lb += b2 * b2;
+              }
+              dp /= Math.sqrt(la * lb) || 1;
+              wt *= 0.10 + 0.90 * dp * dp;
+            }
             const uo = u * n;
-            for (let i = 0; i < n; i++) dst[o + i] += src[uo + i];
-            count++;
+            for (let i = 0; i < n; i++) dst[o + i] += src[uo + i] * wt;
+            count += wt;
           }
         }
         if (count) for (let i = 0; i < n; i++) dst[o + i] /= count;

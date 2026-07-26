@@ -79,6 +79,12 @@ class App {
       tier: this.tier
     };
 
+    // Soft particles need scene depth. Feed them the *resolved* depth target,
+    // never the composer's shared attachment — sampling that would recreate
+    // the feedback loop the resolve pass exists to break.
+    this.fx.setDepthTexture?.(
+      this.pipeline.depthResolve.texture, this.camera.near, this.camera.far);
+
     this.room.build(this.ctx);
     await this.baby.build(this.ctx);
 
@@ -207,21 +213,27 @@ function installHarness(app) {
       document.getElementById('title-screen')?.classList.add('hidden');
     },
 
-    /** Advance the simulation by `seconds` of fixed 60Hz steps. */
+    /**
+     * Advance the simulation by `seconds` of fixed 60Hz steps.
+     *
+     * Simulation is cheap; rendering under SwiftShader is not (~0.7 s/frame).
+     * A still only needs the *final* frame to be right, so we simulate the
+     * whole warm-up but render only near the end — once to let transmission
+     * and env probes resolve against a settled scene, then the final state.
+     */
     async warm(seconds) {
       const dt = 1 / 60;
       const n = Math.max(1, Math.round(seconds / dt));
+      const renderAt = new Set([Math.max(0, n - 10), n - 1]);
       for (let i = 0; i < n; i++) {
         app.step(dt);
-        // Render every 6th step so transmission/env probes stay converged
-        // without paying full post-processing cost for the whole warm-up.
-        if (i % 6 === 0) app.pipeline.render(dt);
+        if (renderAt.has(i)) app.pipeline.render(dt);
       }
     },
 
-    /** Render a few settled frames so TAA-ish passes and bloom stabilise. */
+    /** Render a settled frame so bloom and transmission stabilise. */
     async settle() {
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 2; i++) {
         app.pipeline.render(1 / 60);
         await raf();
       }

@@ -239,9 +239,13 @@ export function foldCloth(g, { folds = 4, amp = 0.03, drape = 0, gather = 0, swa
     const narrow = 1 - gather * 0.55 * (0.35 + 0.65 * y0);
     const x = x0 * w * narrow;
     const phase = x0 * Math.PI * 2 * folds;
-    const foldDepth = amp * (0.45 + 0.55 * (1 - y0)) * (1 + gather * 1.9);
+    // Fold depth has to stay under about half the fold pitch or the panel
+    // reads as a row of ribbons rather than gathered cloth.
+    // scale the fold depth with the gathered width: depth must stay well under
+    // the fold pitch, or the panel turns into a row of vertical ribbons
+    const foldDepth = amp * narrow * (0.55 + 0.45 * (1 - y0)) * (1 + gather * 0.5);
     const z = Math.sin(phase) * foldDepth
-            + Math.sin(phase * 0.5 + 1.1) * foldDepth * 0.35
+            + Math.sin(phase * 0.5 + 1.1) * foldDepth * 0.22
             + drape * (1 - y0) * (1 - y0) * 0.5
             + sway * (1 - y0) * (1 - y0);
     const y = (y0 - 0.5) * h - (1 - y0) * foldDepth * 0.25;   // hem swings in a little
@@ -340,13 +344,13 @@ export function palette() {
   // surface is the same generator with a different repeat and colour. That
   // matters twice over — a 512² procedural PBR set costs real milliseconds to
   // synthesise at boot, and re-using one keeps VRAM flat.
-  const WOOD = { seed: 3, ringScale: 30, satin: 0.42 };
+  const WOOD = { seed: 3, ringScale: 74, satin: 0.42 };
   const PAINT = { seed: 43, gloss: 0.3 };
 
   P.wall = MAT.makeWall({ base: 0xf7ece3, tint: 0xe4d3c6, repeat: 0.8, seed: 11 });
   P.floor = MAT.makeWood({
     light: 0xdfba90, dark: 0xa5723f, planks: 7, repeat: 2.4, seed: 5,
-    ringScale: 44, clearcoat: 0.26, satin: 0.5
+    ringScale: 108, clearcoat: 0.26, satin: 0.5
   });
 
   P.trim = unshare(MAT.makePaint({ color: 0xfffaf4, ...PAINT }), 1.1, { clearcoat: 0.45 });
@@ -382,8 +386,8 @@ export function palette() {
   for (const k of ['plastic', 'plush', 'cloth', 'paper', 'carpet', 'leaf']) P[k].vertexColors = true;
 
   P.curtain = unshare(MAT.makeCloth({
-    color: 0xf8e2e4, weave: 'plain', threads: 120, repeat: 3, seed: 7,
-    sheen: 1.0, roughness: 0.96, normalScale: 0.7
+    color: 0xeec9d2, weave: 'plain', threads: 120, repeat: 3, seed: 7,
+    sheen: 0.6, roughness: 0.96, normalScale: 0.7
   }), 3.2);
   P.curtain.side = THREE.DoubleSide;
 
@@ -946,17 +950,20 @@ export function buildWardrobe(M) {
     hinge.position.set(sx * (W / 2 - 0.02), 0.145 + doorH / 2, D / 2 - 0.012);
     // the left door never quite shuts — the room has been lived in
     hinge.rotation.y = sx < 0 ? 0.12 : 0;
-    const panelParts = [rbox(doorW, doorH, 0.024, [sx * doorW / 2, 0, 0], [0, 0, 0], 0.008, 1.2)];
+    // the leaf hangs from its hinge *towards the middle* of the carcass
+    const cx = -sx * doorW / 2;
+    const panelParts = [rbox(doorW, doorH, 0.024, [cx, 0, 0], [0, 0, 0], 0.008, 1.2)];
     for (const py of [doorH * 0.24, -doorH * 0.24]) {
-      panelParts.push(rbox(doorW - 0.13, doorH * 0.40, 0.008, [sx * doorW / 2, py, 0.014], [0, 0, 0], 0.01, 1.4));
+      panelParts.push(rbox(doorW - 0.13, doorH * 0.40, 0.008, [cx, py, 0.014], [0, 0, 0], 0.01, 1.4));
     }
     const leaf = mesh(mergeAll(panelParts), M.oak, 'wardrobeDoor');
     hinge.add(leaf);
     // slim brass bar handle
+    const hx = -sx * (doorW - 0.06);       // handle sits at the free edge
     const handle = mergeAll([
-      xf(new THREE.CylinderGeometry(0.007, 0.007, 0.16, 8), [sx * (doorW - 0.055), 0.03, 0.038]),
-      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [sx * (doorW - 0.055), 0.10, 0.024], [Math.PI / 2, 0, 0]),
-      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [sx * (doorW - 0.055), -0.04, 0.024], [Math.PI / 2, 0, 0])
+      xf(new THREE.CylinderGeometry(0.007, 0.007, 0.16, 8), [hx, 0.03, 0.038]),
+      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [hx, 0.10, 0.024], [Math.PI / 2, 0, 0]),
+      xf(new THREE.CylinderGeometry(0.005, 0.005, 0.028, 6), [hx, -0.04, 0.024], [Math.PI / 2, 0, 0])
     ]);
     hinge.add(mesh(handle, M.brass, 'wardrobeHandle'));
     doors.add(hinge);
@@ -987,9 +994,9 @@ export function buildWardrobe(M) {
  */
 export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
-  const base = new THREE.Color(0xf6dfe4);
-  const band = new THREE.Color(0xfaf1e6);
-  const edge = new THREE.Color(0xe9c3cc);
+  const base = new THREE.Color(0xe9b9c4);
+  const band = new THREE.Color(0xfbf1e4);
+  const edge = new THREE.Color(0xcf8d9f);
   const c = new THREE.Color();
   const liftAngle = 2.35;
   for (let i = 0; i <= rings; i++) {
@@ -1018,8 +1025,9 @@ export function buildRug(M, { radius = 1.16, rings = 20, segs = 72 } = {}) {
   const row = segs + 1;
   for (let i = 0; i < rings; i++) {
     for (let j = 0; j < segs; j++) {
+      // counter-clockwise seen from +Y, or the whole rug back-face culls away
       const a = i * row + j, b = a + 1, cIdx = a + row, dIdx = cIdx + 1;
-      idx.push(a, cIdx, b, b, cIdx, dIdx);
+      idx.push(a, b, cIdx, b, dIdx, cIdx);
     }
   }
   const g = new THREE.BufferGeometry();
@@ -1415,16 +1423,19 @@ export function buildBunting(M, from, to, { n = 11, sag = 0.22, seed = 6 } = {})
 export function buildNightlight(M) {
   const g = new THREE.Group();
   g.name = 'nightlight';
+  // Deliberately NOT `transmission`: a transmissive material forces the
+  // renderer to resolve the whole opaque scene into a buffer first, which for
+  // a 5 cm mushroom costs an entire extra pass. Emissive plus a little alpha
+  // reads identically at this size.
   const glowMat = new THREE.MeshPhysicalMaterial({
     color: 0xfff0e0,
     emissive: new THREE.Color(0xffbf7a),
     emissiveIntensity: 0,
-    roughness: 0.35,
-    transmission: 0.45,
-    thickness: 0.05,
-    ior: 1.4,
+    roughness: 0.32,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.2,
     transparent: true,
-    opacity: 0.92
+    opacity: 0.94
   });
   const dome = new THREE.SphereGeometry(0.055, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.62);
   dome.translate(0, 0.028, 0);
@@ -1561,7 +1572,7 @@ export function buildClutter(M, spots, { seed = 77 } = {}) {
     kind: i % 3 === 2 ? 'ball' : 'block',
     x: s[0], z: s[1], rot: s[2] !== undefined ? s[2] : R() * 6.28,
     tilt: (R() - 0.5) * 0.5,
-    size: 0.062 + R() * 0.022,
+    size: 0.088 + R() * 0.030,
     color: (i % 3 === 2 ? ballCols : blockCols)[i % 5 % (i % 3 === 2 ? 3 : 5)],
     v: 0, target: 0, phase: R() * 6.28
   }));

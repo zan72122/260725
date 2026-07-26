@@ -79,9 +79,9 @@ export function anchors() {
     nose:      [0, P.noseY, P.noseZ],
     shoulder:  [0.0380, 0.4040, 0.0020],
     arm:       [0.0820, 0.4010, 0.0040],
-    forearm:   [0.1105, 0.3450, 0.0110],
-    hand:      [0.1265, 0.2880, 0.0190],
-    handEnd:   [0.1395, 0.2440, 0.0270],
+    forearm:   [0.1265, 0.3480, 0.0225],
+    hand:      [0.1570, 0.3010, 0.0420],
+    handEnd:   [0.1735, 0.2640, 0.0545],
     thigh:     [0.0430, 0.2620, 0.0040],
     shin:      [0.0520, 0.1680, 0.0000],
     foot:      [0.0560, 0.0660, 0.0040],
@@ -107,42 +107,42 @@ export function bodySpec() {
   const ell = (g, prio, c, r) => prims.push({ g, prio, t: 1, c, r });
 
   /* -- torso: pelvis → belly → chest, plus buttocks and the shoulder girdle */
-  ell('torso', 5, [0, 0.2680, 0.0000], [0.0800, 0.0550, 0.0700]);      // pelvis
-  ell('torso', 5, [0, 0.3220, 0.0080], [0.0840, 0.0600, 0.0780]);      // belly
-  ell('torso', 5, [0, 0.3780, 0.0040], [0.0790, 0.0520, 0.0700]);      // ribcage
-  cone('torso', 5, [-0.0540, 0.4040, 0.0020], [0.0540, 0.4040, 0.0020], 0.0400, 0.0400); // clavicle bar
-  cone('torso', 5, [-0.0250, 0.2560, 0.0000], [0.0250, 0.2560, 0.0000], 0.0430, 0.0430); // crotch
+  ell('torso', 0, [0, 0.2680, 0.0000], [0.0800, 0.0550, 0.0700]);      // pelvis
+  ell('torso', 0, [0, 0.3220, 0.0080], [0.0840, 0.0600, 0.0780]);      // belly
+  ell('torso', 0, [0, 0.3780, 0.0040], [0.0790, 0.0520, 0.0700]);      // ribcage
+  cone('torso', 0, [-0.0540, 0.4040, 0.0020], [0.0540, 0.4040, 0.0020], 0.0400, 0.0400); // clavicle bar
+  cone('torso', 0, [-0.0250, 0.2560, 0.0000], [0.0250, 0.2560, 0.0000], 0.0430, 0.0430); // crotch
   for (const s of [1, -1]) {
-    ell('torso', 5, m([0.0655, 0.4010, 0.0020], s), [0.0345, 0.0355, 0.0350]); // deltoid
-    ell('torso', 5, m([0.0400, 0.2580, -0.0400], s), [0.0450, 0.0420, 0.0450]); // buttock
+    ell('torso', 0, m([0.0655, 0.4010, 0.0020], s), [0.0345, 0.0355, 0.0350]); // deltoid
+    ell('torso', 0, m([0.0400, 0.2580, -0.0400], s), [0.0450, 0.0420, 0.0450]); // buttock
   }
 
   /* -- head: big cranium, small jaw, fat cheeks, button nose, soft ears ---- */
-  ell('head', 0, [0, 0.5470, -0.0025], [0.0700, 0.0755, 0.0690]);      // cranium
-  ell('head', 0, [0, 0.5010, 0.0090], [0.0575, 0.0455, 0.0530]);       // jaw mass
-  ell('head', 0, [0, 0.4945, 0.0400], [0.0295, 0.0235, 0.0235]);       // muzzle
-  ell('head', 0, [0, 0.4735, 0.0290], [0.0250, 0.0195, 0.0235]);       // chin
-  ell('head', 0, [0, P.noseY, 0.0575], [0.0122, 0.0100, 0.0175]);      // nose
-  cone('head', 0, [-0.0310, 0.5430, 0.0440], [0.0310, 0.5430, 0.0440], 0.0155, 0.0155); // brow ridge
-  cone('head', 0, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
+  ell('head', 1, [0, 0.5470, -0.0025], [0.0700, 0.0755, 0.0690]);      // cranium
+  ell('head', 1, [0, 0.5010, 0.0090], [0.0575, 0.0455, 0.0530]);       // jaw mass
+  ell('head', 1, [0, 0.4945, 0.0400], [0.0295, 0.0235, 0.0235]);       // muzzle
+  ell('head', 1, [0, 0.4735, 0.0290], [0.0250, 0.0195, 0.0235]);       // chin
+  ell('head', 1, [0, P.noseY, 0.0575], [0.0122, 0.0100, 0.0175]);      // nose
+  cone('head', 1, [-0.0310, 0.5430, 0.0440], [0.0310, 0.5430, 0.0440], 0.0155, 0.0155); // brow ridge
+  cone('head', 1, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
   for (const s of [1, -1]) {
-    ell('head', 0, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
-    ell('head', 0, m([0.0740, 0.5285, -0.0070], s), [0.0080, 0.0235, 0.0180]); // ear
+    ell('head', 1, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
+    ell('head', 1, m([0.0740, 0.5285, -0.0070], s), [0.0080, 0.0235, 0.0180]); // ear
   }
 
   /* -- limbs --------------------------------------------------------------- */
   for (const s of [1, -1]) {
     const side = s > 0 ? 'L' : 'R';
-    cone('arm' + side, 3, m(A.arm, s), m(A.forearm, s), 0.0360, 0.0300);
-    cone('arm' + side, 3, m(A.forearm, s), m(A.hand, s), 0.0310, 0.0230);
-    ell('hand' + side, 1, m([0.1335, 0.2670, 0.0220], s), [0.0210, 0.0240, 0.0140]);
-    ell('hand' + side, 1, m([0.1380, 0.2455, 0.0260], s), [0.0190, 0.0165, 0.0130]);
-    cone('hand' + side, 1, m([0.1275, 0.2620, 0.0280], s), m([0.1170, 0.2500, 0.0370], s), 0.0092, 0.0072);
+    cone('arm' + side, 2, m(A.arm, s), m(A.forearm, s), 0.0360, 0.0300);
+    cone('arm' + side, 2, m(A.forearm, s), m(A.hand, s), 0.0310, 0.0230);
+    ell('hand' + side, 3, m([0.1640, 0.2830, 0.0460], s), [0.0215, 0.0235, 0.0155]);
+    ell('hand' + side, 3, m([0.1710, 0.2640, 0.0530], s), [0.0190, 0.0170, 0.0140]);
+    cone('hand' + side, 3, m([0.1520, 0.2790, 0.0470], s), m([0.1400, 0.2680, 0.0580], s), 0.0092, 0.0072);
 
-    cone('leg' + side, 4, m(A.thigh, s), m(A.shin, s), 0.0520, 0.0380);
-    cone('leg' + side, 4, m(A.shin, s), m(A.foot, s), 0.0390, 0.0260);
-    ell('foot' + side, 2, m([0.0560, 0.0320, -0.0060], s), [0.0240, 0.0260, 0.0240]);
-    ell('foot' + side, 2, m([0.0570, 0.0250, 0.0250], s), [0.0230, 0.0190, 0.0300]);
+    cone('leg' + side, 2, m(A.thigh, s), m(A.shin, s), 0.0520, 0.0380);
+    cone('leg' + side, 2, m(A.shin, s), m(A.foot, s), 0.0390, 0.0260);
+    ell('foot' + side, 3, m([0.0560, 0.0320, -0.0060], s), [0.0240, 0.0260, 0.0240]);
+    ell('foot' + side, 3, m([0.0570, 0.0250, 0.0250], s), [0.0230, 0.0190, 0.0300]);
   }
 
   return prims;
@@ -342,7 +342,7 @@ export function buildDetail() {
     // knuckle dimples — four little pits where fingers meet the palm
     for (let i = 0; i < 4; i++) {
       const u = -0.014 + i * 0.0095;
-      dimple(m([0.1310 + u * 0.12, 0.2545 + u * 0.02, 0.0350], s), 0.0075, 0.0022);
+      dimple(m([0.1640 + u * 0.10, 0.2725 + u * 0.02, 0.0570], s), 0.0075, 0.0022);
     }
     // thigh: the classic double roll
     ring(thigh[0], thigh[1], 0.46, 0.016, 0.0040, 0.095, [0, 0, 1], -0.25);
@@ -356,7 +356,7 @@ export function buildDetail() {
     // ear concha
     dimple(m([0.0700, 0.5290, 0.0040], s), 0.0105, 0.0042, 0.0016);
     // eye socket: a shallow anisotropic scoop so the eyeball sits *in* the face
-    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.006], s), [0.0250, 0.0175, 0.0300], 0.0092);
+    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0285, 0.0205, 0.0330], 0.0135);
     // the little pad under the eye that makes infants look sleepy-sweet
     blob(m([P.eyeX, P.eyeY - 0.0180, P.eyeZ + 0.004], s), [0.0210, 0.0075, 0.0240], -0.0022);
     // nostril
@@ -470,7 +470,7 @@ export function zoneWeights(x, y, z, out) {
     0.6 * g(x, y - 0.5320, z - 0.0300, 0.070));
   let hands = 0, feet = 0;
   for (const s of [1, -1]) {
-    hands = Math.max(hands, g(x - 0.1350 * s, y - 0.2580, z - 0.0240, 0.052));
+    hands = Math.max(hands, g(x - 0.1660 * s, y - 0.2750, z - 0.0480, 0.052));
     feet = Math.max(feet, g(x - 0.0565 * s, y - 0.0300, z - 0.0100, 0.060));
   }
   const body = Math.max(0, (1 - face) * (1 - hands) * (1 - feet) *
@@ -580,6 +580,7 @@ export function buildPatch(field, opts) {
   const nor = new Float32Array(nv * 3);
   const uv = new Float32Array(nv * 2);
   const own = new Float32Array(nv);
+  const parts = new Float32Array(nv * nGroups);
   const gnrm = [0, 0, 0];
   const tmp = [0, 0, 0];
 
@@ -607,10 +608,29 @@ export function buildPatch(field, opts) {
       }
       const tOwn = field.march(ox, oy, oz, dx, dy, dz, { only, level: -inflate, tMax });
       const tUni = field.march(ox, oy, oz, dx, dy, dz, { level: -inflate, tStart: tOwn, tMax });
-      const lim = tOwn + margin;
-      // Stay inside our own domain. Because the smooth union is never inside a
-      // member volume, t <= tUni always holds, so a clamped vertex is *always*
-      // buried — it can never poke through a neighbouring shell.
+
+      // How much of this direction do we actually own? Sample the blend
+      // weights at the provisional surface point first.
+      const probe = Math.min(tUni, tOwn + margin);
+      field.groupWeights(ox + dx * probe, oy + dy * probe, oz + dz * probe, gw);
+      const gi0 = gi, nG = nGroups;
+      // Retraction ignores priority: whoever owns the surface owns it. (The
+      // torso is top priority but must still keep out of the hands, which hang
+      // right beside the hips.) Priority only breaks ties later.
+      let wAny = 0;
+      for (let g = 0; g < nG; g++) if (g !== gi0 && gw[g] > wAny) wAny = gw[g];
+      // 0 while we are winning or level (we must keep covering the fillet),
+      // rising to 1 only once another part clearly owns this surface.
+      const rel0 = Math.max(0, (wAny - gw[gi0]) / (wAny + gw[gi0] + 1e-6));
+
+      // Where a higher-priority part owns the surface, retract to our *own*
+      // volume instead of skimming along theirs. This matters enormously once
+      // the rig moves: a shell parked just under a neighbour's skin is invisible
+      // in bind pose but flies out as a sheet the moment its bone rotates.
+      const mEff = margin * (1 - smoothstep(0.06, 0.42, rel0));
+      const lim = tOwn + mEff;
+      // Because the smooth union is never inside a member volume, t <= tUni
+      // always holds, so a clamped vertex can never pierce a neighbour.
       const t = tUni > lim ? lim : tUni;
       const deficit = tUni - t;
 
@@ -654,6 +674,9 @@ export function buildPatch(field, opts) {
       pos[vi * 3] = px; pos[vi * 3 + 1] = py; pos[vi * 3 + 2] = pz;
       nor[vi * 3] = gnrm[0]; nor[vi * 3 + 1] = gnrm[1]; nor[vi * 3 + 2] = gnrm[2];
       own[vi] = wSelf;
+      // remember which anatomical part this skin belongs to — the skinning
+      // solver uses it to keep arm bones off the ribcage
+      for (let g = 0; g < nGroups; g++) parts[vi * nGroups + g] = gw[g];
     }
   }
 
@@ -717,7 +740,7 @@ export function buildPatch(field, opts) {
     }
   }
 
-  return { pos, nor, uv, own, idx: new Uint32Array(idx), segs, rings: R, group };
+  return { pos, nor, uv, own, parts, idx: new Uint32Array(idx), segs, rings: R, group };
 }
 
 /* ----------------------------------------------------------- assembly ----- */
@@ -725,6 +748,8 @@ export function buildPatch(field, opts) {
 function mergePatches(patches, field) {
   let nv = 0, ni = 0;
   for (const p of patches) { nv += p.pos.length / 3; ni += p.idx.length; }
+  const nG = field.groups.length;
+  const parts = new Float32Array(nv * nG);
   const pos = new Float32Array(nv * 3);
   const nor = new Float32Array(nv * 3);
   const uv = new Float32Array(nv * 2);
@@ -737,6 +762,7 @@ function mergePatches(patches, field) {
     nor.set(p.nor, vo * 3);
     uv.set(p.uv, vo * 2);
     own.set(p.own, vo);
+    if (p.parts) parts.set(p.parts, vo * nG);
     for (let i = 0; i < p.idx.length; i++) idx[io + i] = p.idx[i] + vo;
     vo += p.pos.length / 3; io += p.idx.length;
   }
@@ -745,7 +771,7 @@ function mergePatches(patches, field) {
     zoneWeights(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], z);
     zone[i * 4] = z[0]; zone[i * 4 + 1] = z[1]; zone[i * 4 + 2] = z[2]; zone[i * 4 + 3] = z[3];
   }
-  return { pos, nor, uv, zone, own, idx };
+  return { pos, nor, uv, zone, own, idx, parts, groups: field.groups };
 }
 
 /**
@@ -788,6 +814,9 @@ function toGeometry(m) {
   g.setAttribute('uv', new THREE.BufferAttribute(m.uv, 2));
   g.setAttribute('aZone', new THREE.BufferAttribute(m.zone, 4));
   g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+  // CPU-side only: never uploaded, used by rig.computeSkinWeights()
+  g.userData.parts = m.parts;
+  g.userData.partNames = m.groups;
   g.computeBoundingSphere();
   g.computeBoundingBox();
   return g;
@@ -798,7 +827,7 @@ function toGeometry(m) {
 const LOD = [
   { head: [40, 30], torso: [28, 22], arm: [16, 14], hand: [12, 9], leg: [18, 16], foot: [14, 10] },
   { head: [48, 36], torso: [34, 28], arm: [20, 18], hand: [15, 11], leg: [22, 20], foot: [17, 12] },
-  { head: [56, 42], torso: [40, 34], arm: [22, 22], hand: [18, 14], leg: [26, 26], foot: [20, 15] }
+  { head: [52, 38], torso: [40, 34], arm: [22, 22], hand: [18, 14], leg: [26, 26], foot: [20, 15] }
 ];
 
 /**
@@ -839,7 +868,7 @@ export function buildAnatomy({ tier = 2, uvRepeat = 7 } = {}) {
     }));
     bodyPatches.push(buildPatch(field, {
       ...common, group: 'hand' + side,
-      axis: [m([0.1275, 0.2790, 0.0200], s), m([0.1385, 0.2430, 0.0275], s)],
+      axis: [m([0.1580, 0.2940, 0.0435], s), m([0.1720, 0.2620, 0.0540], s)],
       segs: lod.hand[0], rings: lod.hand[1], capStart: 4, capEnd: 5, tMax: 0.09
     }));
     bodyPatches.push(buildPatch(field, {

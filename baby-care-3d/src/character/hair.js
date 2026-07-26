@@ -75,8 +75,10 @@ export class Hair {
   }
 
   build() {
+    // one strand texture set shared by cards and scalp: the scalp differs only
+    // in alpha cut-off and tiling, which costs nothing
     this.mat = MAT.makeHairCards({ color: this.color, strands: 9, seed: 5 });
-    this.scalpMat = MAT.makeHairCards({ color: this.color, strands: 14, seed: 11 });
+    this.scalpMat = MAT.makeHairCards({ color: this.color, strands: 9, seed: 5 });
     this.scalpMat.alphaTest = 0.30;
 
     this._buildScalp();
@@ -183,7 +185,6 @@ export class Hair {
       // grow the rest shape: hugs the skull, then peels off and droops
       let p = root.clone();
       let d = this._flow(root);
-      const n0 = skullNormal(root);
       for (let k = 0; k <= segs; k++) {
         const t = k / segs;
         const n = skullNormal(p);
@@ -216,7 +217,6 @@ export class Hair {
       }
       vo += card.count;
       this.cards.push(card);
-      void n0;
     }
 
     const g = new THREE.BufferGeometry();

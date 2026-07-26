@@ -27,10 +27,10 @@ const P = PROPORTIONS;
 /* ------------------------------------------------------------ landmarks --- */
 
 export const FACE = {
-  eye: [0.0300, 0.5320, 0.0480],   // eyeball centre (baby's left)
+  eye: [0.0300, 0.5320, 0.0530],   // eyeball centre (baby's left)
   eyeR: 0.0176,
-  lidR: 0.0199,
-  brow: [0.0300, 0.5470, 0.0640],
+  lidR: 0.0193,
+  brow: [0.0300, 0.5495, 0.0655],
   browHalf: 0.0215,
   mouth: [0, 0.4862, 0.0655],
   mouthHalf: 0.0245,
@@ -43,6 +43,9 @@ export const FACE = {
 const g1 = (d, r) => Math.exp(-(d * d) / (r * r));
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
 const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const DEG = Math.PI / 180;
+const LID_HALF = Math.PI * 0.52;              // lid cap half-angle
+const LID_HALF_DEG = 0.52 * 180;
 
 /* --------------------------------------------------------- morph targets -- */
 
@@ -364,21 +367,21 @@ export class Face {
     this.corneaMat = MAT.makeCornea();
     this.skinMat = null;                          // injected by Baby.build()
 
-    const eyeGeo = new THREE.SphereGeometry(FACE.eyeR, this.tier >= 2 ? 26 : 18, this.tier >= 2 ? 20 : 14);
+    const eyeGeo = new THREE.SphereGeometry(FACE.eyeR, this.tier >= 2 ? 22 : 16, this.tier >= 2 ? 16 : 12);
     // The iris texture is laid out on a flat square, so rotate the sphere's
     // pole to face forward — that puts the pupil dead centre of the cornea.
     eyeGeo.rotateX(-Math.PI / 2);
-    const corneaGeo = new THREE.SphereGeometry(FACE.lidR * 0.985, 18, 12,
+    const corneaGeo = new THREE.SphereGeometry(FACE.lidR * 0.985, 16, 10,
       0, Math.PI * 2, 0, Math.PI * 0.42);
     corneaGeo.rotateX(Math.PI / 2);
 
-    const lidSegs = this.tier >= 2 ? 24 : 16;
-    const lidGeo = lidGeometry(FACE.lidR, Math.PI * 0.52, lidSegs, 7);
+    const lidSegs = this.tier >= 2 ? 22 : 15;
+    const lidGeo = lidGeometry(FACE.lidR, LID_HALF, lidSegs, 6);
     // the lid shares the skin material, which samples aZone; without the
     // attribute WebGL would feed it (0,0,0,1) and dirt would land on eyelids
     lidGeo.setAttribute('aZone', new THREE.BufferAttribute(
       new Float32Array(lidGeo.attributes.position.count * 4), 4));
-    const lashGeo = lashGeometry(FACE.lidR, Math.PI * 0.52, lidSegs);
+    const lashGeo = lashGeometry(FACE.lidR, LID_HALF, lidSegs);
 
     this.lashMat = MAT.makeLash({ color: 0x4b3428 });
     this.browMat = MAT.makeLash({ color: 0x9a6f4e, opacity: 0.94 });
@@ -677,16 +680,14 @@ export class Face {
       const close = clamp01(Math.max(this._blinkAmount, val('lidClose')) + val('lidLower') * 0.55 + gazeLid * 0.4);
       const squint = val('eyeSquint') * 0.30 + val('mouthCry') * 0.25;
       const wide = val('eyeWide');
-      // upper lid: edge sweeps from high (open) to below the pupil (closed)
-      const upperOpen = -0.62 - wide * 0.16 + squint * 0.10;
-      const upperShut = 0.30;
-      e.upper.rotation.x = THREE.MathUtils.lerp(upperOpen, upperShut, close)
-        + (this.gazePitch || 0) * 0.30;
-      // lower lid: rises with squint and with the last third of a blink
-      const lowerOpen = 0.80 - wide * 0.10;
-      const lowerShut = 0.06;
-      e.lower.rotation.x = -(THREE.MathUtils.lerp(lowerOpen, lowerShut, close * 0.62 + squint * 0.55))
-        + (this.gazePitch || 0) * 0.10;
+      // Lids are hemispherical caps of half-angle LID_HALF. Solve directly for
+      // where each lid's *edge* should cross the front of the eye (measured in
+      // degrees from straight up) and back out the pivot angle — far easier to
+      // reason about than raw rotations, and it makes the aperture explicit.
+      const upEdge = THREE.MathUtils.lerp(62 - wide * 8 + squint * 7, 100, close);
+      const loEdge = THREE.MathUtils.lerp(119 + wide * 5, 96, close * 0.62 + squint * 0.85);
+      e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
+      e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;
       e.upper.rotation.z = e.s * (val('browSad') * 0.10 - val('browFurrow') * 0.08);
       const vis = close < 0.985;
       e.cornea.visible = vis;
@@ -751,10 +752,10 @@ export class Face {
       if (t.life < 0.85) {
         t.u = 0;
         const k = clamp01(t.life / 0.85);
-        t.mesh.scale.setScalar(t.r * (0.25 + k * 1.0) * 60);
+        t.mesh.scale.setScalar(t.r * (0.25 + k * 1.0));
       } else {
         t.u += dt * (0.35 + (t.life - 0.85) * 0.9);
-        t.mesh.scale.setScalar(t.r * (1.25 - t.u * 0.35) * 60);
+        t.mesh.scale.setScalar(t.r * (1.25 - t.u * 0.35));
       }
       if (t.u >= 1) { t.life = -1; t.mesh.visible = false; continue; }
       const f = t.u * (path.length - 1);

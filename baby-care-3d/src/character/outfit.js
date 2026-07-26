@@ -45,7 +45,7 @@ export const GARMENTS = {
       // short sleeves: a capsule around the top of each upper arm
       let sl = 0;
       for (const s of [1, -1]) {
-        const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.0960, 0.3560, 0.0080], s));
+        const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1080, 0.3640, 0.0160], s));
         sl = Math.max(sl, 1 - sstep(0.030, 0.048, d));
       }
       // neck hole
@@ -79,9 +79,11 @@ export const GARMENTS = {
       const bulk = 1 - sstep(0.048, 0.082, Math.hypot(x * 0.85, (y - 0.2560) * 1.3, (z + 0.010) * 0.85));
       return Math.max(wais * 0.9, bulk);
     },
+    // a nappy is non-woven and smooth; a plain weave is both truer and an
+    // order of magnitude cheaper to synthesise than a terry pile
     material: () => MAT.makeCloth({
-      color: 0xfffdf8, weave: 'terry', threads: 90, repeat: 7,
-      sheen: 1.0, roughness: 0.99, seed: 45, normalScale: 1.2
+      color: 0xfffdf8, weave: 'plain', threads: 190, repeat: 7,
+      sheen: 0.85, roughness: 0.97, seed: 45, normalScale: 0.7
     })
   },
   socks: {
@@ -115,7 +117,7 @@ export const GARMENTS = {
       const neck = sstep(0.030, 0.052, Math.hypot(x / 0.9, (y - 0.4340) / 0.75));
       return (1 - sstep(0.85, 1.05, r)) * neck;
     },
-    material: (c) => MAT.makeCloth({ color: c, weave: 'terry', threads: 100, repeat: 8, seed: 83 })
+    material: (c) => MAT.makeTerry({ color: c, repeat: 8, seed: 71 })
   }
 };
 
@@ -180,10 +182,13 @@ export class Outfit {
     let nv = 0;
     for (const p of patches) nv += p.pos.length / 3;
     const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
+    const nG = this.field.groups.length;
+    const parts = new Float32Array(nv * nG);
     const idx = [];
     let vo = 0;
     for (const p of patches) {
       pos.set(p.pos, vo * 3); nor.set(p.nor, vo * 3); uv.set(p.uv, vo * 2);
+      if (p.parts) parts.set(p.parts, vo * nG);
       const n = p.pos.length / 3;
       for (let i = 0; i < p.idx.length; i += 3) {
         const a = p.idx[i] + vo, b = p.idx[i + 1] + vo, c = p.idx[i + 2] + vo;
@@ -202,6 +207,10 @@ export class Outfit {
     geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setIndex(idx);
+    // Clothing needs the same part masks the skin uses, or the arm bones will
+    // grab the shirt's ribcage exactly the way they used to grab the skin.
+    geo.userData.parts = parts;
+    geo.userData.partNames = this.field.groups;
     // drop the vertices no surviving triangle references
     const clean = mergeUsed(geo);
     clean.computeBoundingSphere();
@@ -280,6 +289,18 @@ function mergeUsed(geo) {
   const ni = new Uint32Array(idx.length);
   for (let i = 0; i < idx.length; i++) ni[i] = map[idx[i]];
   out.setIndex(new THREE.BufferAttribute(ni, 1));
+  const src = geo.userData.parts;
+  if (src) {
+    const nG = geo.userData.partNames.length;
+    const dst = new Float32Array(n * nG);
+    for (let i = 0; i < map.length; i++) {
+      const j = map[i];
+      if (j < 0) continue;
+      for (let g = 0; g < nG; g++) dst[j * nG + g] = src[i * nG + g];
+    }
+    out.userData.parts = dst;
+    out.userData.partNames = geo.userData.partNames;
+  }
   geo.dispose();
   return out;
 }
@@ -297,14 +318,14 @@ export const SHELL_PATCHES = {
     star: true, center: [0, 0.5330, 0.0060], segs: 46, rings: 34, tMax: 0.22,
     collapse: { from: 0.86, to: [0, 0.4400, 0.0040] }
   },
-  armL: { axis: [[0.0820, 0.4010, 0.0040], [0.1105, 0.3450, 0.0110], [0.1265, 0.2880, 0.0190]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
-  armR: { axis: [[-0.0820, 0.4010, 0.0040], [-0.1105, 0.3450, 0.0110], [-0.1265, 0.2880, 0.0190]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
+  armL: { axis: [[0.0820, 0.4010, 0.0040], [0.1265, 0.3480, 0.0225], [0.1570, 0.3010, 0.0420]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
+  armR: { axis: [[-0.0820, 0.4010, 0.0040], [-0.1265, 0.3480, 0.0225], [-0.1570, 0.3010, 0.0420]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
   legL: { axis: [[0.0430, 0.2620, 0.0040], [0.0520, 0.1680, 0.0000], [0.0560, 0.0660, 0.0040]], segs: 26, rings: 26, capStart: 2, capEnd: 2, tMax: 0.16 },
   legR: { axis: [[-0.0430, 0.2620, 0.0040], [-0.0520, 0.1680, 0.0000], [-0.0560, 0.0660, 0.0040]], segs: 26, rings: 26, capStart: 2, capEnd: 2, tMax: 0.16 },
   footL: { axis: [[0.0560, 0.0345, -0.0170], [0.0570, 0.0270, 0.0400]], segs: 20, rings: 15, capStart: 5, capEnd: 5, tMax: 0.10 },
   footR: { axis: [[-0.0560, 0.0345, -0.0170], [-0.0570, 0.0270, 0.0400]], segs: 20, rings: 15, capStart: 5, capEnd: 5, tMax: 0.10 },
-  handL: { axis: [[0.1275, 0.2790, 0.0200], [0.1385, 0.2430, 0.0275]], segs: 18, rings: 14, capStart: 4, capEnd: 5, tMax: 0.10 },
-  handR: { axis: [[-0.1275, 0.2790, 0.0200], [-0.1385, 0.2430, 0.0275]], segs: 18, rings: 14, capStart: 4, capEnd: 5, tMax: 0.10 }
+  handL: { axis: [[0.1580, 0.2940, 0.0435], [0.1720, 0.2620, 0.0540]], segs: 18, rings: 14, capStart: 4, capEnd: 5, tMax: 0.10 },
+  handR: { axis: [[-0.1580, 0.2940, 0.0435], [-0.1720, 0.2620, 0.0540]], segs: 18, rings: 14, capStart: 4, capEnd: 5, tMax: 0.10 }
 };
 
 export { PALETTE };

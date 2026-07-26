@@ -195,17 +195,18 @@ export class DressActivity {
     rail.position.set(0, RAIL_Y, z);
     this.root.add(rail);
 
-    // two doors that swing open on entry
+    // Two doors, hinged at the outer edges. The panel reaches *inwards* from
+    // its hinge to the middle of the cabinet, and swings forward and outwards.
     this.doors = [];
     for (const sx of [-1, 1]) {
       const door = new THREE.Group();
       const panel = new THREE.Mesh(
         this.trash.geo(S.roundedBox(W / 2 - 0.012, H - 0.05, 0.018, 0.006, 3)), this.mat.woodPale);
-      panel.position.set(sx * (W / 4 - 0.006), 0, 0);
+      panel.position.set(-sx * (W / 4 - 0.006), 0, 0);
       door.add(panel);
       const knob = new THREE.Mesh(
         this.trash.geo(new THREE.SphereGeometry(0.011, 14, 10)), this.mat.chrome);
-      knob.position.set(sx * (W / 2 - 0.045), 0, 0.014);
+      knob.position.set(-sx * (W / 2 - 0.052), 0, 0.014);
       door.add(knob);
       door.position.set(sx * (W / 2 - 0.012), H / 2, z + D / 2);
       this.root.add(door);
@@ -376,8 +377,8 @@ export class DressActivity {
       this.pegs.push(peg);
     }
 
-    g.position.set(-0.58, 0, 0.14);
-    g.rotation.y = 0.5;
+    g.position.set(0.70, 0, -0.20);
+    g.rotation.y = -0.85;
     this.root.add(g);
     this.line = g;
   }
@@ -395,7 +396,7 @@ export class DressActivity {
       S.xform([0, 0.025 + i * 0.042, 0], [Math.PI / 2, 0, 0])]);
     }
     g.add(new THREE.Mesh(this.trash.geo(S.mergeAll(hoops)), this.mat.woodPale));
-    g.position.set(-0.44, 0, 0.40);
+    g.position.set(-0.40, 0, 0.46);
     g.userData.pickId = 'basket';
     const bh = S.hitProxy(0.14, 'basket-hit');
     bh.position.y = 0.07;
@@ -408,15 +409,15 @@ export class DressActivity {
     const g = new THREE.Group();
     g.add(new THREE.Mesh(this.trash.geo(S.mergeAll([
       new THREE.TorusGeometry(0.155, 0.018, 12, 36),
-      [S.lathe([[0, 0], [0.07, 0], [0.065, 0.012], [0.014, 0.05], [0.012, 0.30], [0, 0.305]], 18),
-      S.xform([0, -0.46, 0])]
+      [S.lathe([[0, 0], [0.075, 0], [0.070, 0.014], [0.016, 0.06], [0.013, 0.455], [0, 0.465]], 18),
+      S.xform([0, -0.620, 0])]
     ])), this.mat.woodPale));
     const glassGeo = this.trash.geo(new THREE.CircleGeometry(0.152, 36));
     const glass = new THREE.Mesh(glassGeo, this.mat.chrome);
     glass.position.z = -0.004;
     g.add(glass);
-    g.position.set(0.44, 0.62, -0.30);
-    g.rotation.y = -0.55;
+    g.position.set(-0.58, 0.62, 0.02);
+    g.rotation.y = 0.78;
     this.root.add(g);
     this.mirror = g;
   }
@@ -531,12 +532,15 @@ export class DressActivity {
     trim.side = THREE.DoubleSide;
 
     // ---- body: a lathe grid so it can be stretched over the head ----------
+    // Baby proportions: ~0.16 m long, 0.062 m at the widest, and a neck hole
+    // (0.034) deliberately smaller than the head so it has to stretch.
     const profile = new THREE.SplineCurve([
-      new THREE.Vector2(0.076, -0.052), new THREE.Vector2(0.078, -0.044),
-      new THREE.Vector2(0.072, -0.026), new THREE.Vector2(0.069, 0.000),
-      new THREE.Vector2(0.071, 0.022), new THREE.Vector2(0.073, 0.040),
-      new THREE.Vector2(0.070, 0.056), new THREE.Vector2(0.060, 0.070),
-      new THREE.Vector2(0.048, 0.079), new THREE.Vector2(0.042, 0.084)
+      new THREE.Vector2(0.0615, -0.088), new THREE.Vector2(0.0635, -0.080),
+      new THREE.Vector2(0.0590, -0.062), new THREE.Vector2(0.0560, -0.035),
+      new THREE.Vector2(0.0570, -0.010), new THREE.Vector2(0.0600, 0.014),
+      new THREE.Vector2(0.0612, 0.032), new THREE.Vector2(0.0580, 0.048),
+      new THREE.Vector2(0.0480, 0.062), new THREE.Vector2(0.0380, 0.070),
+      new THREE.Vector2(0.0340, 0.0745)
     ]).getPoints(26);
     const bodyGeo = this.trash.geo(new THREE.LatheGeometry(profile, 40));
     const body = new THREE.Mesh(bodyGeo, cloth);
@@ -544,16 +548,16 @@ export class DressActivity {
 
     // ---- ribbed hem, neck band and shoulder seam -------------------------
     const bands = [];
-    bands.push([new THREE.TorusGeometry(0.0765, 0.0055, 8, 40), S.xform([0, -0.048, 0], [Math.PI / 2, 0, 0])]);
-    bands.push([new THREE.TorusGeometry(0.0425, 0.0050, 8, 32), S.xform([0, 0.0835, 0], [Math.PI / 2, 0, 0])]);
+    bands.push([new THREE.TorusGeometry(0.0625, 0.0050, 8, 36), S.xform([0, -0.0845, 0], [Math.PI / 2, 0, 0])]);
+    bands.push([new THREE.TorusGeometry(0.0345, 0.0045, 8, 28), S.xform([0, 0.0740, 0], [Math.PI / 2, 0, 0])]);
     const bandMesh = new THREE.Mesh(this.trash.geo(S.mergeAll(bands)), trim);
     group.add(bandMesh);
 
-    // visible topstitching around the yoke
+    // visible topstitching around the yoke — just proud of the cloth
     const stitchPts = [];
     for (let i = 0; i < 48; i++) {
       const a = (i / 48) * Math.PI * 2;
-      stitchPts.push(new THREE.Vector3(Math.cos(a) * 0.0665, 0.052, Math.sin(a) * 0.0665));
+      stitchPts.push(new THREE.Vector3(Math.cos(a) * 0.0592, 0.046, Math.sin(a) * 0.0592));
     }
     const stitch = new THREE.Mesh(this.trash.geo(new THREE.TubeGeometry(
       new THREE.CatmullRomCurve3(stitchPts, true), 64, 0.0013, 4, true)), trim);
@@ -562,19 +566,19 @@ export class DressActivity {
     // ---- sleeves ---------------------------------------------------------
     const sleeves = [];
     const long = spec.sleeve === 'long';
-    const len = long ? 0.085 : 0.042;
+    const len = long ? 0.072 : 0.036;
     for (const sx of [-1, 1]) {
       const s = new THREE.Group();
-      const tubeGeo = this.trash.geo(new THREE.CylinderGeometry(0.030, 0.024, len, 20, 4, true));
+      const tubeGeo = this.trash.geo(new THREE.CylinderGeometry(0.026, 0.021, len, 20, 4, true));
       const tubeMesh = new THREE.Mesh(tubeGeo, cloth);
       tubeMesh.position.y = -len / 2;
       s.add(tubeMesh);
       const cuff = new THREE.Mesh(this.trash.geo(
-        new THREE.TorusGeometry(0.0245, 0.0055, 8, 20)), trim);
+        new THREE.TorusGeometry(0.0215, 0.0048, 8, 20)), trim);
       cuff.rotation.x = Math.PI / 2;
       cuff.position.y = -len;
       s.add(cuff);
-      s.position.set(sx * 0.062, 0.048, 0);
+      s.position.set(sx * 0.053, 0.036, 0);
       s.rotation.z = sx * 0.95;
       s.userData.baseQuat = s.quaternion.clone();
       s.userData.side = sx < 0 ? 0 : 1;
@@ -586,18 +590,18 @@ export class DressActivity {
     let placket = null;
     const buttons = [];
     if (spec.buttons > 0) {
+      // The placket follows the body's own profile, offset a couple of
+      // millimetres out, so it lies on the cloth instead of standing off it
+      // like a bolted-on plate.
       placket = new THREE.Group();
-      const flapGeo = this.trash.geo(new THREE.CylinderGeometry(
-        0.0715, 0.0715, 0.098, 24, 3, true, -0.34, 0.68));
-      const flap = new THREE.Mesh(flapGeo, cloth);
-      flap.position.y = 0.010;
-      placket.add(flap);
-      const edgeGeo = this.trash.geo(new THREE.CylinderGeometry(
-        0.0722, 0.0722, 0.0085, 8, 1, true, -0.345, 0.02));
-      const edge = new THREE.Mesh(edgeGeo, trim);
-      edge.scale.y = 11;
-      edge.position.y = 0.010;
-      placket.add(edge);
+      const front = profile
+        .filter(p => p.y > -0.048 && p.y < 0.058)
+        .map(p => new THREE.Vector2(p.x + 0.0016, p.y));
+      placket.add(new THREE.Mesh(
+        this.trash.geo(new THREE.LatheGeometry(front, 14, -0.36, 0.72)), cloth));
+      const edgePts = front.map(p => new THREE.Vector2(p.x + 0.0012, p.y));
+      placket.add(new THREE.Mesh(
+        this.trash.geo(new THREE.LatheGeometry(edgePts, 3, -0.372, 0.028)), trim));
       group.add(placket);
 
       // Each button is two draw calls: the disc (with its four sewing holes
@@ -622,16 +626,22 @@ export class DressActivity {
           S.xform([0, 0, 0.0018], [0, 0, -Math.PI / 4])]
         ]));
         b.add(new THREE.Mesh(threadGeo, this.mat.thread));
-        const y = 0.036 - i * 0.030;
-        b.userData.closed = new THREE.Vector3(0, y, 0.0735);
-        b.userData.open = new THREE.Vector3(0.026, y, 0.0680);
+        // Undone: sitting off to the side of its hole, tilted to stay flat
+        // against the curve of the placket. Done up: right in the hole.
+        const y = 0.030 - i * 0.028;
+        const R = 0.0632;
+        b.userData.closed = new THREE.Vector3(-0.010, y, Math.sqrt(R * R - 0.010 * 0.010));
+        b.userData.closedRotY = Math.asin(-0.010 / R);
+        b.userData.open = new THREE.Vector3(0.019, y, Math.sqrt(R * R - 0.019 * 0.019));
+        b.userData.openRotY = Math.asin(0.019 / R);
         b.position.copy(b.userData.open);
+        b.rotation.y = b.userData.openRotY;
         b.userData.pickId = 'button:' + spec.id + ':' + i;
-        b.add(S.hitProxy(0.030, 'button-hit'));
+        b.add(S.hitProxy(0.026, 'button-hit'));
         group.add(b);
         buttons.push(b);
-        holeRings.push([new THREE.TorusGeometry(0.0056, 0.0014, 6, 14),
-        S.xform([-0.022, y, 0.0700], [0, -0.32, 0])]);
+        holeRings.push([new THREE.TorusGeometry(0.0052, 0.0013, 6, 14),
+        S.xform([-0.010, y, 0.0622], [0, b.userData.closedRotY, 0])]);
       }
       const holeMesh = new THREE.Mesh(this.trash.geo(S.mergeAll(holeRings)), trim);
       group.add(holeMesh);
@@ -641,13 +651,13 @@ export class DressActivity {
     let skirt = null, skirtSim = null;
     if (spec.skirt) {
       const segX = 26, segY = 6;
-      const geo = this.trash.geo(new THREE.PlaneGeometry(0.50, 0.085, segX, segY));
+      const geo = this.trash.geo(new THREE.PlaneGeometry(0.393, 0.085, segX, segY));
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) {                 // roll the panel into a skirt
-        const a = (pos.getX(i) / 0.50) * Math.PI * 2;
+        const a = (pos.getX(i) / 0.393) * Math.PI * 2;
         const y = pos.getY(i);
-        const r = 0.078 + (0.0425 - y) * 0.22;
-        pos.setXYZ(i, Math.sin(a) * r, y - 0.052, Math.cos(a) * r);
+        const r = 0.0662 + (0.0425 - y) * 0.22;
+        pos.setXYZ(i, Math.sin(a) * r, y - 0.086, Math.cos(a) * r);
       }
       pos.needsUpdate = true;
       geo.computeVertexNormals();
@@ -662,10 +672,10 @@ export class DressActivity {
     let hood = null, hoodSim = null;
     if (spec.hood) {
       const segX = 10, segY = 8;
-      const geo = this.trash.geo(S.clothPanel(0.12, 0.11, segX, segY,
+      const geo = this.trash.geo(S.clothPanel(0.105, 0.10, segX, segY,
         v => 0.55 + 0.45 * Math.sin(Math.min(1, v * 1.1) * Math.PI * 0.8)));
       geo.rotateX(0.25);
-      geo.translate(0, 0.055, -0.058);
+      geo.translate(0, 0.052, -0.048);
       hood = new THREE.Mesh(geo, cloth);
       group.add(hood);
       hoodSim = S.makeCloth(this.ctx, hood, {
@@ -693,9 +703,17 @@ export class DressActivity {
     const entry = {
       spec, group, hanger, body, bodyBase: S.snapshot(bodyGeo),
       sleeves, buttons, placket, skirt, skirtSim, hood, hoodSim,
-      cloth, trim, state: 'clean', spin: this._rand() * Math.PI * 2, wet: 0
+      cloth, trim, state: 'clean', spin: this._rand() * Math.PI * 2, wet: 0,
+      detail: [stitch, ...buttons]
     };
+    // On the weakest tier the millimetre details only appear once the garment
+    // is actually being put on, where the camera is close enough to see them.
+    if (this.tier === 0) this._setDetail(entry, false);
     return entry;
+  }
+
+  _setDetail(entry, on) {
+    for (const d of entry.detail) d.visible = on;
   }
 
   /* ============================================================= enter === */
@@ -1048,13 +1066,16 @@ export class DressActivity {
   _startDressing(entry) {
     const ctx = this.ctx;
     this.dressing = { g: entry, step: 'head', buttonsDone: 0 };
+    this._setDetail(entry, true);
     entry.group.userData.railHome = entry.group.position.clone();
     try { ctx.baby?.setOutfit?.({ top: null, bottom: null }); } catch (e) { /* ignore */ }
 
     // sleeves start tucked; buttons start open
     for (const s of entry.sleeves) s.scale.set(1, 0.12, 1);
-    for (const b of entry.buttons) b.position.copy(b.userData.open);
-    if (entry.placket) entry.placket.rotation.y = -0.55;
+    for (const b of entry.buttons) {
+      b.position.copy(b.userData.open);
+      b.rotation.y = b.userData.openRotY;
+    }
 
     // float the garment above the head
     this._headWorld(this._v);
@@ -1120,7 +1141,7 @@ export class DressActivity {
     entry.group.updateWorldMatrix(true, false);
     const local = entry.group.worldToLocal(this._v.clone());
     S.wrapGeometry(entry.body.geometry, entry.bodyBase,
-      [{ centre: local, radius: this._headRadius(), softness: 1.45 }], { blend });
+      [{ centre: local, radius: this._headRadius(), softness: 1.15 }], { blend });
   }
 
   _doSleeve(side) {
@@ -1180,13 +1201,11 @@ export class DressActivity {
     const from = b.position.clone();
     S.play(ctx, 'snap');
     S.play(ctx, 'pop');
+    const fromRot = b.rotation.y;
     this.clock.tween(0.32, t => {
       b.position.lerpVectors(from, b.userData.closed, t);
+      b.rotation.y = S.lerp(fromRot, b.userData.closedRotY, t);
       b.scale.setScalar(1 + Math.sin(t * Math.PI) * 0.45);
-      if (entry.placket) {
-        entry.placket.rotation.y = S.lerp(-0.55 * (1 - (d.buttonsDone - 1) / entry.buttons.length),
-          -0.55 * (1 - d.buttonsDone / entry.buttons.length), t);
-      }
     }, {
       ease: S.EASE.back,
       onDone: () => {
@@ -1194,7 +1213,6 @@ export class DressActivity {
         b.getWorldPosition(this._v);
         S.burst(ctx, 'sparkle', this._v, 3);
         if (d.buttonsDone >= entry.buttons.length) {
-          if (entry.placket) entry.placket.rotation.y = 0;
           this._finishDressing();
         } else {
           this._pulseButton(entry.buttons[d.buttonsDone]);
@@ -1261,6 +1279,7 @@ export class DressActivity {
   }
 
   _resetGarment(entry) {
+    if (this.tier === 0) this._setDetail(entry, false);
     entry.cloth.transparent = false;
     entry.cloth.opacity = 1;
     entry.group.scale.setScalar(1);
@@ -1269,8 +1288,11 @@ export class DressActivity {
       new THREE.Vector3(entry.railX, RAIL_Y - 0.115, -0.16));
     S.restore(entry.body.geometry, entry.bodyBase);
     for (const s of entry.sleeves) { s.scale.set(1, 1, 1); s.userData.done = false; }
-    for (const b of entry.buttons) { b.position.copy(b.userData.closed); b.scale.setScalar(1); }
-    if (entry.placket) entry.placket.rotation.y = 0;
+    for (const b of entry.buttons) {
+      b.position.copy(b.userData.closed);
+      b.rotation.y = b.userData.closedRotY;
+      b.scale.setScalar(1);
+    }
   }
 
   /* ------------------------------------------------- socks & shoes ------- */
@@ -1421,7 +1443,7 @@ export class DressActivity {
     const dOpen = this.doorTarget;
     for (const d of this.doors) {
       d.open += (dOpen - d.open) * Math.min(1, dt * 3.2);
-      d.group.rotation.y = -d.sx * d.open * 1.9;
+      d.group.rotation.y = d.sx * d.open * 2.05;
     }
 
     // hangers turn so the clothes can be seen in the round
@@ -1517,7 +1539,7 @@ export class DressActivity {
     const ctx = this.ctx;
     this.clock.clear();
     this.doorTarget = 1;
-    for (const d of this.doors) { d.open = 1; d.group.rotation.y = -d.sx * 1.9; }
+    for (const d of this.doors) { d.open = 1; d.group.rotation.y = d.sx * 2.05; }
     if (this.dressing) { this._resetGarment(this.dressing.g); this.dressing = null; }
     for (const g of this.garments) if (g.state !== 'dirty') this._resetGarment(g);
     for (const s of [...this.socks, ...this.shoes, ...this.boots]) {
@@ -1534,15 +1556,17 @@ export class DressActivity {
 
     if (step === 'head') {
       this.dressing = { g, step: 'head', buttonsDone: 0, running: false };
+      this._setDetail(g, true);
       for (const s of g.sleeves) s.scale.set(1, 0.12, 1);
-      for (const b of g.buttons) b.position.copy(b.userData.open);
-      if (g.placket) g.placket.rotation.y = -0.55;
+      for (const b of g.buttons) { b.position.copy(b.userData.open); b.rotation.y = b.userData.openRotY; }
       g.group.userData.railHome = new THREE.Vector3(g.railX, RAIL_Y - 0.115, -0.16);
-      // park it exactly where the stretch reads best: half way over the crown
+      // Park it where the stretch reads best: the neck opening (local +0.074)
+      // sitting on the crown, so the band is taut around the head and the body
+      // hangs below it — not the whole garment inflated like a balloon.
       this._headWorld(this._v);
       const head = this.root.worldToLocal(this._v.clone());
-      g.group.position.set(head.x, head.y + 0.028, head.z);
-      g.group.scale.set(1.05, 0.96, 1.05);
+      g.group.position.set(head.x, head.y - 0.058, head.z);
+      g.group.scale.set(1.04, 0.97, 1.04);
       this._deformOverHead(g, 1);
       S.mood(ctx, 'surprised');
       try { ctx.baby?.setOutfit?.({ top: null }); } catch (e) { /* ignore */ }
@@ -1559,18 +1583,22 @@ export class DressActivity {
 
     if (step === 'armL' || step === 'armR') {
       this.dressing = { g, step, buttonsDone: 0, running: false };
+      this._setDetail(g, true);
       g.sleeves[0].scale.set(1, step === 'armR' ? 1 : 0.12, 1);
       g.sleeves[1].scale.set(1, 0.12, 1);
-      for (const b of g.buttons) b.position.copy(b.userData.open);
-      if (g.placket) g.placket.rotation.y = -0.55;
+      for (const b of g.buttons) { b.position.copy(b.userData.open); b.rotation.y = b.userData.openRotY; }
       S.say(ctx, step === 'armL' ? 'ひだりうでを とおそう' : 'みぎうでも とおそう', 'hand');
     } else if (step === 'buttons') {
       this.dressing = { g, step: 'buttons', buttonsDone: 1, running: false };
+      this._setDetail(g, true);
       for (const s of g.sleeves) s.scale.set(1, 1, 1);
       if (g.buttons.length) {
         g.buttons[0].position.copy(g.buttons[0].userData.closed);
-        for (let i = 1; i < g.buttons.length; i++) g.buttons[i].position.copy(g.buttons[i].userData.open);
-        if (g.placket) g.placket.rotation.y = -0.55 * (1 - 1 / g.buttons.length);
+        g.buttons[0].rotation.y = g.buttons[0].userData.closedRotY;
+        for (let i = 1; i < g.buttons.length; i++) {
+          g.buttons[i].position.copy(g.buttons[i].userData.open);
+          g.buttons[i].rotation.y = g.buttons[i].userData.openRotY;
+        }
         this._pulseButton(g.buttons[1] || g.buttons[0]);
       }
       S.say(ctx, 'ボタンを パチン！', 'hand');

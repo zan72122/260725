@@ -257,7 +257,11 @@ export function carveBite(mesh, centre, radius, {
     _v2.normalize();
     if (d < radius) {
       const phi = Math.atan2(_v2.dot(tanB), _v2.dot(tanA));
-      const ripple = 1 + toothDepth * Math.cos(teeth * phi) + (rand() - 0.5) * jitter * 0.2;
+      // The ripple may only ever cut *deeper* (>= 1). A radius below the bite
+      // sphere would drag rim vertices back out through the skin and leave a
+      // spike sticking out of the fruit.
+      const scallop = 0.5 - 0.5 * Math.cos(teeth * phi);
+      const ripple = 1 + toothDepth * scallop + rand() * jitter * 0.1;
       _v2.multiplyScalar(radius * ripple).add(centre);
       pos.setXYZ(i, _v2.x, _v2.y, _v2.z);
       moved++;
@@ -278,6 +282,31 @@ export function carveBite(mesh, centre, radius, {
   }
   if (col) col.needsUpdate = true;
   return moved;
+}
+
+/**
+ * How far the surface of `mesh` reaches along `dir` (local space), measured
+ * over the vertices inside a cone around that direction.
+ *
+ * carveBite() needs its sphere centre to sit *outside* the surface, otherwise
+ * the projection turns inside-out and blows the mesh open. Fruit, biscuits and
+ * rice balls all have very different radii in different directions — and they
+ * change as they get eaten — so the reach is measured rather than guessed.
+ */
+export function surfaceReach(mesh, dir, cone = 0.55) {
+  const pos = mesh.geometry.attributes.position;
+  const d = _v3.copy(dir).normalize();
+  const cosLimit = Math.cos(cone);
+  let best = 0;
+  for (let i = 0; i < pos.count; i++) {
+    _v.fromBufferAttribute(pos, i);
+    const len = _v.length();
+    if (len < 1e-6) continue;
+    const proj = _v.dot(d);
+    if (proj / len < cosLimit) continue;
+    if (proj > best) best = proj;
+  }
+  return best;
 }
 
 /**

@@ -381,9 +381,9 @@ export class FeedActivity {
     collar.position.set(0, 0.088, 0);
     group.add(collar);
 
-    // draped over the front-left corner of the tray, where a child can see it
-    group.position.set(-0.135, 0.505, TRAY_Z + TRAY_D / 2 - 0.025);
-    group.rotation.x = 0.62;
+    // draped over the left rim of the tray, hanging clear of every food slot
+    group.position.set(-TRAY_W / 2 - 0.005, 0.468, TRAY_Z + 0.02);
+    group.rotation.set(0.12, 0.30, -1.15);
     group.userData.pickId = 'bib';
     group.add(S.hitProxy(0.10, 'bib-hit'));
     this.root.add(group);
@@ -513,10 +513,12 @@ export class FeedActivity {
     ], 28)), this.mat.collar);
     g.add(collar);
 
+    // bulb → neck → rounded tip, the way a real silicone teat is moulded
     const teat = new THREE.Mesh(this.trash.geo(S.lathe([
-      [0.0175, 0.148], [0.0180, 0.156], [0.0135, 0.168], [0.0090, 0.180],
-      [0.0060, 0.190], [0.0030, 0.194], [0, 0.195]
-    ], 24)), this.mat.teat);
+      [0.0175, 0.1480], [0.0198, 0.1545], [0.0192, 0.1625], [0.0140, 0.1700],
+      [0.0092, 0.1765], [0.0074, 0.1840], [0.0082, 0.1905], [0.0068, 0.1955],
+      [0.0038, 0.1988], [0, 0.2000]
+    ], 26)), this.mat.teat);
     this.mat.teat.transmission = this.tier >= 1 ? 0.35 : 0;
     this.mat.teat.thickness = 0.006;
     this.mat.teat.ior = 1.41;
@@ -632,8 +634,8 @@ export class FeedActivity {
         const face = Math.sign(z);
         const d1 = Math.hypot(x - 0.008, y + 0.005);
         const d2 = Math.hypot(x + 0.012, y - 0.018);
-        const push = k * (0.0115 * Math.exp(-Math.pow(d1 / 0.022, 2)) +
-          0.0075 * Math.exp(-Math.pow(d2 / 0.018, 2)));
+        const push = k * (0.0145 * Math.exp(-Math.pow(d1 / 0.022, 2)) +
+          0.0095 * Math.exp(-Math.pow(d2 / 0.018, 2)));
         z -= face * Math.min(push, Math.abs(z) - 0.004);
       }
       // narrow sides pinch, whole carton settles down
@@ -927,7 +929,8 @@ export class FeedActivity {
     for (let i = 0; i < pos.count; i++) {
       v.set(base[i * 3], base[i * 3 + 1], base[i * 3 + 2]);
       const s = S.clamp((H.y - v.y) / 0.105, 0, 1);              // 0 at the hinge
-      const ang = p.open * (1.15 + 1.45 * S.smoothstep(0, 0.55, s));
+      // splayed open and drooping, not flipped over the top
+      const ang = p.open * (0.45 + 0.80 * S.smoothstep(0, 0.6, s));
       q.setFromAxisAngle(p.axis, ang);
       v.sub(H).applyQuaternion(q).add(H);
       pos.setXYZ(i, v.x, v.y, v.z);
@@ -942,30 +945,59 @@ export class FeedActivity {
     const g = new THREE.Group();
     g.name = 'riceball';
     const R = 0.030;
-    const geo = new THREE.SphereGeometry(1, 64, 44);
+    // A rounded disc of revolution whose radius is then modulated by a
+    // three-lobed term: closed flat faces, softly rounded edges, and the
+    // rounded-triangle silhouette of a hand-pressed onigiri.
+    // Monotonic from the centre outwards: a profile that dips back at radius 0
+    // puts a dimple in the middle of the face and the lathe fan shades as a star.
+    const geo = S.lathe([
+      [0, -0.0158], [0.006, -0.0157], [0.012, -0.0155], [0.018, -0.0151],
+      [0.0225, -0.0143], [0.0265, -0.0121], [0.0292, -0.0073], [0.0300, -0.0020],
+      [0.0300, 0.0020], [0.0292, 0.0073], [0.0265, 0.0121], [0.0225, 0.0143],
+      [0.018, 0.0151], [0.012, 0.0155], [0.006, 0.0157], [0, 0.0158]
+    ], 52);
     const pos = geo.attributes.position;
     const uv = geo.attributes.uv;
     const v = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i).normalize();
-      // triangle-with-rounded-corners profile in XZ, flat faces at ±Y
+      v.fromBufferAttribute(pos, i);
       const phi = Math.atan2(v.z, v.x);
-      const tri = 1 + 0.24 * Math.cos(3 * (phi - Math.PI / 2));
-      const flat = Math.sign(v.y) * Math.pow(Math.abs(v.y), 0.42);
-      const horiz = Math.hypot(v.x, v.z) || 1e-6;
-      const hx = (v.x / horiz), hz = (v.z / horiz);
-      const spread = Math.sqrt(Math.max(0, 1 - flat * flat * 0.55));
-      let x = hx * tri * spread * R * 1.06;
-      let z = hz * tri * spread * R * 1.06;
-      const y = flat * R * 0.52;
-      // rice grain lumps, taken straight from the same worley the textures use
-      const w = TEX.worley(uv.getX(i) * 1.0, uv.getY(i) * 1.0, 26, 5);
-      const bump = Math.pow(1 - w.f1, 2.0) * 0.0022;
-      const len = Math.hypot(x, y, z) || 1e-6;
-      pos.setXYZ(i, x * (1 + bump / len), y * (1 + bump / len), z * (1 + bump / len));
+      const tri = 1 + 0.26 * Math.cos(3 * (phi - Math.PI / 2));
+      pos.setXYZ(i, v.x * tri, v.y, v.z * tri);
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
+    // A lathe leaves `segments` coincident vertices at each pole; averaging
+    // their normals per-vertex fans a star across the middle of the flat face,
+    // so the axial normal is written back by hand.
+    const fixPoles = () => {
+      const n = geo.attributes.normal;
+      for (let i = 0; i < pos.count; i++) {
+        if (Math.hypot(pos.getX(i), pos.getZ(i)) > 1e-4) continue;
+        n.setXYZ(i, 0, Math.sign(pos.getY(i)) || 1, 0);
+      }
+      n.needsUpdate = true;
+    };
+    fixPoles();
+    // Rice grains ride along the surface normal, and the noise is sampled from
+    // the *position*, not the uv — the ring of coincident vertices at each pole
+    // carries different uvs, and sampling those tears them apart into a star.
+    const nrm = geo.attributes.normal;
+    for (let i = 0; i < pos.count; i++) {
+      const w = TEX.worley(0.5 + pos.getX(i) * 7, 0.5 + pos.getZ(i) * 7, 42, 5);
+      // Half a millimetre: worley cells have creases along their boundaries, so
+      // a deep displacement reads as a golf ball rather than pressed rice. The
+      // grain itself comes from the material; this is only the irregularity.
+      const rr = Math.hypot(pos.getX(i), pos.getZ(i));
+      const bump = Math.pow(1 - w.f1, 2.2) * 0.00055 * S.smoothstep(0.001, 0.010, rr);
+      pos.setXYZ(i,
+        pos.getX(i) + nrm.getX(i) * bump,
+        pos.getY(i) + nrm.getY(i) * bump,
+        pos.getZ(i) + nrm.getZ(i) * bump);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    fixPoles();
     geo.rotateX(-Math.PI / 2);         // flat faces now front/back
     S.paintVertexColors(geo, (x, y, z, i, c) => {
       c.setHex(0xfffdf5).multiplyScalar(0.93 + 0.09 * (TEX.fbm(x * 30 + 0.5, y * 30 + 0.5, 20, 2, 3)));
@@ -975,11 +1007,27 @@ export class FeedActivity {
     g.add(rice);
     this.riceball = rice;
 
-    // nori band wrapped around the bottom
-    const nori = new THREE.Mesh(this.trash.geo(S.roundedBox(0.040, 0.024, 0.038, 0.004, 4)),
-      this.mat.nori);
-    nori.position.y = -R * 0.42;
-    nori.scale.set(1.0, 1.0, 1.02);
+    // Nori: a band lifted off the rice ball's own surface, so it wraps the
+    // bottom of the triangle exactly the way a konbini onigiri does instead of
+    // sitting on it like a brick.
+    const noriGeo = geo.clone();
+    noriGeo.scale(1.022, 1.022, 1.06);
+    const npos = noriGeo.attributes.position;
+    const src = noriGeo.index.array;
+    const keep = [];
+    const yTop = -R * 0.16;
+    for (let t = 0; t < src.length; t += 3) {
+      const a = src[t], b = src[t + 1], c = src[t + 2];
+      // centroid test, with a gentle wave so the edge reads as torn nori
+      const cy = (npos.getY(a) + npos.getY(b) + npos.getY(c)) / 3;
+      const cx = (npos.getX(a) + npos.getX(b) + npos.getX(c)) / 3;
+      if (cy < yTop + Math.sin(cx * 120) * 0.0010) keep.push(a, b, c);
+    }
+    noriGeo.setIndex(keep);
+    noriGeo.deleteAttribute('color');
+    this.trash.geo(noriGeo);
+    const nori = new THREE.Mesh(noriGeo, this.mat.nori);
+    nori.material.side = THREE.DoubleSide;
     g.add(nori);
 
     // a stray flake that will end up on the cheek
@@ -1006,7 +1054,14 @@ export class FeedActivity {
     const g = new THREE.Group();
     g.name = 'cookie';
     const R = 0.026;
-    const geo = new THREE.CylinderGeometry(R, R * 0.97, 0.0085, 64, 6, false);
+    // A lathe rather than a cylinder: the caps get real radial subdivision, so
+    // the crumb surface has somewhere to live and a bite has something to cut.
+    const geo = S.lathe([
+      [0, -0.0043], [0.006, -0.00425], [0.012, -0.0042], [0.018, -0.0041],
+      [0.023, -0.0038], [0.0253, -0.0030], [0.0260, -0.0014],
+      [0.0260, 0.0014], [0.0253, 0.0032], [0.023, 0.0042], [0.018, 0.0046],
+      [0.012, 0.0048], [0.006, 0.00492], [0, 0.00495]
+    ], 56);
     const pos = geo.attributes.position;
     const v = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
@@ -1016,10 +1071,10 @@ export class FeedActivity {
       // hand-cut wobbly edge
       const wob = 1 + 0.045 * Math.sin(a * 7 + 0.6) + 0.03 * Math.sin(a * 3 - 1.1);
       // crumbly, cratered surface
-      const w = TEX.worley((v.x / R) * 0.5 + 0.5, (v.z / R) * 0.5 + 0.5, 9, 13);
-      const crumb = (Math.pow(1 - w.f1, 2.4) - 0.35) * 0.0016;
-      const dome = (1 - Math.pow(rr / R, 2)) * 0.0014;
-      pos.setXYZ(i, v.x * wob, v.y + Math.sign(v.y) * (crumb + dome) * (rr < R * 0.99 ? 1 : 0.3), v.z * wob);
+      const w = TEX.worley((v.x / R) * 0.5 + 0.5, (v.z / R) * 0.5 + 0.5, 11, 13);
+      const crumb = (Math.pow(1 - w.f1, 2.4) - 0.32) * 0.0019;
+      const fine = (TEX.fbm(v.x * 40 + 0.5, v.z * 40 + 0.5, 24, 2, 29) - 0.5) * 0.0007;
+      pos.setXYZ(i, v.x * wob, v.y + Math.sign(v.y || 1) * (crumb + fine), v.z * wob);
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
@@ -1206,11 +1261,9 @@ export class FeedActivity {
 
     if (id && FOODS[id]) {
       const group = this.foods[id];
-      // leftovers (core / peel / empty pack) are dragged, not eaten
+      // leftovers (core / peel / empty pack) are dragged to the bin, not eaten
       if (this.item?.id === id && this.item.state === 'residue') {
         this._grab(group, id, hit.point);
-        this.item.state = 'residueHeld';
-        this.binOpenTarget = 1;
         return;
       }
       if (this.item && this.item.id !== id && this.item.state !== 'idle'
@@ -1298,9 +1351,11 @@ export class FeedActivity {
     this.picker.dragPlane(this._vLocal, this.dragPlane);
     this.dragOffset.copy(this._vLocal).sub(worldPoint || this._vLocal);
     if (kind !== 'spoon') {
-      const keep = this.item?.id === kind && this.item.state === 'residue';
+      const leftover = this.item?.id === kind &&
+        (this.item.state === 'residue' || this.item.state === 'residueHeld');
       this.item = this.item?.id === kind ? this.item : this._newItem(kind);
-      if (!keep) this.item.state = 'held';
+      this.item.state = leftover ? 'residueHeld' : 'held';
+      if (leftover) this.binOpenTarget = 1;
     }
     S.play(this.ctx, 'tap');
     this.hintRing.visible = false;
@@ -1519,25 +1574,7 @@ export class FeedActivity {
     // Carve a real crescent out of the mesh. The bite sphere sits just outside
     // the surface on the side facing the mouth, so every vertex it swallows is
     // pushed onto its shell — a genuine scooped-out bite, teeth marks and all.
-    const target = it.id === 'apple' ? this.apple
-      : it.id === 'cookie' ? this.cookie
-        : it.id === 'riceball' ? this.riceball
-          : this.bananaFlesh;
-    const dir = new THREE.Vector3(
-      0.35 + 0.3 * Math.sin(it.bites * 2.1),
-      0.30 - 0.25 * it.bites,
-      0.80).normalize();
-    const reach = it.id === 'apple' ? 0.034 : it.id === 'cookie' ? 0.026
-      : it.id === 'riceball' ? 0.030 : 0.011;
-    const biteR = it.id === 'apple' ? 0.021 : it.id === 'cookie' ? 0.017
-      : it.id === 'riceball' ? 0.019 : 0.013;
-    const centre = dir.multiplyScalar(reach + biteR * 0.52);
-    if (it.id === 'banana') centre.y += 0.020 - it.bites * 0.020;
-    const flesh = it.id === 'apple' ? 0xfdf3d8 : it.id === 'cookie' ? 0xe8cfa3
-      : it.id === 'riceball' ? 0xfffdf6 : 0xfff6de;
-    S.carveBite(target, centre, biteR, {
-      teeth: 6, toothDepth: 0.075, flesh, seed: 11 + it.bites * 7
-    });
+    this._carveOnly(it.id, it.bites);
 
     S.play(ctx, it.id === 'cookie' ? 'crunch' : 'munch');
     try { ctx.baby?.gesture?.('suck'); } catch (e) { /* rig may differ */ }
@@ -1997,7 +2034,7 @@ export class FeedActivity {
     if (!this.bibOn) {
       S.say(ctx, 'まずは スタイを つけよう', 'hand');
       this.hintRing.visible = true;
-      this.hintRing.position.copy(this.bib.position).add(new THREE.Vector3(0, -0.10, 0));
+      this.hintRing.position.set(this.bib.position.x, TRAY_Y + 0.016, this.bib.position.z);
       return;
     }
     if (this.faceDirt > 0.45) { S.say(ctx, 'おしぼりで ふきふき しよう', 'hand'); }
@@ -2246,20 +2283,31 @@ export class FeedActivity {
     S.lookAt(ctx, null);
   }
 
-  /** The geometry half of _doBite(), without the sound, fx or meter changes. */
+  /**
+   * The geometry half of a bite: carve a crescent out of the real mesh.
+   *
+   * The direction walks down the food bite by bite, the reach is *measured*
+   * against the current (already partly eaten) surface, and the sphere centre
+   * is parked just outside it so the projection always scoops inward.
+   */
   _carveOnly(id, biteIndex) {
     const target = id === 'apple' ? this.apple : id === 'cookie' ? this.cookie
       : id === 'riceball' ? this.riceball : this.bananaFlesh;
-    const dir = new THREE.Vector3(
-      0.35 + 0.3 * Math.sin(biteIndex * 2.1), 0.30 - 0.25 * biteIndex, 0.80).normalize();
-    const reach = id === 'apple' ? 0.034 : id === 'cookie' ? 0.026
-      : id === 'riceball' ? 0.030 : 0.011;
-    const biteR = id === 'apple' ? 0.021 : id === 'cookie' ? 0.017
-      : id === 'riceball' ? 0.019 : 0.013;
-    const centre = dir.multiplyScalar(reach + biteR * 0.52);
-    if (id === 'banana') centre.y += 0.020 - biteIndex * 0.020;
+    const rice = id === 'riceball';
+    // An onigiri is bitten at the corners, not through the flat face — a
+    // sphere tangent to that face would scoop out half the rice ball.
+    const dir = rice
+      ? new THREE.Vector3(
+        0.30 * Math.sin(biteIndex * 2.3), 0.95 - 0.28 * biteIndex, 0.34).normalize()
+      : new THREE.Vector3(
+        0.35 + 0.3 * Math.sin(biteIndex * 2.1), 0.30 - 0.25 * biteIndex, 0.80).normalize();
+    const biteR = id === 'apple' ? 0.020 : id === 'cookie' ? 0.015
+      : rice ? 0.016 : 0.011;
+    const reach = S.surfaceReach(target, dir, id === 'banana' ? 0.9 : 0.55);
+    const centre = dir.multiplyScalar(reach + biteR * 0.58);
+    if (id === 'banana') centre.y += 0.026 - biteIndex * 0.022;
     const flesh = id === 'apple' ? 0xfdf3d8 : id === 'cookie' ? 0xe8cfa3
-      : id === 'riceball' ? 0xfffdf6 : 0xfff6de;
+      : rice ? 0xfffdf6 : 0xfff6de;
     S.carveBite(target, centre, biteR, {
       teeth: 6, toothDepth: 0.075, flesh, seed: 11 + biteIndex * 7
     });

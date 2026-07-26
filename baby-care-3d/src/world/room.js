@@ -76,6 +76,8 @@ export class Room {
     this._buildLights();
     this._buildAnchors();
 
+    this._trimShadowCasters();
+
     this.shadows = this._shadowField.build();
     this.group.add(this.shadows);
 
@@ -451,6 +453,28 @@ export class Room {
     A('toybox', -2.30, 0.45, 1.05, Math.PI / 2);
     A('rug', 0.05, 0.015, 0.35);
     A('table', 1.45, 0.44, 0.78, 0.4);
+  }
+
+  /**
+   * Every shadow caster is a second draw call, in a VSM map soft enough that a
+   * teddy on a shelf contributes nothing but noise. Anything small, high up or
+   * already grounded by a contact blob is dropped from the shadow pass; GTAO
+   * in the post stack supplies the small-scale contact darkening instead.
+   * This is worth ~30 draw calls a frame.
+   */
+  _trimShadowCasters() {
+    const NO_CAST = new Set([
+      'doorKnob', 'mobileArm', 'mobileHub', 'mobileCharms', 'dresserKnobs',
+      'changingBolsters', 'nightlightFoot', 'wardrobeHandle', 'wardrobeClothes',
+      'books', 'bookPages', 'teddyBody', 'ringBase', 'rings', 'lampBase',
+      'lampStem', 'toyboxPull', 'stools', 'basketStaves', 'basketHoops',
+      'basketLiner', 'plantSoil', 'plantLeaves', 'pouffeSeams', 'pictureFrames',
+      'pictureArt', 'clockCase', 'clockHand', 'cribPiping', 'highchairPad',
+      'curtainRings', 'buntingFlags', 'buntingCord', 'snowLedge'
+    ]);
+    this.group.traverse(o => {
+      if ((o.isMesh || o.isPoints) && NO_CAST.has(o.name)) o.castShadow = false;
+    });
   }
 
   /* ================================================================ api === */

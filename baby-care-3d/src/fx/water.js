@@ -691,9 +691,10 @@ export class WaterlineRing {
           float w = 1.0 + 0.06 * sin( a * 7.0 + uTime * 2.1 )
                         + 0.04 * sin( a * 11.0 - uTime * 1.3 );
           r /= w;
-          float wet  = smoothstep( 0.34, 0.20, r );          // dark damp band
-          float lip  = smoothstep( 0.10, 0.0, abs( r - 0.30 ) );
-          float foam = smoothstep( 0.86, 0.30, r ) * smoothstep( 0.28, 0.40, r );
+          // r runs 0.18 (the hole the limb occupies) out to 1.0
+          float wet  = smoothstep( 0.62, 0.30, r );             // damp shadow band
+          float lip  = smoothstep( 0.13, 0.0, abs( r - 0.58 ) );// the meniscus itself
+          float foam = smoothstep( 1.00, 0.60, r ) * smoothstep( 0.55, 0.74, r );
           vec3 col = uWet * wet * 0.9 + uRim * lip * 0.9 + vec3( 1.0 ) * foam * uFoam;
           float alpha = ( wet * 0.42 + lip * 0.75 + foam * uFoam * 0.85 ) * uOpacity;
           if ( alpha < 0.004 ) discard;

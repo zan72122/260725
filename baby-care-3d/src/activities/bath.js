@@ -56,6 +56,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _ndc = new THREE.Vector2();
+const DIRT_ZONES = ['face', 'hands', 'feet', 'body', 'hair'];
 
 /* -------------------------------------------------------------- helpers --- */
 
@@ -249,6 +250,15 @@ class Droplets {
   clear() { this.list.length = 0; this.mesh.count = 0; this.total = 0; }
   get count() { return this.list.length; }
 
+  /** World position of any remaining bead — used to point the child at it. */
+  anyWorld(out = new THREE.Vector3()) {
+    const d = this.list[0];
+    if (!d) return null;
+    out.copy(d.local);
+    d.anchor.localToWorld(out);
+    return out;
+  }
+
   update(dt, time) {
     let n = 0;
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -384,7 +394,7 @@ export class BathActivity {
     });
 
     this.steam = new SteamVeil(ctx, {
-      parent: this.bowl, count: 7, radiusX: HALF_X * 0.9, radiusZ: HALF_Z * 0.9
+      parent: this.bowl, count: 6, radiusX: HALF_X * 0.9, radiusZ: HALF_Z * 0.9
     });
 
     /* --- foam ---------------------------------------------------------- */
@@ -637,7 +647,7 @@ export class BathActivity {
   _buildCaddy() {
     const wood = this._materials(MAT.makeWood({ light: 0xe9cfa6, dark: 0xa87a4c, seed: 21, repeat: 2 }));
     const stool = new THREE.Group();
-    stool.position.set(0.62, 0, -0.06);
+    stool.position.set(0.58, 0, 0.02);
     stool.rotation.y = -0.35;
     this.tub.add(stool);
     this.caddy = stool;
@@ -723,7 +733,6 @@ export class BathActivity {
     dryer.visible = false;
     stool.add(dryer);
     this.dryer = dryer;
-    this.dryerHome = { pos: dryer.position.clone(), rot: dryer.rotation.clone() };
     const dBodyGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.12, 22);
     this._disposables.push(dBodyGeo);
     const dMat = this._materials(MAT.makePlastic({ color: 0xff8fb3, seed: 80, matte: 0.3, clearcoat: 0.8 }));
@@ -1009,12 +1018,13 @@ export class BathActivity {
         rig.addPreset(name, { pos: w(...pos), target: w(...target), fov, focusRange: focus });
       } catch (e) { /* the rig may not accept overrides — never fatal */ }
     };
-    // wide enough for the tub, the mixer and the baby standing on the mat
-    add('tub', [0.56, 1.12, 1.62], [0.00, 0.36, 0.22], 34, 0.26);
+    // The hero shot: the bowl, the mixer above the rim, and enough headroom
+    // for a fully sculpted foam horn on a seated baby.
+    add('tub', [0.57, 1.39, 1.97], [0.00, 0.61, 0.10], 34, 0.28);
     // over the rim, tight on a baby sitting in the water
-    add('bath-face', [0.42, 1.02, 1.10], [0.02, 0.50, 0.02], 36, 0.17);
+    add('bath-face', [0.44, 1.10, 1.24], [0.02, 0.72, 0.02], 37, 0.18);
     // the towel-and-dryer stage on the mat
-    add('bath-dry', [0.38, 0.74, 1.66], [0.02, 0.32, 0.50], 33, 0.20);
+    add('bath-dry', [0.45, 0.86, 2.03], [0.02, 0.40, 0.50], 33, 0.22);
   }
 
   _goTo(preset, seconds = 1.1) {
@@ -1028,16 +1038,25 @@ export class BathActivity {
     ctx.ui?.setHud?.(true);
 
     /* --- dirt, sourced from what actually happened earlier -------------- */
-    const s = ctx.state?.dirt;
+    // Each mark sits where its cause put it: food round the mouth, play on
+    // the hands, rain-mud on the feet. If the day has left nothing behind we
+    // seed a plausible day's worth, because a bath with nothing to wash is a
+    // bath with no story.
+    const sd = ctx.state?.dirt;
     const rainy = (ctx.state?.weather || 'clear') === 'rain';
-    this.dirt = {
-      face: s?.face ?? 0.75,
-      hands: s?.hands ?? 0.60,
-      feet: s?.feet ?? (rainy ? 0.85 : 0.45),
-      body: s?.body ?? 0.30,
-      hair: s?.hair ?? 0.40
-    };
-    for (const z of Object.keys(this.dirt)) ctx.baby?.setDirt?.(z, this.dirt[z]);
+    const carried = sd
+      ? DIRT_ZONES.reduce((a, z) => a + (sd[z] || 0), 0)
+      : 0;
+    if (carried > 0.2) {
+      this.dirt = { face: sd.face || 0, hands: sd.hands || 0, feet: sd.feet || 0,
+                    body: sd.body || 0, hair: sd.hair || 0 };
+    } else {
+      this.dirt = {
+        face: 0.75, hands: 0.60, feet: rainy ? 0.85 : 0.45, body: 0.30, hair: 0.40
+      };
+    }
+    for (const z of DIRT_ZONES) ctx.baby?.setDirt?.(z, this.dirt[z]);
+    ctx.state?.patch?.({ dirt: { ...this.dirt } });
 
     /* --- deliberately wrong to start with: the child has to mix --------- */
     this.temp = 0.10;
@@ -1060,12 +1079,16 @@ export class BathActivity {
 
     const naked = !!ctx.state?.naked;
     this._setPhase(naked ? 'fill' : 'undress');
+    // The app snaps to the activity's default preset *after* enter(), so the
+    // opening shot has to be claimed on the first frame instead.
+    this._openingShot = !naked;
     this.root.visible = true;
     return this;
   }
 
   async exit() {
     const ctx = this.ctx;
+    this._stopLoops();
     this._restoreMaterials();
     ctx.baby?.setWet?.(this.wet);
     this.foam.clear();
@@ -1080,6 +1103,7 @@ export class BathActivity {
 
   dispose() {
     this._timers.length = 0;
+    this._stopLoops();
     this._restoreMaterials();
     this.water.dispose();
     this.stream.dispose();
@@ -1138,21 +1162,65 @@ export class BathActivity {
 
   _sfx(name, opts) { try { this.ctx.audio?.play?.(name, opts); } catch (e) { /* optional */ } }
 
+  /**
+   * Hold a sustained sound (running tap, shower, hairdryer) for as long as the
+   * thing making it is actually running. `engine/audio.js` loops these
+   * natively, which sounds far better than re-triggering a one-shot.
+   */
+  _loop(key, name, on, opts) {
+    this._loops ||= new Map();
+    const cur = this._loops.get(key);
+    if (on && !cur) {
+      try {
+        const h = this.ctx.audio?.loop?.(name, opts);
+        if (h) this._loops.set(key, h);
+      } catch (e) { /* optional */ }
+    } else if (!on && cur) {
+      try { cur.stop?.(); } catch (e) { /**/ }
+      this._loops.delete(key);
+    }
+  }
+
+  _stopLoops() {
+    if (!this._loops) return;
+    for (const h of this._loops.values()) { try { h.stop?.(); } catch (e) { /**/ } }
+    this._loops.clear();
+  }
+
   _prompt(text, icon) { try { this.ctx.ui?.prompt?.(text, icon ? { icon } : undefined); } catch (e) { /**/ } }
 
   _toast(text, icon) { try { this.ctx.ui?.toast?.(text, icon ? { icon } : undefined); } catch (e) { /**/ } }
 
+  /**
+   * How big is this baby's head, really? The lather has to sit on it, and the
+   * character rig is owned by someone else — so measure the head mesh if we
+   * can find one, and only fall back to a proportion of the head-to-chest
+   * distance if the rig names nothing recognisable.
+   */
   _estimateHeadRadius() {
     const b = this.ctx.baby;
     try {
+      const g = b?.group;
+      if (g) {
+        let best = 0;
+        const box = new THREE.Box3(), size = new THREE.Vector3();
+        g.traverse(o => {
+          if (!o.isMesh || !/head|skull|cranium/i.test(o.name || '')) return;
+          box.setFromObject(o);
+          box.getSize(size);
+          const r = Math.max(size.x, size.y, size.z) * 0.5;
+          if (r > best && r < 0.2) best = r;
+        });
+        if (best > 0.03) return best * 0.96;
+      }
       const h = b?.headWorldPos?.();
       const c = b?.focusPoint?.();
       if (h && c) {
         const d = h.distanceTo(c);
-        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.55, 0.045, 0.10);
+        if (d > 0.04 && d < 0.4) return THREE.MathUtils.clamp(d * 0.45, 0.045, 0.13);
       }
     } catch (e) { /**/ }
-    return 0.068;
+    return 0.075;
   }
 
   _babyPoint(kind) {
@@ -1199,17 +1267,18 @@ export class BathActivity {
     const ctx = this.ctx;
     switch (p) {
       case 'undress':
+        this._goTo('bath-dry');
         this._prompt('おふくを ぬがせてあげよう', 'shirt');
         this._cueAt(this._babyPoint('body'), 0.10);
         break;
       case 'fill':
         this._goTo('tub');
-        this._prompt('じゃぐちを ひねって おゆを ためよう', 'tap');
+        this._prompt('じゃぐちを ひねって おゆを ためよう', 'tub');
         this._cueAt(this._world(this.mixer, 0.232, 0.70, 0.27), 0.075);
         ctx.baby?.lookAt?.(this._world(this.mixer, 0.232, 0.66, 0.27));
         break;
       case 'temper':
-        this._prompt('あかと あおの ノブで ちょうどいい おんどに', 'temp');
+        this._prompt('あかと あおの ノブで ちょうどいい おんどに', 'bath');
         this._cueAt(this._world(this.mixer, 0, 0.60, 0), 0.13);
         break;
       case 'test':
@@ -1217,13 +1286,13 @@ export class BathActivity {
         this._cueAt(this._world(this.bowl, 0.0, this.water.surfaceY + 0.02, 0.06), 0.11);
         break;
       case 'wash':
-        this._prompt('ごしごし きれいに あらってあげよう', 'sponge');
+        this._prompt('ごしごし きれいに あらってあげよう', 'soap');
         this._cueAt(this._babyPoint('body'), 0.11);
         this.foam.setBubbleRate(this.tier >= 1 ? 1.2 : 0.4);
         this._goTo('bath-face');
         break;
       case 'shampoo':
-        this._prompt('シャンプーを おして あたまを あわあわに', 'shampoo');
+        this._prompt('シャンプーを おして あたまを あわあわに', 'soap');
         this._cueAt(this._world(this.shampoo, 0.02, 0.23, 0), 0.06);
         break;
       case 'rinse':
@@ -1235,15 +1304,20 @@ export class BathActivity {
         this.foam.setBubbleRate(0.4);
         break;
       case 'dry':
-        this._prompt('タオルで ふきふき しよう', 'towel');
+        this._prompt('タオルで ふきふき しよう', 'clothes');
         this._cueAt(this.towelHome, 0.10);
         this._goTo('bath-dry');
         break;
-      case 'dryer':
-        this._prompt('ドライヤーで かわかそう', 'dryer');
+      case 'dryer': {
+        this._prompt('ドライヤーで かわかそう', 'spark');
         this.dryer.visible = true;
-        this._cueAt(this._world(this.caddy, 0.03, 0.44, -0.055), 0.075);
+        this.root.attach(this.dryer);
+        const h = this._babyPoint('head');
+        this.dryer.position.set(h.x + 0.22, h.y + 0.03, h.z + 0.13);
+        this.dryer.rotation.set(0, -0.4, -Math.PI / 2.4);
+        this._cueAt(this.dryer.getWorldPosition(new THREE.Vector3()), 0.075);
         break;
+      }
       case 'done':
         this._prompt('ぴかぴか！ つぎは おきがえ しようね', 'star');
         this._cueHide();
@@ -1366,9 +1440,7 @@ export class BathActivity {
         return;
 
       case 'dryer':
-        if (this._hitSphere(this._world(this.caddy, 0.03, 0.40, -0.055), 0.11)) {
-          this._useDryer();
-        }
+        if (this._hitSphere(this.dryer.getWorldPosition(_v3), 0.12)) this._useDryer();
         return;
     }
   }
@@ -1390,7 +1462,10 @@ export class BathActivity {
   }
 
   _endDrag() {
-    if (this._drag === 'shower') this.sprayUniforms.uOn.value = 0;
+    if (this._drag === 'shower') {
+      this.sprayUniforms.uOn.value = 0;
+      this._loop('shower', 'bath.shower', false);
+    }
     this._drag = null;
     this._lastPointerY = null;
   }
@@ -1447,7 +1522,7 @@ export class BathActivity {
       return;
     }
     this.filling = !this.filling;
-    this._sfx(this.filling ? 'pour' : 'tap');
+    this._sfx(this.filling ? 'ui.confirm' : 'ui.tap');
     this.water.setLevel(this.filling ? 1 : this.water.level);
     if (this.filling) {
       this._setPhase('temper');
@@ -1478,19 +1553,20 @@ export class BathActivity {
     const local = this.bowl.worldToLocal(worldPoint.clone());
     this.water.disturb(local.x, local.z, 0.075, 0.011);
     this.ctx.fx?.burst?.('splash', worldPoint, 6);
-    this._sfx('splash');
+    this._sfx('bath.swirl');
 
     if (this.phase === 'test' || (this.water.level > 0.85 && this.phase !== 'wash')) {
       if (this.temp > TEMP_OK_MAX) {
         this.ctx.baby?.setMood?.('surprised');
-        this.ctx.baby?.say?.('hot');
+        this.ctx.baby?.gesture?.('shiver');
         this._toast('あちち！ すこし さまそう');
         this.ctx.fx?.burst?.('steam', this._world(this.bowl, 0, this.water.surfaceY + 0.05, 0), 14);
+        this._sfx('bath.steam');
         this._sfx('sadBaby');
         this._setPhase('temper');
       } else if (this.temp < TEMP_OK_MIN) {
         this.ctx.baby?.setMood?.('sulk');
-        this.ctx.baby?.gesture?.('shiver');
+        this.ctx.baby?.say?.('cold');
         this._toast('つめたい！ すこし あたためよう');
         this._sfx('shiver');
         this._setPhase('temper');
@@ -1522,7 +1598,7 @@ export class BathActivity {
     this.water.stir(0, 0, 0.16, 0.010);
     this.ctx.fx?.burst?.('splash', this._world(this.bowl, 0, this.water.surfaceY, 0.04), 18);
     this.foam.spawnBubbles(this._world(this.bowl, 0, this.water.surfaceY, 0.04), 5, 0.09);
-    this._sfx('splash');
+    this._sfx('bath.splash-big');
     this._sfx('giggle');
     b?.setMood?.('giggle');
     for (const f of this.floaters) f.obj.visible = true;
@@ -1535,14 +1611,13 @@ export class BathActivity {
   _pumpShampoo() {
     this.shampooUsed = true;
     this._pumpPress = 1;
-    this._sfx('bubble');
-    this._sfx('pop');
+    this._sfx('bath.pump');
     const head = this._babyPoint('head');
     this.foam.seed('head', 5, this.foam.headRadius * 0.6, this.foam.headRadius * 0.55, 0.014);
     this.ctx.fx?.burst?.('bubble', this._world(this.shampoo, 0.045, 0.222, 0), 5);
     this.ctx.baby?.setFoam?.('hair', 0.25);
     this.ctx.baby?.lookAt?.(this._world(this.shampoo, 0, 0.22, 0));
-    this._prompt('あたまを ごしごし！ うえに なでると ツノさん', 'sponge');
+    this._prompt('あたまを ごしごし！ うえに なでると ツノさん', 'soap');
     this._cueAt(head, 0.10);
     this._setPhase('wash');
   }
@@ -1606,6 +1681,7 @@ export class BathActivity {
       ctx.fx?.burst?.('bubble', worldPoint, 2);
       this.dirt.hair = Math.max(0, this.dirt.hair - 0.14);
       ctx.baby?.setDirt?.('hair', this.dirt.hair);
+      ctx.state?.patch?.({ dirt: { hair: this.dirt.hair } });
       ctx.baby?.setFoam?.('hair', Math.min(1, this.foam.density('head') * 3));
       if (this._scrubStrokeUp > 0.25 && this.foam.density('head') > 0.09) {
         this.foam.setHorn(Math.min(1, this.foam.hornTarget + 0.09));
@@ -1619,7 +1695,7 @@ export class BathActivity {
           this._moodResetSoon();
         }
       }
-      this._sfx('squeak');
+      this._sfx('bath.lather');
       return;
     }
 
@@ -1628,8 +1704,9 @@ export class BathActivity {
     if (zone && this.dirt[zone] > 0) {
       this.dirt[zone] = Math.max(0, this.dirt[zone] - 0.13);
       ctx.baby?.setDirt?.(zone, this.dirt[zone]);
+      ctx.state?.patch?.({ dirt: { [zone]: this.dirt[zone] } });
       ctx.fx?.burst?.('bubble', worldPoint, 2);
-      this._sfx('squeak');
+      this._sfx('bath.lather');
       if (this.dirt[zone] === 0) {
         ctx.fx?.burst?.('sparkle', worldPoint, 5);
         this._sfx('chime');
@@ -1688,7 +1765,7 @@ export class BathActivity {
 
   _moveShower(p) {
     const babyP = this._babyPoint('body');
-    const plane = this._planePoint(babyP.z + 0.16);
+    const plane = this._planePoint(babyP.z + 0.08);
     if (!plane) return;
     const local = this.tub.worldToLocal(plane.clone());
     local.y = THREE.MathUtils.clamp(local.y, STAND_H + 0.24, STAND_H + 0.72);
@@ -1697,12 +1774,14 @@ export class BathActivity {
     this.showerHead.rotation.z = THREE.MathUtils.clamp(-local.x * 0.6, -0.5, 0.5);
     this.spray.visible = true;
     this.sprayUniforms.uOn.value = 1;
+    this._loop('shower', 'bath.shower', true, { gain: 0.5 });
   }
 
   _rinseStep(dt) {
     if (this._drag !== 'shower') {
       this.sprayUniforms.uOn.value *= Math.max(0, 1 - dt * 6);
       this.spray.visible = this.sprayUniforms.uOn.value > 0.02;
+      this._loop('shower', 'bath.shower', false);
       return;
     }
     const headW = this.showerHead.getWorldPosition(_v);
@@ -1723,7 +1802,7 @@ export class BathActivity {
       this._lastRinseFx = this.time;
       this.ctx.fx?.burst?.('splash', target, 3);
       if (removed > 0) this.ctx.fx?.burst?.('bubble', target, 2);
-      if (this.rand() < 0.22) this._sfx('bubble');
+      if (this.rand() < 0.2) this._sfx('bath.rinse');
     }
 
     // the jet hits the water and rings it
@@ -1761,8 +1840,8 @@ export class BathActivity {
     this.droplets.fill(this.anchors, 1);
     this.wetStrands.visible = true;
     this.sneezeTimer = 7;
-    this._sfx('splash');
-    ctx.state?.patch?.({ wet: true });
+    this._sfx('bath.drain');
+    ctx.state?.patch?.({ wet: 1 });
     // the tub empties behind them
     this.water.setLevel(0.18);
     this.foam.setBubbleRate(0);
@@ -1773,21 +1852,28 @@ export class BathActivity {
   /* ----------------------------------------------------------- 5. dry --- */
 
   _moveTowel(p) {
+    // Rub where the towel really meets the skin: raycast the baby first and
+    // only fall back to a plane through it when the pointer is off the body.
+    const hit = this._hitBaby();
     const babyP = this._babyPoint('body');
-    const plane = this._planePoint(babyP.z + 0.20);
-    if (!plane) return;
+    const at = hit ? hit.point : this._planePoint(babyP.z);
+    if (!at) return;
     if (this.towel.parent !== this.root) this.root.attach(this.towel);
-    this.towel.position.lerp(plane, 0.55);
+    _v.copy(at); _v.z += 0.09; _v.y += 0.05;
+    this.towel.position.lerp(_v, 0.55);
     this.towel.rotation.set(0.15, Math.sin(this.time * 3) * 0.12, Math.sin(this.time * 5) * 0.10);
 
-    const wiped = this.droplets.wipe(plane, 0.085);
+    // the fewer beads are left, the more forgiving the rub gets
+    const left = this.droplets.count / Math.max(1, this.droplets.total || 1);
+    const wiped = this.droplets.wipe(at, 0.10 + (1 - left) * 0.07);
     if (wiped > 0) {
-      this._sfx('squeak');
-      this.ctx.fx?.burst?.('sparkle', plane, wiped * 2);
+      this._sfx('bath.towel');
+      this.ctx.fx?.burst?.('sparkle', at, wiped * 2);
       this.sneezeTimer = 7;
       this.wet = Math.max(0, this.droplets.count / Math.max(1, this.droplets.total || 1));
       this.ctx.baby?.setWet?.(Math.max(0.25, this.wet));
       this._applyWetSkin(Math.max(0.25, this.wet));
+      this.ctx.state?.patch?.({ wet: this.wet });
       if (this.droplets.count === 0) {
         this._sfx('chime');
         this.ctx.baby?.setMood?.('happy');
@@ -1799,12 +1885,11 @@ export class BathActivity {
   _useDryer() {
     const ctx = this.ctx;
     this.dryerBlast = 1.6;
-    this._sfx('dryer');
-    this._sfx('hairFlutter');
+    this._loop('dryer', 'bath.hairdryer', true, { gain: 0.6 });
     const head = this._babyPoint('head');
     this.dryer.visible = true;
     this.root.attach(this.dryer);
-    this.dryer.position.copy(head).add(new THREE.Vector3(-0.26, 0.10, 0.16));
+    this.dryer.position.copy(head).add(_v.set(0.20, 0.09, 0.15));
     this.dryer.lookAt(head);
     this.dryer.rotateX(Math.PI / 2);
     ctx.baby?.setMood?.('happy');
@@ -1823,7 +1908,7 @@ export class BathActivity {
     this.wetStrands.visible = false;
     this.dryer.visible = false;
     this.droplets.clear();
-    ctx.state?.patch?.({ wet: false, naked: true });
+    ctx.state?.patch?.({ wet: 0, naked: true });
     try { ctx.state?.patch?.({ meters: { clean: 1 } }); } catch (e) { /**/ }
     ctx.ui?.meter?.('clean', 1);
     ctx.ui?.star?.(3);
@@ -1869,6 +1954,7 @@ export class BathActivity {
     if (!this.root) return;
     const ctx = this.ctx;
     this.time += dt;
+    if (this._openingShot) { this._openingShot = false; this._goTo('bath-dry', 0.9); }
     this._tickTimers(dt);
     ctx.baby?.group?.updateMatrixWorld?.();
 
@@ -1883,7 +1969,7 @@ export class BathActivity {
       if (this.rand() < dt * 3) {
         ctx.fx?.burst?.('splash', this._world(this.bowl, this.spoutTip.x, impactY, this.spoutTip.z), 2);
       }
-      if (this.time - (this._lastPour || 0) > 0.9) { this._lastPour = this.time; this._sfx('pour'); }
+      this._loop('fill', 'bath.fill', true, { gain: 0.55 });
       if (this.water.level >= 0.985) {
         this.filling = false;
         this._sfx('chime');
@@ -1891,6 +1977,7 @@ export class BathActivity {
       }
     } else {
       this.stream.setFlow(Math.max(0, this.stream.flow - dt * 4));
+      this._loop('fill', 'bath.fill', false);
     }
     this.stream.update(dt);
 
@@ -2029,6 +2116,8 @@ export class BathActivity {
         ctx.baby?.gesture?.('shiver');
         ctx.fx?.burst?.('splash', this._babyPoint('mouth'), 6);
         this._toast('ハックション！ ふきのこしが あるよ');
+        const spot = this.droplets.anyWorld();
+        if (spot) this._cueAt(spot, 0.07);          // show the missed patch
         this._moodResetSoon();
       }
     }
@@ -2036,6 +2125,7 @@ export class BathActivity {
     /* --- hairdryer blast ----------------------------------------------- */
     if (this.dryerBlast > 0) {
       this.dryerBlast -= dt;
+      if (this.dryerBlast <= 0) this._loop('dryer', 'bath.hairdryer', false);
       const head = this._babyPoint('head');
       if (this.rand() < dt * 14) {
         ctx.fx?.burst?.('sparkle', head, 1);
@@ -2116,7 +2206,7 @@ export class BathActivity {
       this._babyPoint('handL'),
       this._babyPoint('handR')
     ];
-    const radii = [0.115, 0.048, 0.048];
+    const radii = [0.17, 0.075, 0.075];
     for (let i = 0; i < this.rings.length; i++) {
       const r = this.rings[i];
       if (!wet) { r.set(_v.set(0, -10, 0), 0.1, 0, 0, this.time); continue; }

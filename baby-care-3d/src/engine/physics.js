@@ -95,6 +95,12 @@ const REST_THRESHOLD = 0.55;   // closing speed below which nothing bounces
 const SLEEP_LIN = 0.040;       // m/s
 const SLEEP_ANG = 0.30;        // rad/s
 const SLEEP_TIME = 0.45;       // s at rest before a body sleeps
+// Speed at which a moving body yanks a sleeping neighbour awake on the spot.
+// It must clear one substep of gravity (9.81/120 ≈ 0.082 m/s), because
+// collision detection runs *after* gravity is integrated — every resting body
+// looks like it is falling at that speed for the instant before its contact is
+// solved, and a lower threshold makes settled piles wake each other forever.
+const WAKE_SPEED = 0.25;
 
 /* ------------------------------------------------------------ scratch --- */
 
@@ -729,7 +735,12 @@ export class PhysicsWorld {
         b._pv.set(0, 0, 0);
         b._pw.set(0, 0, 0);
         b.asleep = false;
-        b.sleepTimer = 0;
+        // sleepTimer is deliberately *not* reset. This body is only awake
+        // because a neighbour is not ready yet — it has not actually been
+        // disturbed. Zeroing it here makes two settled blocks ping-pong
+        // forever: each dozes off alone, is rejoined to the other's island,
+        // has its clock wiped, and neither ever sleeps. A real disturbance
+        // still clears it, via wake() or a velocity above the threshold.
       }
     }
   }
@@ -802,10 +813,10 @@ export class PhysicsWorld {
     const a = A._aabb, b = B._aabb;
     if (a[0] > b[3] || a[3] < b[0] || a[1] > b[4] || a[4] < b[1] || a[2] > b[5] || a[5] < b[2]) return;
 
-    // Wake a sleeper only when the other body is genuinely moving, otherwise a
-    // settled stack would keep re-waking itself forever.
-    if (A.asleep && B.velocity.lengthSq() > SLEEP_LIN * SLEEP_LIN) A.wake();
-    if (B.asleep && A.velocity.lengthSq() > SLEEP_LIN * SLEEP_LIN) B.wake();
+    // Wake a sleeper on the spot only for a genuinely moving neighbour; the
+    // island pass at the end of the substep handles every gentler case.
+    if (A.asleep && B.velocity.lengthSq() > WAKE_SPEED * WAKE_SPEED) A.wake();
+    if (B.asleep && A.velocity.lengthSq() > WAKE_SPEED * WAKE_SPEED) B.wake();
 
     const sa = A.shape, sb = B.shape;
     if (sa === 'sphere' && sb === 'sphere') this._sphereSphere(A, B);

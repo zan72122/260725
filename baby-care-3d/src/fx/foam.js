@@ -367,7 +367,7 @@ export class FoamSystem {
         const rad = this.headRadius * 0.95 * Math.pow(1 - k, 0.85);
         _p.set(
           Math.cos(a) * rad + Math.sin(k * Math.PI) * this.headRadius * 0.22,
-          this.headRadius * 0.55 + k * this.headRadius * 2.5,
+          this.headRadius * 0.55 + k * this.headRadius * 1.7,
           Math.sin(a) * rad * 0.9);
         b.local.lerpVectors(b.base, _p, this.horn);
         scaleK = 1 - this.horn * k * 0.55;

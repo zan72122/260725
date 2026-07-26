@@ -17,6 +17,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /* --------------------------------------------------------------- tiers --- */
 
@@ -88,7 +89,9 @@ const GradeShader = {
 
     float linearDepth(vec2 uv) {
       float d = texture2D(tDepth, uv).x;
-      #if PERSPECTIVE_CAMERA == 1
+      #if defined( DEPTH_IS_LINEAR )
+        return d;
+      #elif PERSPECTIVE_CAMERA == 1
         float vz = perspectiveDepthToViewZ(d, uNear, uFar);
         return viewZToOrthographicDepth(vz, uNear, uFar);
       #else
@@ -192,6 +195,91 @@ const GradeShader = {
   `
 };
 
+/* -------------------------------------------------------- depth resolve --- */
+
+/**
+ * Resolves the scene depth attachment into a standalone colour target.
+ *
+ * This exists to break a WebGL2 feedback loop. `EffectComposer` ping-pongs
+ * between two render targets, and `clone()` copies the *reference* to the
+ * DepthTexture — so both buffers share one depth attachment. Any later pass
+ * that samples that DepthTexture is reading the attachment it is currently
+ * drawing into, which is undefined behaviour; Chrome rejects the draw call
+ * outright (`GL_INVALID_OPERATION: Feedback loop formed between Framebuffer
+ * and active Texture`) and the frame comes out black.
+ *
+ * Writing linear depth once into a target of our own costs one full-screen
+ * blit and lets the grade pass — and the particle system's soft-fade — sample
+ * depth safely. `needsSwap = false` so it leaves the colour chain untouched.
+ */
+class DepthResolvePass extends Pass {
+  constructor(depthTexture, camera, width, height) {
+    super();
+    this.needsSwap = false;
+    this.camera = camera;
+
+    this.renderTarget = new THREE.WebGLRenderTarget(width, height, {
+      type: THREE.HalfFloatType,
+      format: THREE.RedFormat,
+      depthBuffer: false,
+      stencilBuffer: false,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter
+    });
+
+    this.material = new THREE.ShaderMaterial({
+      defines: { PERSPECTIVE_CAMERA: camera.isPerspectiveCamera ? 1 : 0 },
+      uniforms: {
+        tDepth: { value: depthTexture },
+        uNear: { value: camera.near },
+        uFar: { value: camera.far }
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        #include <common>
+        #include <packing>
+        varying vec2 vUv;
+        uniform sampler2D tDepth;
+        uniform float uNear, uFar;
+        void main() {
+          float d = texture2D(tDepth, vUv).x;
+          #if PERSPECTIVE_CAMERA == 1
+            float vz = perspectiveDepthToViewZ(d, uNear, uFar);
+            gl_FragColor = vec4(viewZToOrthographicDepth(vz, uNear, uFar), 0.0, 0.0, 1.0);
+          #else
+            gl_FragColor = vec4(d, 0.0, 0.0, 1.0);
+          #endif
+        }`
+    });
+
+    this._quad = new FullScreenQuad(this.material);
+  }
+
+  get texture() { return this.renderTarget.texture; }
+
+  setSize(width, height) { this.renderTarget.setSize(width, height); }
+
+  render(renderer) {
+    this.material.uniforms.uNear.value = this.camera.near;
+    this.material.uniforms.uFar.value = this.camera.far;
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.renderTarget);
+    this._quad.render(renderer);
+    renderer.setRenderTarget(prev);
+  }
+
+  dispose() {
+    this.renderTarget.dispose();
+    this.material.dispose();
+    this._quad.dispose();
+  }
+}
+
 /* ------------------------------------------------------------ pipeline --- */
 
 export class RenderPipeline {
@@ -283,10 +371,19 @@ export class RenderPipeline {
     composer.addPass(bloom);
     this.bloom = bloom;
 
+    // --- depth resolve (breaks the composer's depth feedback loop) --------
+    const depthResolve = new DepthResolvePass(
+      target.depthTexture, camera, size.x, size.y);
+    composer.addPass(depthResolve);
+    this.depthResolve = depthResolve;
+
     // --- grade ------------------------------------------------------------
     const grade = new ShaderPass(GradeShader);
     grade.material.defines.PERSPECTIVE_CAMERA = camera.isPerspectiveCamera ? 1 : 0;
-    grade.uniforms.tDepth.value = target.depthTexture;
+    // Already linearised by the resolve pass, so the grade must not linearise
+    // a second time.
+    grade.material.defines.DEPTH_IS_LINEAR = 1;
+    grade.uniforms.tDepth.value = depthResolve.texture;
     grade.uniforms.uNear.value = camera.near;
     grade.uniforms.uFar.value = camera.far;
     grade.uniforms.uResolution.value.set(size.x, size.y);
@@ -344,6 +441,7 @@ export class RenderPipeline {
       this.camera.updateProjectionMatrix();
     }
     this.gtao?.setSize(w, h);
+    this.depthResolve?.setSize(size.x, size.y);
   }
 
   render(dt) {
@@ -355,6 +453,7 @@ export class RenderPipeline {
   dispose() {
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
+    this.depthResolve?.dispose();
     this.composer.dispose();
     this.renderer.dispose();
   }

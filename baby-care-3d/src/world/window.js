@@ -132,7 +132,7 @@ const SHAFT_FRAG = /* glsl */`
     vec3 V = normalize(cameraPosition - vWorld);
     float axial = 1.0 - abs(dot(V, normalize(uAxis)));
 
-    float a = edge * bars * fade * haze * uIntensity * (0.30 + 0.70 * axial);
+    float a = edge * bars * fade * haze * uIntensity * (0.45 + 0.55 * axial);
     if (a <= 0.001) discard;
     gl_FragColor = vec4(uColor, a);
   }`;
@@ -378,18 +378,20 @@ export class WindowUnit {
       uHaze: { value: SKY.day.haze },
       uTime: { value: 0 }
     };
-    const sky = new THREE.Mesh(new THREE.PlaneGeometry(34, 20), new THREE.ShaderMaterial({
+    // Far enough back that moving the camera across the room parallaxes the
+    // treeline against it; big enough that the opening never runs off its edge.
+    const sky = new THREE.Mesh(new THREE.PlaneGeometry(150, 44), new THREE.ShaderMaterial({
       uniforms: this.skyU, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, fog: false
     }));
-    sky.position.set(0, 2.0, -14);
+    sky.position.set(0, 9.5, -34);
     sky.renderOrder = -5;
     ex.add(sky);
 
     /* --- two cloud sheets at different depths = real parallax ----------- */
     this.clouds = [];
     const cloudDefs = [
-      { z: -11.0, y: 4.2, w: 30, h: 9, cov: 0.42, seed: 17, speed: 0.0055, op: 0.9 },
-      { z: -8.2, y: 3.0, w: 22, h: 6.5, cov: 0.55, seed: 91, speed: 0.011, op: 0.75 }
+      { z: -27.0, y: 11.0, w: 64, h: 17, cov: 0.42, seed: 17, speed: 0.0045, op: 0.9 },
+      { z: -20.0, y: 7.5, w: 44, h: 12, cov: 0.55, seed: 91, speed: 0.010, op: 0.75 }
     ];
     for (const d of cloudDefs) {
       const tex = TEX.cloudSheet({ seed: d.seed, coverage: d.cov, softness: 0.42 });
@@ -408,9 +410,11 @@ export class WindowUnit {
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x93a97c, roughness: 1, metalness: 0, fog: false
     });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 26), groundMat);
+    // The outside ground sits at the same height as the nursery floor, so it
+    // must start *behind* the wall or it lays a green sheet across the room.
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 46), groundMat);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, gy, -12);
+    ground.position.set(0, gy - 0.03, -23.4);      // spans z −0.4 … −46.4
     ground.renderOrder = -3;
     ex.add(ground);
     this.groundMat = groundMat;
@@ -428,10 +432,10 @@ export class WindowUnit {
     const R = rng(31);
     const greens = [0x5f8f57, 0x74a262, 0x4e7d4c, 0x86ad6a];
     const trees = [];
-    for (let i = 0; i < 11; i++) {
-      const s = 0.85 + R() * 1.15;
+    for (let i = 0; i < 14; i++) {
+      const s = 0.85 + R() * 0.8;
       trees.push({
-        pos: [-7.5 + i * 1.5 + R() * 0.9, gy, -5.5 - R() * 3.5],
+        pos: [-19 + i * 2.8 + R() * 1.8, gy - 0.03, -10.5 - R() * 6.5],
         rot: [0, R() * 3, 0],
         scale: [s * (0.85 + R() * 0.3), s, s * (0.85 + R() * 0.3)],
         color: greens[i % greens.length]
@@ -549,7 +553,7 @@ export class WindowUnit {
     this.shaft = shaft;
 
     /* --- dust motes living inside the beam ------------------------------ */
-    const count = this.tier >= 2 ? 260 : this.tier === 1 ? 130 : 60;
+    const count = this.tier >= 2 ? 190 : this.tier === 1 ? 100 : 50;
     const R = rng(97);
     const mp = new Float32Array(count * 3);
     const ms = new Float32Array(count);
@@ -560,7 +564,7 @@ export class WindowUnit {
       mp[i * 3] = (R() * 2 - 1) * 0.92 * kk;
       mp[i * 3 + 1] = (R() * 2 - 1) * 0.92 * kk;
       mp[i * 3 + 2] = t;
-      ms[i] = 6 + R() * 16;
+      ms[i] = 4 + R() * 11;
       mz[i] = R();
     }
     const mg = new THREE.BufferGeometry();
@@ -649,7 +653,7 @@ export class WindowUnit {
 
     for (const sx of [-1, 1]) {
       const geo = clothPanel(this.panelW, this.panelH, {
-        cols: 22, rows: 14, folds: 5, amp: 0.038
+        cols: 46, rows: 13, folds: 6, amp: 0.042
       });
       const panel = new THREE.Mesh(geo, M.curtain);
       panel.castShadow = true;
@@ -677,8 +681,8 @@ export class WindowUnit {
     for (const panel of this.panels) {
       const sx = panel.userData.side;
       foldCloth(panel.geometry, {
-        folds: 5,
-        amp: 0.038,
+        folds: 6,
+        amp: 0.042,
         gather: open,
         drape: 0.02,
         sway
@@ -694,7 +698,7 @@ export class WindowUnit {
       const rings = this.rings[sx < 0 ? 0 : 1];
       for (let i = 0; i < 7; i++) {
         const u = (i / 6 - 0.5) * narrow;
-        const phase = (u / this.panelW) * Math.PI * 2 * 5;
+        const phase = (u / this.panelW) * Math.PI * 2 * 6;
         _v.set(panel.position.x + u, poleY - 0.024, poleZ + Math.sin(phase) * 0.038 * (1 + open * 1.9));
         _q.identity();
         rings.setMatrixAt(i, _m.compose(_v, _q, _v2.set(1, 1, 1)));
@@ -825,9 +829,9 @@ export class WindowUnit {
   }
 
   _writeShaftIntensity(i) {
-    this.shaftU.uIntensity.value = 0.135 * i;
-    this.poolU.uIntensity.value = 0.42 * i;
-    this.moteU.uIntensity.value = 0.9 * Math.min(1.4, i);
+    this.shaftU.uIntensity.value = 0.42 * i;
+    this.poolU.uIntensity.value = 0.50 * i;
+    this.moteU.uIntensity.value = 0.42 * Math.min(1.4, i);
   }
 
   /** What the room should feed its window-bounce light. */

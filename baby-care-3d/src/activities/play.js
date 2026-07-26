@@ -54,7 +54,7 @@ const AUTO_COLLAPSE_HEIGHT = 7;
  * a harness-driven collapse is deliberately staged to fire late: the tower gets
  * to stand and shiver first, and the frame lands mid-fall with dust in the air.
  */
-const HARNESS_COLLAPSE_LEAD = 4.55;
+const HARNESS_COLLAPSE_LEAD = 4.92;
 
 const RALLY_GOAL = 5;
 
@@ -87,7 +87,6 @@ export class PlayActivity {
 
     this.rally = 0;
     this.rallyBest = 0;
-    this.balloonState = 'idle';
 
     this.dance = 0;
     this.peek = null;
@@ -127,7 +126,6 @@ export class PlayActivity {
     /* --- つみき ---------------------------------------------------------- */
     const set = makeBlockSet(res, { count: BLOCK_COUNT, size: BLOCK_SIZE, seed: 5 });
     this.towerBase = home.clone().add(new THREE.Vector3(0.28, 0, 0.09));
-    this.pilePoints = [];
     for (let i = 0; i < BLOCK_COUNT; i++) {
       const mesh = set.blocks[i];
       const a = (i / BLOCK_COUNT) * Math.PI * 2 + 0.7;
@@ -136,7 +134,6 @@ export class PlayActivity {
         BLOCK_SIZE / 2,
         0.26 + Math.sin(a) * 0.075
       ));
-      this.pilePoints.push(p.clone());
       mesh.position.copy(p);
       mesh.rotation.y = a;
       this.group.add(mesh);
@@ -300,7 +297,7 @@ export class PlayActivity {
 
     ctx.room?.clutter?.(false);
     ctx.audio?.unlock?.();
-    snd(ctx, 'chime');
+    snd(ctx, 'play.chime');
     ctx.ui?.prompt?.('ボールを ころころ！', { icon: 'ball' });
 
     // Give the ball a tiny settle so it is never floating on the first frame.
@@ -494,9 +491,11 @@ export class PlayActivity {
     this.ballStillFor = 0;
     this.tried.ball = true;
     this.ball.hit(0.28);
-    snd(ctx, 'whoosh', { gain: 0.5 });
+    snd(ctx, 'ui.swipe', { gain: 0.5 });
+    snd(ctx, 'play.roll', { gain: 0.45 * power });
     ctx.baby?.lookAt?.(this.ball.group.position);
-    ctx.fx?.burst?.('dust', this.ball.group.position.clone().setY(0.01), 5, { spread: 0.1 });
+    ctx.fx?.burst?.('dust', this.ball.group.position.clone().setY(this.home.y + 0.005), 5,
+      { spread: 1.35, speed: [0.15, 0.5], radius: 0.03 });
   }
 
   _releaseBall() {
@@ -537,8 +536,9 @@ export class PlayActivity {
       const wasFalling = this._ballPrevVy ?? 0;
       if (wasFalling < -0.5 && v.y > -0.05 && pos.y <= floor + 0.01) {
         this.ball.hit(clamp(-wasFalling * 0.35, 0.1, 0.9));
-        snd(ctx, 'bounce', { gain: clamp(-wasFalling * 0.3, 0.1, 0.6) });
-        ctx.fx?.burst?.('dust', pos.clone().setY(this.home.y + 0.005), 3, { spread: 0.06 });
+        snd(ctx, 'play.bounce', { gain: clamp(-wasFalling * 0.3, 0.1, 0.6) });
+        ctx.fx?.burst?.('dust', pos.clone().setY(this.home.y + 0.005), 4,
+          { spread: 1.35, speed: [0.15, 0.45], radius: 0.03 });
       }
       this._ballPrevVy = v.y;
     }
@@ -566,7 +566,7 @@ export class PlayActivity {
         baby?.playPose?.('crawl', { loop: true });
         baby?.setMood?.('excited');
         baby?.lookAt?.(pos);
-        snd(ctx, 'giggle', { gain: 0.5 });
+        snd(ctx, 'baby.giggle', { gain: 0.5 });
       }
     } else if (this.ballState === 'chased' && babyPos) {
       baby?.lookAt?.(pos);
@@ -587,7 +587,7 @@ export class PlayActivity {
         baby?.setMood?.('happy');
         baby?.gesture?.('reach');
         baby?.say?.('yoisho');
-        snd(ctx, 'yoisho');
+        snd(ctx, 'baby.babble');
         ctx.fx?.burst?.('sparkle', pos.clone(), 5);
         if (body.velocity) body.velocity.set(0, 0, 0);
         body.asleep = true;
@@ -618,8 +618,8 @@ export class PlayActivity {
     baby?.playPose?.('sit', { seconds: 0.3 });
     baby?.setMood?.('giggle');
     baby?.gesture?.('clap');
-    snd(ctx, 'whoosh', { gain: 0.6 });
-    snd(ctx, 'giggle');
+    snd(ctx, 'ui.swipe', { gain: 0.6 });
+    snd(ctx, 'baby.giggle');
     ctx.fx?.burst?.('star', from, 6);
     ctx.fx?.burst?.('heart', from, 3);
     this._bumpHappy(0.06);
@@ -654,7 +654,7 @@ export class PlayActivity {
     rec.flyQ = rec.mesh.quaternion.clone();
     this.towerHeight++;
     rec.entry.body.asleep = true;
-    snd(this.ctx, 'pop', { rate: 1 + rec.level * 0.05 });
+    snd(this.ctx, 'play.block', { rate: 1 + rec.level * 0.05 });
     this.ctx.baby?.lookAt?.(this._towerTop());
   }
 
@@ -679,13 +679,14 @@ export class PlayActivity {
         rec.entry.body.asleep = true;
         if (rec.flyT >= 1) {
           rec.state = 'tower';
-          snd(ctx, 'wood', { rate: 1 + rec.level * 0.06 });
-          ctx.fx?.burst?.('dust', target.clone().setY(target.y - BLOCK_SIZE / 2), 4, { spread: 0.05 });
-          ctx.cameraRig?.shake?.(0.03 + rec.level * 0.008, 0.12);
+          snd(ctx, 'play.block', { rate: 1 + rec.level * 0.06 });
+          ctx.fx?.burst?.('dust', target.clone().setY(target.y - BLOCK_SIZE / 2), 4,
+            { spread: 1.2, speed: [0.08, 0.3], radius: 0.02 });
+          ctx.cameraRig?.shake?.(0.006 + rec.level * 0.002, 0.14);
           if (this.towerHeight >= 5) {
             ctx.baby?.setMood?.('excited');
             ctx.baby?.gesture?.('clap');
-            snd(ctx, 'tada', { gain: 0.5 });
+            snd(ctx, 'ui.star', { gain: 0.5 });
             this._star(1);
             this._bumpHappy(0.05);
           }
@@ -718,7 +719,7 @@ export class PlayActivity {
         if (rec.flyT >= 1) {
           rec.state = 'stored';
           rec.mesh.visible = false;
-          snd(ctx, 'pop', { rate: 1.2 });
+          snd(ctx, 'play.block', { rate: 1.2 });
           ctx.fx?.burst?.('sparkle', this.boxMouth.clone(), 4);
           this._checkTidyDone();
         }
@@ -730,8 +731,8 @@ export class PlayActivity {
         if ((rec.prevVy ?? 0) < -0.9 && vy > -0.15
           && rec.mesh.position.y < this.home.y + BLOCK_SIZE * 1.2) {
           const p = rec.mesh.position.clone().setY(this.home.y + 0.008);
-          ctx.fx?.burst?.('dust', p, 5, { spread: 0.09 });
-          snd(ctx, 'wood', { rate: 0.75 + (rec.mesh.userData.index % 4) * 0.09, gain: 0.55 });
+          ctx.fx?.burst?.('dust', p, 6, { spread: 1.35, speed: [0.15, 0.5], radius: 0.03 });
+          snd(ctx, 'play.block', { rate: 0.75 + (rec.mesh.userData.index % 4) * 0.09, gain: 0.55 });
         }
         rec.prevVy = vy;
         // once the body has come to rest, it stays put as clutter
@@ -798,27 +799,31 @@ export class PlayActivity {
     }
     this.towerHeight = 0;
 
-    ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.012), 26, { spread: 0.34, rise: 0.2 });
-    ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.10), 12, { spread: 0.2 });
+    // a low, wide ring of dust punched out of the base, plus a slower plume
+    ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.012), 28,
+      { spread: 1.45, speed: [0.35, 1.25], radius: 0.09 });
+    ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.10), 14,
+      { spread: 1.1, speed: [0.2, 0.7], radius: 0.06 });
     ctx.fx?.burst?.('star', base.clone().setY(this.home.y + 0.24), 8);
-    ctx.cameraRig?.shake?.(0.42, 0.42);
-    snd(ctx, 'crash');
-    snd(ctx, 'wood', { rate: 0.8, gain: 0.8 });
+    ctx.cameraRig?.shake?.(0.058, 0.55);
+    snd(ctx, 'play.collapse');
+    snd(ctx, 'play.block', { rate: 0.8, gain: 0.8 });
 
     ctx.baby?.setMood?.('surprised');
     ctx.baby?.lookAt?.(base.clone().setY(this.home.y + 0.1));
-    this._after(0.12, () => ctx.cameraRig?.shake?.(0.16, 0.3));
+    this._after(0.12, () => ctx.cameraRig?.shake?.(0.022, 0.34));
     // a second wave of dust as the tumbling blocks meet the floor
     this._after(0.5, () => {
-      ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.02), 16, { spread: 0.42 });
+      ctx.fx?.burst?.('dust', base.clone().setY(this.home.y + 0.02), 16,
+        { spread: 1.5, speed: [0.2, 0.8], radius: 0.18 });
     });
     this._after(0.42, () => {
       ctx.baby?.setMood?.('giggle');
       ctx.baby?.gesture?.('clap');
-      snd(ctx, 'laugh');
+      snd(ctx, 'baby.laugh');
       ctx.fx?.burst?.('heart', ctx.baby?.headWorldPos?.() || base, 6);
     });
-    this._after(1.0, () => { snd(ctx, 'laugh', { rate: 1.12, gain: 0.7 }); });
+    this._after(1.0, () => { snd(ctx, 'baby.laugh', { rate: 1.12, gain: 0.7 }); });
     this._after(1.6, () => {
       ctx.ui?.prompt?.('おかたづけ しよう', { icon: 'toybox' });
       ctx.baby?.gesture?.('point');
@@ -873,7 +878,7 @@ export class PlayActivity {
   _tidyUp(silent) {
     const loose = this.blocks.filter((b) => b.state === 'loose' || b.state === 'idle');
     if (!loose.length) {
-      if (!silent) snd(this.ctx, 'tap');
+      if (!silent) snd(this.ctx, 'ui.tap');
       return;
     }
     this.tidying = true;
@@ -885,7 +890,7 @@ export class PlayActivity {
       rec.entry.body.asleep = true;
     });
     if (!silent) {
-      snd(this.ctx, 'chime');
+      snd(this.ctx, 'play.chime');
       this.ctx.ui?.prompt?.('おかたづけ じょうず！', { icon: 'star' });
       this.ctx.baby?.setMood?.('happy');
       this.ctx.baby?.lookAt?.(this.boxMouth);
@@ -899,7 +904,7 @@ export class PlayActivity {
     this.tidying = false;
     ctx.room?.clutter?.(false);
     ctx.state?.patch?.({ toysOut: 0 });
-    snd(ctx, 'tada');
+    snd(ctx, 'ui.star');
     ctx.fx?.burst?.('confetti', this.boxMouth.clone(), 18);
     ctx.baby?.setMood?.('happy');
     ctx.baby?.gesture?.('clap');
@@ -928,12 +933,12 @@ export class PlayActivity {
     this.balloon.bump(0.5 + force * 0.5);
     this.rally++;
     this.rallyBest = Math.max(this.rallyBest, this.rally);
-    snd(ctx, 'bounce', { rate: 1 + this.rally * 0.04 });
+    snd(ctx, 'play.bounce', { rate: 1 + this.rally * 0.04 });
     ctx.fx?.burst?.('sparkle', this.balloonPos.clone(), 3);
     ctx.baby?.lookAt?.(this.balloonPos);
 
     if (this.rally > 0 && this.rally % RALLY_GOAL === 0) {
-      snd(ctx, 'tada');
+      snd(ctx, 'ui.star');
       ctx.fx?.burst?.('confetti', this.balloonPos.clone(), 16);
       ctx.baby?.setMood?.('excited');
       ctx.baby?.gesture?.('clap');
@@ -968,7 +973,7 @@ export class PlayActivity {
     if (p.y > ceil) { p.y = ceil; v.y = Math.min(0, v.y) * 0.4; this.balloon.bump(0.3); }
     if (p.y < rest) {
       p.y = rest;
-      if (v.y < -0.05) { this.balloon.bump(0.4); snd(this.ctx, 'pofu', { gain: 0.4 }); }
+      if (v.y < -0.05) { this.balloon.bump(0.4); snd(this.ctx, 'play.balloon', { gain: 0.4 }); }
       v.y = 0;
       if (this.rally > 0) this.rally = 0;
     }
@@ -1007,8 +1012,7 @@ export class PlayActivity {
     this.tried.music = true;
     this.xylo.strike(index, 1);
     // one synthesised note, pitched by ratio against the base sample
-    snd(ctx, 'xylo', { rate: bar.note.freq / 523.25, gain: 0.7 });
-    snd(ctx, 'note', { rate: bar.note.freq / 523.25, gain: 0.5 });
+    snd(ctx, 'play.xylo', { rate: bar.note.freq / 523.25, gain: 0.75 });
     const p = new THREE.Vector3();
     bar.mesh.getWorldPosition(p);
     ctx.fx?.burst?.('sparkle', p.clone().setY(p.y + 0.03), 3);
@@ -1023,9 +1027,10 @@ export class PlayActivity {
     this.drum.group.getWorldPosition(centre);
     const rim = point ? clamp(centre.distanceTo(point) / this.drum.radius, 0, 1) : 0.2;
     this.drum.hit(1 - rim * 0.5);
-    snd(ctx, rim > 0.6 ? 'drumRim' : 'drum', { rate: 1 - rim * 0.25, gain: 0.8 });
-    ctx.fx?.burst?.('dust', centre.clone().setY(this.home.y + this.drum.shellH + 0.01), 4, { spread: 0.1 });
-    ctx.cameraRig?.shake?.(0.035, 0.12);
+    snd(ctx, 'play.drum', { hi: rim > 0.6, rate: 1 - rim * 0.2, gain: 0.8 });
+    ctx.fx?.burst?.('dust', centre.clone().setY(this.home.y + this.drum.shellH + 0.01), 4,
+      { spread: 1.0, speed: [0.2, 0.6], radius: 0.05 });
+    ctx.cameraRig?.shake?.(0.009, 0.16);
     this._feelRhythm();
   }
 
@@ -1085,7 +1090,7 @@ export class PlayActivity {
     this.peek = { phase: 'hide', t: 0, head: head.clone() };
     this.hanky.mesh.visible = true;
     ctx.baby?.setMood?.('shy');
-    snd(ctx, 'whoosh', { gain: 0.4 });
+    snd(ctx, 'play.peekaboo-hide');
     ctx.ui?.prompt?.('いない いない…', { icon: 'peekaboo' });
   }
 
@@ -1107,14 +1112,14 @@ export class PlayActivity {
       if (pk.t > 0.95) {
         pk.phase = 'reveal';
         pk.t = 0;
-        snd(ctx, 'baa');
-        snd(ctx, 'laugh');
+        snd(ctx, 'play.peekaboo-baa');
+        snd(ctx, 'baby.laugh');
         ctx.baby?.setMood?.('giggle');
         ctx.baby?.gesture?.('clap');
         ctx.fx?.burst?.('confetti', head.clone(), 18);
         ctx.fx?.burst?.('heart', head.clone(), 6);
         ctx.ui?.prompt?.('ばあ！', { icon: 'peekaboo' });
-        ctx.cameraRig?.shake?.(0.06, 0.2);
+        ctx.cameraRig?.shake?.(0.014, 0.26);
         this._bumpHappy(0.1);
         this._star(1);
       }

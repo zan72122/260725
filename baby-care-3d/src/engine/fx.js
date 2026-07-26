@@ -57,9 +57,12 @@ const PAL = {
 const KINDS = {
   confetti: {
     mode: 'oriented', shape: 'QUAD', blending: 'normal', lit: true,
-    capacity: 260, life: [1.5, 2.8], size: [0.010, 0.018], aspect: 0.62,
+    capacity: 260, life: [1.8, 3.2], size: [0.010, 0.018], aspect: 0.62,
     speed: [0.7, 2.0], spread: 1.15, dir: [0, 1, 0],
-    gravity: -3.4, drag: 1.5, flutter: 2.6, spin: [4, 14],
+    // Terminal velocity ≈ gravity/drag ≈ 0.75 m/s. Paper does not plummet, and
+    // getting that one ratio wrong is what makes game confetti look like grit.
+    gravity: -2.2, drag: 2.9, flutter: 3.4, spin: [4, 14],
+    bounce: 0.10, floor: 0.002,
     fadeIn: 0.03, fadeOut: 0.30, alpha: 1, palette: PAL.confetti, soft: 0.06
   },
   sparkle: {
@@ -89,7 +92,7 @@ const KINDS = {
     mode: 'stretch', shape: 'SOFT', blending: 'normal', lit: false,
     capacity: 300, life: [0.4, 0.95], size: [0.004, 0.010],
     speed: [0.6, 2.2], spread: 0.85, dir: [0, 1, 0],
-    gravity: -9.0, drag: 0.35, stretch: 0.10,
+    gravity: -9.0, drag: 0.35, stretch: 0.10, bounce: 0, floor: 0,
     sprite: () => TEX.radialSprite({ size: 64, power: 2.4 }),
     fadeIn: 0.02, fadeOut: 0.35, alpha: 0.85, palette: PAL.splash, soft: 0.04
   },
@@ -375,6 +378,7 @@ class Layer {
     this.seed = new Float32Array(cap);
     this.size0 = new Float32Array(cap * 2);
     this.alpha0 = new Float32Array(cap);
+    this.floorY = new Float32Array(cap);
 
     const quad = unitQuad();
     const geo = new THREE.InstancedBufferGeometry();
@@ -523,6 +527,10 @@ class Layer {
         this.aQuat[i4 + 3] = 1;
       }
 
+      // Per-particle, so one burst can settle on the high-chair tray while the
+      // next settles on the rug. -1e9 means "fall forever".
+      this.floorY[i] = o.floor ?? d.floor ?? -1e9;
+
       this.aLife[i2] = 0;
       this.aLife[i2 + 1] = this.seed[i];
     }
@@ -541,6 +549,7 @@ class Layer {
     this.life[i] = this.life[last];
     this.seed[i] = this.seed[last];
     this.alpha0[i] = this.alpha0[last];
+    this.floorY[i] = this.floorY[last];
   }
 
   /* --------------------------------------------------------------- tick -- */
@@ -564,7 +573,7 @@ class Layer {
     const fadeIn = d.fadeIn ?? 0.1;
     const fadeOut = d.fadeOut ?? 0.4;
     const oriented = d.mode === 'oriented';
-    const hasFloor = d.bounce !== undefined;
+    const bounce = d.bounce ?? 0;
 
     for (let i = 0; i < this.count;) {
       this.age[i] += dt;
@@ -604,10 +613,11 @@ class Layer {
         px += Math.sin(ph) * wobble * dt;
         pz += Math.cos(ph * 1.31) * wobble * dt;
       }
-      if (hasFloor && py < d.floor) {
-        py = d.floor;
-        this.vel[i3 + 1] = Math.abs(this.vel[i3 + 1]) * d.bounce;
-        this.vel[i3] *= 0.7; this.vel[i3 + 2] *= 0.7;
+      const fy = this.floorY[i];
+      if (py < fy) {
+        py = fy;
+        this.vel[i3 + 1] = Math.abs(this.vel[i3 + 1]) * bounce;
+        this.vel[i3] *= 0.66; this.vel[i3 + 2] *= 0.66;
         if (this.vel[i3 + 1] < 0.05) this.vel[i3 + 1] = 0;
       }
       this.aPos[i3] = px; this.aPos[i3 + 1] = py; this.aPos[i3 + 2] = pz;

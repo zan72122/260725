@@ -121,18 +121,22 @@ function fnoise(x, seed) {
 }
 
 /**
- * Handheld noise, zero-anchored at t = 0.
+ * Handheld noise for one channel, anchored so it reads exactly zero at t = 0.
  *
- * Subtracting the value at the origin costs one cached lookup and buys two
- * things: the rig starts from rest instead of jumping on the first frame, and
- * a harness snap (which freezes the phase at 0) lands on *exactly* the framing
- * the preset describes rather than an arbitrary noise offset.
+ * Each channel has its own constant `phase` to decorrelate it from the others,
+ * so the anchor has to be the noise value *at that phase* — subtracting
+ * fnoise(0) instead would leave a constant offset per channel. That costs one
+ * cached lookup and buys two things: the rig starts from rest instead of
+ * lurching on the first frame, and a harness snap (which freezes the phase at
+ * t = 0) lands on *exactly* the framing the preset describes.
+ *
+ * Every seed is used with exactly one phase, so caching by seed is safe.
  */
 const _n0 = new Map();
-function hnoise(x, seed) {
+function hnoise(x, phase, seed) {
   let z = _n0.get(seed);
-  if (z === undefined) { z = fnoise(0, seed); _n0.set(seed, z); }
-  return fnoise(x, seed) - z;
+  if (z === undefined) { z = fnoise(phase, seed); _n0.set(seed, z); }
+  return fnoise(x + phase, seed) - z;
 }
 
 /* -------------------------------------------------------------- spring --- */
@@ -411,17 +415,17 @@ export class CameraRig {
     const shake = this._shakeAmp * this._shakeEnvelope();
 
     // --- handheld translation ---------------------------------------------
-    let ox = hnoise(t * 0.37, 17) * amp;
-    let oy = hnoise(t * 0.31 + 5.1, 83) * amp * 0.8;
-    let oz = hnoise(t * 0.27 + 9.4, 151) * amp * 0.6;
+    let ox = hnoise(t * 0.37, 0.0, 17) * amp;
+    let oy = hnoise(t * 0.31, 5.1, 83) * amp * 0.8;
+    let oz = hnoise(t * 0.27, 9.4, 151) * amp * 0.6;
     // Breath: a slow, almost-sine vertical rise and fall on top of the drift.
     oy += Math.sin(t * 1.32) * amp * 0.45;
 
     // --- shake translation (fast, mostly lateral) --------------------------
     if (shake > 0) {
-      ox += hnoise(t * 26.0, 313) * shake;
-      oy += hnoise(t * 23.5 + 3.7, 419) * shake * 0.9;
-      oz += hnoise(t * 21.0 + 7.2, 577) * shake * 0.5;
+      ox += hnoise(t * 26.0, 0.0, 313) * shake;
+      oy += hnoise(t * 23.5, 3.7, 419) * shake * 0.9;
+      oz += hnoise(t * 21.0, 7.2, 577) * shake * 0.5;
     }
 
     // --- place the eye ------------------------------------------------------
@@ -446,15 +450,15 @@ export class CameraRig {
     // --- handheld + shake rotation -----------------------------------------
     // Applied after lookAt, in camera-local axes, so it survives the aim.
     const rAmp = 0.0022 * this.hh * this._breathe;
-    let pitch = hnoise(t * 0.43 + 2.2, 641) * rAmp;
-    let yaw = hnoise(t * 0.39 + 6.6, 733) * rAmp;
-    let roll = hnoise(t * 0.23 + 4.4, 811) * 0.0018 * this.rollScale * this._breathe;
+    let pitch = hnoise(t * 0.43, 2.2, 641) * rAmp;
+    let yaw = hnoise(t * 0.39, 6.6, 733) * rAmp;
+    let roll = hnoise(t * 0.23, 4.4, 811) * 0.0018 * this.rollScale * this._breathe;
     if (shake > 0) {
       // Rotational kick is what actually sells an impact on screen.
       const rs = shake * 0.55;
-      pitch += hnoise(t * 24.0 + 1.1, 907) * rs;
-      yaw += hnoise(t * 27.5 + 8.3, 1013) * rs;
-      roll += hnoise(t * 19.5 + 2.9, 1117) * rs * 1.4;
+      pitch += hnoise(t * 24.0, 1.1, 907) * rs;
+      yaw += hnoise(t * 27.5, 8.3, 1013) * rs;
+      roll += hnoise(t * 19.5, 2.9, 1117) * rs * 1.4;
     }
     cam.rotateX(pitch);
     cam.rotateY(yaw);
