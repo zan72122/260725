@@ -63,22 +63,25 @@
     box-shadow:0 0 3.4vmin rgba(130,190,255,.85); border-color:#cfe6ff; transform:translateY(-.8vmin); }
   .mode-btn:active { transform:scale(.95); }
 
-  /* ---- pour panel ---- */
-  #pour-panel { position:absolute; bottom:calc(16vmin + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%) translateY(6vmin);
-    background:rgba(12,20,50,.92); border:1px solid rgba(140,200,255,.4); border-radius:4vmin; padding:2.6vmin 3vmin 2.2vmin;
-    display:flex; gap:2vmin; pointer-events:auto; opacity:0; visibility:hidden; transition:all .3s ease; backdrop-filter:blur(6px);
-    box-shadow:0 0 4vmin rgba(60,120,255,.35); max-width:94vw; flex-wrap:wrap; justify-content:center; }
-  #pour-panel.open { opacity:1; visibility:visible; transform:translateX(-50%) translateY(0); }
-  .ing-btn { font-family:inherit; display:flex; flex-direction:column; align-items:center; gap:.6vmin; cursor:pointer;
-    background:rgba(255,255,255,.06); border:1px solid rgba(140,200,255,.25); border-radius:3vmin; padding:1.5vmin 1.8vmin;
-    color:#cfe0ff; font-size:2.4vmin; width:13.4vmin; transition:all .2s; position:relative; }
-  .ing-btn .ic { font-size:5.2vmin; line-height:1; filter:grayscale(.9) opacity(.55); transition:filter .2s; }
-  .ing-btn .amt { display:flex; gap:.6vmin; height:1.4vmin; }
-  .ing-btn .amt i { width:2.6vmin; height:1.2vmin; border-radius:1vmin; background:rgba(255,255,255,.14); }
-  .ing-btn[data-lv="1"] .amt i:nth-child(1), .ing-btn[data-lv="2"] .amt i { background:#8fd8ff; box-shadow:0 0 1vmin rgba(140,220,255,.9); }
-  .ing-btn[data-lv="1"] .ic, .ing-btn[data-lv="2"] .ic { filter:none; }
-  .ing-btn[data-lv="1"], .ing-btn[data-lv="2"] { border-color:rgba(160,220,255,.75); background:rgba(120,190,255,.14); }
-  .ing-btn:active { transform:scale(.94); }
+  /* ---- fx overlay (bottle / stream / funnel) ---- */
+  #fx { position:absolute; inset:0; width:100%; height:100%; z-index:15; pointer-events:none; }
+
+  /* ---- bottle shelf ---- */
+  #shelf { position:absolute; left:2vmin; top:50%; transform:translate(-4vmin,-50%); display:flex; flex-direction:column; gap:1.4vmin;
+    pointer-events:auto; opacity:0; visibility:hidden; transition:all .3s ease; }
+  #shelf.open { opacity:1; visibility:visible; transform:translate(0,-50%); }
+  .bottle { font-family:inherit; border:none; background:none; cursor:pointer; display:flex; flex-direction:column; align-items:center;
+    gap:.3vmin; color:#cfe0ff; font-size:1.9vmin; width:13vmin; padding:0; }
+  .bottle .glass { position:relative; width:7.6vmin; height:10vmin; border:.45vmin solid rgba(190,225,255,.8);
+    border-radius:1.4vmin 1.4vmin 2.6vmin 2.6vmin; background:rgba(180,220,255,.08); overflow:hidden; transition:all .2s;
+    box-shadow:0 0 1.6vmin rgba(90,150,255,.3), inset 0 0 1.4vmin rgba(190,225,255,.2); }
+  .bottle .fill { position:absolute; left:0; right:0; bottom:0; height:100%; transition:height .25s; }
+  .bottle .em { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:3.8vmin;
+    text-shadow:0 0 1.2vmin rgba(0,0,20,.55); }
+  .bottle.sel .glass { border-color:#ffd97f; box-shadow:0 0 2.8vmin rgba(255,217,127,.75); transform:translateY(-.6vmin); }
+  .bottle.away .glass { opacity:.25; border-style:dashed; }
+  .bottle.away .em { opacity:.25; }
+  .bottle:active { transform:scale(.94); }
 
   /* ---- discovery banner ---- */
   #disc-banner { position:absolute; top:26%; left:50%; transform:translate(-50%,-50%) scale(.6); z-index:40;
@@ -119,6 +122,7 @@
 </head>
 <body>
 <canvas id="gl"></canvas>
+<canvas id="fx"></canvas>
 
 <div id="title-screen">
   <div id="title-gem">💎</div>
@@ -137,16 +141,9 @@
     <button class="icon-btn" id="btn-album" title="はっけんアルバム">📖</button>
     <button class="icon-btn" id="btn-reset" title="あたらしいほうせき">🔄</button>
   </div>
-  <div id="hint">まずは 🫗そそぐ で ジュースを いれてみよう！</div>
+  <div id="hint">まずは 🫗そそぐ で びんを えらぼう！</div>
 
-  <div id="pour-panel">
-    <button class="ing-btn" data-ing="blue"  data-lv="0"><span class="ic">🟦</span><span>あおジュース</span><span class="amt"><i></i><i></i></span></button>
-    <button class="ing-btn" data-ing="pink"  data-lv="0"><span class="ic">🌸</span><span>ももジュース</span><span class="amt"><i></i><i></i></span></button>
-    <button class="ing-btn" data-ing="gold"  data-lv="0"><span class="ic">✨</span><span>きんのつぶ</span><span class="amt"><i></i><i></i></span></button>
-    <button class="ing-btn" data-ing="bub"   data-lv="0"><span class="ic">🫧</span><span>あわ</span><span class="amt"><i></i><i></i></span></button>
-    <button class="ing-btn" data-ing="star"  data-lv="0"><span class="ic">⭐</span><span>ひかるほし</span><span class="amt"><i></i><i></i></span></button>
-    <button class="ing-btn" data-ing="jelly" data-lv="0"><span class="ic">🪼</span><span>クラゲ</span><span class="amt"><i></i><i></i></span></button>
-  </div>
+  <div id="shelf"></div>
 
   <div id="mode-bar">
     <button class="mode-btn" id="m-pour"><span class="ic">🫗</span>そそぐ</button>
@@ -203,6 +200,9 @@ uniform float uSpin;       // current spin energy 0..1
 uniform float uHeart, uSix, uTunnel, uJShadow, uGalaxy;
 uniform float uFlash;      // cut feedback flash
 uniform float uSteps;      // volume march steps
+uniform float uPour;       // pouring-in strength 0..1
+uniform vec3  uPourTint;   // color of the poured ingredient
+uniform float uCamShift;   // camera looks up in pour mode -> gem slides down
 
 const int MAXP = 40;
 const float IOR = 1.45;
@@ -342,6 +342,15 @@ vec4 fieldSample(vec3 p){
 
   float h = dot(p, axisU);              // world height inside gem
   float pa = dot(p, axisA), pb = dot(p, axisB);
+
+  // falling column of freshly poured stuff (world-vertical axis through center)
+  if(uPour > 0.01){
+    float rr = length(vec2(pa, pb));
+    float fallN = 0.55 + 0.45*noise3(vec3(pa*8.0, h*5.0 - uTime*7.0, pb*8.0));
+    float colGlow = exp(-rr*rr*30.0) * uPour * fallN;
+    col += uPourTint * colGlow * 2.4;
+    den += colGlow * 0.9;
+  }
 
   // ---- liquids ----
   float wob = (fbm(p*2.2 + uSlosh) - 0.5) * (0.22 + 0.9*uSpin);
@@ -497,7 +506,7 @@ vec4 marchInside(vec3 ro, vec3 rd, float t0, float t1, float steps, vec3 rdW){
 void main(){
   vec2 uv = vUV; uv.x *= uRes.x/uRes.y;
   vec3 ro = vec3(0.0, 0.12, 4.35);
-  vec3 rd = normalize(vec3(uv.x, uv.y - 0.03, -2.55));
+  vec3 rd = normalize(vec3(uv.x, uv.y - 0.03 + uCamShift, -2.55));
 
   // gem-local ray
   vec3 roL = uRotT * ro;
@@ -610,7 +619,7 @@ gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 0, 0);
 
 const U = {};
 ['uRes','uTime','uRot','uRotT','uPlanes','uPlaneCount','uLight','uBlue','uPink','uGold','uBub','uStar','uJelly',
- 'uMixAmt','uSlosh','uSpin','uHeart','uSix','uTunnel','uJShadow','uGalaxy','uFlash','uSteps']
+ 'uMixAmt','uSlosh','uSpin','uHeart','uSix','uTunnel','uJShadow','uGalaxy','uFlash','uSteps','uPour','uPourTint','uCamShift']
  .forEach(n => U[n] = gl.getUniformLocation(prog, n));
 
 // ============================================================
@@ -636,11 +645,21 @@ function m3v(m,v){ return [ m[0]*v[0]+m[3]*v[1]+m[6]*v[2], m[1]*v[0]+m[4]*v[1]+m
 //  game state
 // ============================================================
 const MAXP = 40;
+const ING = {
+  blue:  { name:'あおジュース', em:'🟦', color:'#3d8bff', liquid:true,  tint:[0.24,0.55,1.00] },
+  pink:  { name:'ももジュース', em:'🌸', color:'#ff6fb5', liquid:true,  tint:[1.00,0.44,0.71] },
+  gold:  { name:'きんのつぶ',   em:'✨', color:'#ffd25e', liquid:false, tint:[1.00,0.82,0.37] },
+  bub:   { name:'あわ',         em:'🫧', color:'#bfeaff', liquid:false, tint:[0.75,0.92,1.00] },
+  star:  { name:'ひかるほし',   em:'⭐', color:'#fff3a6', liquid:false, tint:[1.00,0.95,0.65] },
+  jelly: { name:'クラゲ',       em:'🪼', color:'#c99bff', liquid:false, tint:[0.79,0.61,1.00] },
+};
 const state = {
   quat: qNorm([0.1, 0.2, 0.05, 1]),
   angVel: [0,0],           // screen-space drag velocity
   planes: [],              // {n:[x,y,z], d}
-  ing: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },  // 0 | .5 | 1
+  ing: { blue:0, pink:0, gold:0, bub:0, star:0, jelly:0 },        // inside the gem, 0..1
+  bottles: { blue:1, pink:1, gold:1, bub:1, star:1, jelly:1 },    // left in each bottle, 0..1
+  pour: { sel:null, tilt:0, tiltTarget:0, strength:0, pouredTotal:0 },
   slosh: [0,0,0],
   spin: 0,                 // current spin energy 0..1
   mixAmt: 0,
@@ -688,7 +707,7 @@ function pickGem(clientX, clientY){
   const ndcY = 1 - (clientY - r.top)/r.height*2;
   const asp = r.width/r.height;
   const ro = [0, 0.12, 4.35];
-  let rd = [ndcX*asp, ndcY - 0.03, -2.55];
+  let rd = [ndcX*asp, ndcY - 0.03 + camShift, -2.55];
   const l = Math.hypot(...rd); rd = rd.map(v=>v/l);
   const Rt = mat3T(qToMat3(state.quat));
   const roL = m3v(Rt, ro), rdL = m3v(Rt, rd);
@@ -760,6 +779,44 @@ function ping(freq, dur=0.5, vol=0.25, type='sine'){
 }
 function chimeCut(){ ping(1180+Math.random()*300, 0.6, 0.22, 'triangle'); ping(2360, 0.3, 0.08); }
 function chimePour(){ ping(420, 0.25, 0.12, 'sine'); ping(630, 0.3, 0.1); }
+
+// ---- pouring sound: looping filtered noise with a toku-toku LFO ----
+let pourSrc=null, pourGainNode=null, pourLfoGain=null;
+function ensurePourLoop(){
+  const ac = audio(); if(!ac) return null;
+  if(pourSrc) return pourGainNode;
+  const len = ac.sampleRate;
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  pourSrc = ac.createBufferSource(); pourSrc.buffer = buf; pourSrc.loop = true;
+  const bp = ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=640; bp.Q.value=1.1;
+  pourGainNode = ac.createGain(); pourGainNode.gain.value = 0;
+  const lfo = ac.createOscillator(); lfo.frequency.value = 5.3;
+  pourLfoGain = ac.createGain(); pourLfoGain.gain.value = 0;
+  lfo.connect(pourLfoGain); pourLfoGain.connect(pourGainNode.gain); lfo.start();
+  pourSrc.connect(bp); bp.connect(pourGainNode); pourGainNode.connect(master);
+  pourSrc.start();
+  return pourGainNode;
+}
+function setPourSound(strength, liquid){
+  if(strength > 0.01){
+    const g = ensurePourLoop(); if(!g) return;
+    const target = strength * (liquid ? 0.15 : 0.05);
+    g.gain.setTargetAtTime(target, AC.currentTime, 0.08);
+    pourLfoGain.gain.setTargetAtTime(target*0.55, AC.currentTime, 0.08);
+  } else if(pourGainNode && AC){
+    pourGainNode.gain.setTargetAtTime(0, AC.currentTime, 0.1);
+    pourLfoGain.gain.setTargetAtTime(0, AC.currentTime, 0.1);
+  }
+}
+let lastPlop = 0;
+function plop(){
+  const now = performance.now();
+  if(now - lastPlop < 90) return;
+  lastPlop = now;
+  ping(430 + Math.random()*380, 0.14, 0.06, 'triangle');
+}
 function chimeDiscovery(){
   const ac = audio(); if(!ac) return;
   [523.25, 659.26, 783.99, 1046.5, 1318.5].forEach((f,i)=>{
@@ -772,15 +829,15 @@ function chimeDiscovery(){
 // ============================================================
 const DISCS = [
   { id:'heart',  ic:'💗', name:'ハートのあわ',       desc:'あわが ぜんぶ ハートに みえる！',
-    cond:()=> state.ing.bub>0 && state.planes.length>=16 },
+    cond:()=> state.ing.bub>0.05 && state.planes.length>=16 },
   { id:'six',    ic:'🪼', name:'むっつの ぶんしん',   desc:'なかの クラゲが 6ぴきに ふえて みえる！',
-    cond:()=> state.ing.jelly>0 && state.planes.length>=22 },
+    cond:()=> state.ing.jelly>0.05 && state.planes.length>=22 },
   { id:'tunnel', ic:'🌈', name:'にじいろトンネル',    desc:'ほうせきの おくに にじの トンネルが あらわれた！',
-    cond:()=> state.planes.length>=28 && (state.ing.blue>0 || state.ing.pink>0) },
+    cond:()=> state.planes.length>=28 && (state.ing.blue>0.05 || state.ing.pink>0.05) },
   { id:'jshadow',ic:'🌑', name:'きょだいクラゲのかげ', desc:'かべに おおきな クラゲの かげが うつった！',
-    cond:()=> state.ing.jelly>0 && state.lightMoved && Math.sin(state.light.el)<0.25 },
+    cond:()=> state.ing.jelly>0.05 && state.lightMoved && Math.sin(state.light.el)<0.25 },
   { id:'galaxy', ic:'🌌', name:'ちいさなぎんが',      desc:'ほうせきの ちゅうしんに ぎんがが うまれた！',
-    cond:()=> state.galaxyLit || (state.ing.star>0 && state.ing.gold>0 && state.totalSpin>28) },
+    cond:()=> state.galaxyLit || (state.ing.star>0.05 && state.ing.gold>0.05 && state.totalSpin>28) },
 ];
 let found = {};
 try { found = JSON.parse(localStorage.getItem('livingGem.found')||'{}'); } catch(e){ found = {}; }
@@ -826,8 +883,9 @@ renderAlbum();
 //  hints
 // ============================================================
 const HINTS = [
-  'まずは 🫗そそぐ で ジュースを いれてみよう！',
-  'つぎは ⭐や🫧、🪼クラゲも いれてみよう！',
+  'まずは 🫗そそぐ で びんを えらぼう！',
+  'ゆびで したへ ひっぱると びんが かたむいて そそげるよ！',
+  'いいね！ ⭐や 🫧、🪼クラゲの びんも そそいでみよう',
   'ゆびで ドラッグして ほうせきを まわしてみよう！',
   '⛏️けずる にして ほうせきを タップ！ あたらしい めんが できるよ',
   '🔦ひかり で ドラッグすると ひかりが うごくよ。かべの もようを みてみよう',
@@ -847,37 +905,54 @@ setHint(0);
 // ============================================================
 //  UI wiring
 // ============================================================
-const modeBtns = { spin:document.getElementById('m-spin'), cut:document.getElementById('m-cut'), light:document.getElementById('m-light') };
-const pourBtn = document.getElementById('m-pour');
-const pourPanel = document.getElementById('pour-panel');
+const modeBtns = { pour:document.getElementById('m-pour'), spin:document.getElementById('m-spin'),
+                   cut:document.getElementById('m-cut'), light:document.getElementById('m-light') };
+const shelf = document.getElementById('shelf');
 
 function setMode(m){
+  if(m === 'pour' && state.mode === 'pour') m = 'spin';    // tap again to close
   state.mode = m;
   for(const k in modeBtns) modeBtns[k].classList.toggle('active', k===m);
-  if(m !== 'pourOpenKeep') pourPanel.classList.remove('open');
-  pourBtn.classList.toggle('active', false);
+  shelf.classList.toggle('open', m==='pour');
+  if(m !== 'pour') deselectBottle();
 }
+modeBtns.pour.addEventListener('click', ()=>{ audio(); setMode('pour'); });
 modeBtns.spin.addEventListener('click', ()=>{ audio(); setMode('spin'); });
-modeBtns.cut.addEventListener('click', ()=>{ audio(); setMode('cut'); setHint(3); });
-modeBtns.light.addEventListener('click', ()=>{ audio(); setMode('light'); setHint(4); });
-pourBtn.addEventListener('click', ()=>{
-  audio();
-  const open = !pourPanel.classList.contains('open');
-  pourPanel.classList.toggle('open', open);
-  pourBtn.classList.toggle('active', open);
-});
+modeBtns.cut.addEventListener('click', ()=>{ audio(); setMode('cut'); });
+modeBtns.light.addEventListener('click', ()=>{ audio(); setMode('light'); setHint(6); });
 
-const LV = [0, 0.5, 1];
-document.querySelectorAll('.ing-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    const ing = btn.dataset.ing;
-    let lv = (parseInt(btn.dataset.lv)+1)%3;
-    btn.dataset.lv = lv;
-    state.ing[ing] = LV[lv];
-    chimePour();
-    if(ing==='blue'||ing==='pink') setHint(1); else setHint(2);
+// ---- bottle shelf ----
+for(const key in ING){
+  const ing = ING[key];
+  const b = document.createElement('button');
+  b.className = 'bottle'; b.dataset.ing = key;
+  b.innerHTML = `<span class="glass"><span class="fill" style="background:linear-gradient(180deg, ${ing.color}cc, ${ing.color})"></span><span class="em">${ing.em}</span></span><span class="nm">${ing.name}</span>`;
+  b.addEventListener('click', ()=>{ audio(); selectBottle(key); });
+  shelf.appendChild(b);
+}
+function updateShelf(){
+  shelf.querySelectorAll('.bottle').forEach(b=>{
+    const key = b.dataset.ing;
+    b.querySelector('.fill').style.height = (state.bottles[key]*88)+'%';
+    b.classList.toggle('sel', state.pour.sel===key);
+    b.classList.toggle('away', state.pour.sel===key);
   });
-});
+}
+function selectBottle(key){
+  if(state.pour.sel === key){ deselectBottle(); return; }
+  state.pour.sel = key;
+  state.pour.tilt = 0; state.pour.tiltTarget = 0;
+  chimePour();
+  setHint(1);
+  updateShelf();
+}
+function deselectBottle(){
+  if(!state.pour.sel) return;
+  state.pour.sel = null; state.pour.tiltTarget = 0; state.pour.strength = 0;
+  setPourSound(0, true);
+  updateShelf();
+}
+updateShelf();
 
 document.getElementById('btn-album').addEventListener('click', ()=>{ audio(); document.getElementById('album').classList.add('open'); });
 document.getElementById('album-close').addEventListener('click', ()=>document.getElementById('album').classList.remove('open'));
@@ -892,8 +967,10 @@ document.getElementById('btn-reset').addEventListener('click', ()=>{
   audio(); ping(300,0.4,0.15);
   initPlanes();
   state.ing = {blue:0,pink:0,gold:0,bub:0,star:0,jelly:0};
+  state.bottles = {blue:1,pink:1,gold:1,bub:1,star:1,jelly:1};
+  state.pour.pouredTotal = 0;
   state.totalSpin = 0; state.galaxyLit = false; state.mixAmt = 0;
-  document.querySelectorAll('.ing-btn').forEach(b=>b.dataset.lv=0);
+  deselectBottle(); updateShelf();
 });
 
 document.getElementById('start-btn').addEventListener('click', ()=>{
@@ -934,14 +1011,13 @@ function sparkBurst(x, y, ch='✨', n=8){
 // ============================================================
 //  pointer interaction
 // ============================================================
-let dragging = false, lastX=0, lastY=0, downX=0, downY=0, moved=0, dragT=0;
+let dragging = false, lastX=0, lastY=0, downX=0, downY=0, moved=0, pourDrag=false;
 canvas.addEventListener('pointerdown', e=>{
   if(!state.started) return;
   dragging = true; moved = 0;
   lastX = downX = e.clientX; lastY = downY = e.clientY;
-  dragT = performance.now();
+  pourDrag = (state.mode === 'pour' && !!state.pour.sel);
   canvas.setPointerCapture(e.pointerId);
-  pourPanel.classList.remove('open'); pourBtn.classList.remove('active');
 });
 canvas.addEventListener('pointermove', e=>{
   if(!dragging) return;
@@ -949,7 +1025,11 @@ canvas.addEventListener('pointermove', e=>{
   moved += Math.abs(dx)+Math.abs(dy);
   lastX = e.clientX; lastY = e.clientY;
   const sc = 1/Math.min(innerWidth, innerHeight);
-  if(state.mode === 'light'){
+  if(pourDrag){
+    // pull down to tilt the bottle
+    const pull = (e.clientY - downY) * sc;
+    state.pour.tiltTarget = Math.max(0, Math.min(1, pull/0.34)) * 2.6;
+  } else if(state.mode === 'light'){
     state.light.az += dx*sc*3.2;
     state.light.el = Math.max(0.02, Math.min(1.5, state.light.el - dy*sc*3.2));
     state.lightMoved = true;
@@ -957,23 +1037,24 @@ canvas.addEventListener('pointermove', e=>{
     state.angVel[0] = dx*sc*5.5;
     state.angVel[1] = dy*sc*5.5;
     applySpin(state.angVel[0], state.angVel[1]);
-    if(moved > 60) setHint(3);
+    if(moved > 60) setHint(4);
   }
 });
 canvas.addEventListener('pointerup', e=>{
   if(!dragging) return;
   dragging = false;
+  if(pourDrag){ pourDrag = false; state.pour.tiltTarget = 0; return; }
   if(state.mode === 'cut' && moved < 12){
     if(cutAt(e.clientX, e.clientY)){
       state.flash = 1;
       chimeCut();
       sparkBurst(e.clientX, e.clientY, '💎', 6);
       sparkBurst(e.clientX, e.clientY, '✨', 8);
-      setHint(4);
+      setHint(5);
     }
   }
 });
-canvas.addEventListener('pointercancel', ()=>{ dragging=false; });
+canvas.addEventListener('pointercancel', ()=>{ dragging=false; pourDrag=false; state.pour.tiltTarget=0; });
 
 function applySpin(rx, ry){
   const q1 = qAxisAngle([0,1,0], rx);
@@ -984,6 +1065,272 @@ function applySpin(rx, ry){
   state.totalSpin += sp*3.0;
   state.slosh[0] += rx*2.4; state.slosh[1] += (rx-ry)*1.1; state.slosh[2] += ry*2.4;
   state.mixAmt = Math.min(1, state.mixAmt + sp*0.5);
+}
+
+// ============================================================
+//  pour mechanics + fx overlay (bottle / stream / funnel)
+// ============================================================
+let camShift = 0;
+const fxCanvas = document.getElementById('fx');
+const fxc = fxCanvas.getContext('2d');
+function resizeFX(){
+  const d = Math.min(window.devicePixelRatio||1, 2);
+  fxCanvas.width = Math.floor(innerWidth*d); fxCanvas.height = Math.floor(innerHeight*d);
+  fxc.setTransform(d,0,0,d,0,0);
+}
+addEventListener('resize', resizeFX); resizeFX();
+
+// project a world point to CSS pixels (must mirror the shader camera)
+function projScreen(wx, wy, wz){
+  const asp = innerWidth/innerHeight;
+  const dz = 4.35 - wz;
+  const uvy = 0.03 - camShift + (wy-0.12)*2.55/dz;
+  const uvx = wx*2.55/dz/asp;
+  return { x:(uvx*0.5+0.5)*innerWidth, y:(1-(uvy*0.5+0.5))*innerHeight };
+}
+function bez(a, c, b, u){
+  const v = 1-u;
+  return { x: v*v*a.x + 2*v*u*c.x + u*u*b.x, y: v*v*a.y + 2*v*u*c.y + u*u*b.y };
+}
+function smooth(a, b, x){ const t = Math.max(0, Math.min(1, (x-a)/(b-a))); return t*t*(3-2*t); }
+
+let fxParticles = [], fxChunks = [], lastChunkT = 0;
+
+const BOT_H = 0.23;   // bottle height in units of min(W,H)
+function updatePour(dt){
+  const p = state.pour;
+  p.tilt += (p.tiltTarget - p.tilt) * Math.min(1, dt*9);
+  let rate = 0;
+  if(p.sel && state.mode==='pour'){
+    const fill = state.bottles[p.sel];
+    // liquid escapes when the mouth dips below the (world-horizontal) surface
+    const mouthRel = -Math.cos(p.tilt) * BOT_H*0.5;
+    const surfRel  = (0.5 - fill) * BOT_H;
+    rate = Math.max(0, Math.min(1, (mouthRel - surfRel)*12)) * 0.55;
+    if(p.tilt > 2.3) rate = Math.max(rate, 0.35);          // near upside-down: dump it all
+    if(fill <= 0.002) rate = 0;
+  }
+  let transfer = 0;
+  if(rate > 0){
+    transfer = Math.min(rate*dt, state.bottles[p.sel], 1 - state.ing[p.sel]);
+    if(transfer > 0){
+      state.bottles[p.sel] -= transfer;
+      state.ing[p.sel] += transfer;
+      p.pouredTotal += transfer;
+      state.slosh[1] += transfer*2.0;
+      state.mixAmt = Math.min(1, state.mixAmt + transfer*0.25);
+      updateShelf();
+      if(p.pouredTotal > 0.18) setHint(2);
+      if(p.pouredTotal > 0.75) setHint(3);
+    }
+  }
+  p.strength = transfer > 0
+    ? Math.min(1, p.strength + dt*8) * Math.min(1, rate/0.35)
+    : Math.max(0, p.strength - dt*6);
+  setPourSound(p.strength, p.sel ? ING[p.sel].liquid : true);
+}
+
+function drawFunnel(F, FM, s, t, k){
+  const bob = Math.sin(t*2.1)*0.004*s;
+  const idle = (state.pour.sel && k<0.05) ? 0.5+0.5*Math.sin(t*3.4) : 0;
+  const gulp = 1 + 0.06*Math.sin(t*13)*k;
+  const wTop = 0.075*s, wNeck = 0.015*s, tube = 0.036*s;
+  fxc.save();
+  fxc.translate(F.x, F.y + bob);
+  fxc.scale(1, gulp);
+  const yTop = FM.y - F.y - bob;
+  const path = new Path2D();
+  path.moveTo(-wTop, yTop); path.lineTo(-wNeck, 0); path.lineTo(-wNeck*0.85, tube);
+  path.lineTo(wNeck*0.85, tube); path.lineTo(wNeck, 0); path.lineTo(wTop, yTop);
+  path.closePath();
+  fxc.fillStyle = 'rgba(190,225,255,0.14)';
+  fxc.fill(path);
+  const glowC = state.pour.sel ? ING[state.pour.sel].color : '#9fd4ff';
+  fxc.shadowColor = glowC;
+  fxc.shadowBlur = (0.012 + 0.03*(k + idle*0.5))*s;
+  fxc.strokeStyle = k>0.05 ? glowC : `rgba(200,232,255,${0.75+idle*0.25})`;
+  fxc.lineWidth = 0.006*s;
+  fxc.stroke(path);
+  fxc.beginPath();
+  fxc.ellipse(0, yTop, wTop, wTop*0.26, 0, 0, 6.2832);
+  fxc.stroke();
+  fxc.shadowBlur = 0;
+  fxc.restore();
+}
+
+function drawBottle(P, tilt, key, fill, s, t){
+  const ing = ING[key];
+  const BH = BOT_H*s, BW = 0.095*s, NW = 0.045*s, NH = 0.045*s, R = 0.022*s;
+  const top = -BH/2, bot = BH/2;
+  fxc.save();
+  fxc.translate(P.x, P.y);
+  fxc.rotate(tilt);
+  const path = new Path2D();
+  path.moveTo(-NW/2, top);
+  path.lineTo(-NW/2, top+NH*0.55);
+  path.quadraticCurveTo(-BW/2, top+NH, -BW/2, top+NH+0.02*s);
+  path.lineTo(-BW/2, bot-R);
+  path.quadraticCurveTo(-BW/2, bot, -BW/2+R, bot);
+  path.lineTo(BW/2-R, bot);
+  path.quadraticCurveTo(BW/2, bot, BW/2, bot-R);
+  path.lineTo(BW/2, top+NH+0.02*s);
+  path.quadraticCurveTo(BW/2, top+NH, NW/2, top+NH*0.55);
+  path.lineTo(NW/2, top);
+  path.closePath();
+  // liquid keeps a world-horizontal surface
+  if(fill > 0.005){
+    fxc.save();
+    fxc.clip(path);
+    fxc.rotate(-tilt);
+    const liqTop = (0.5 - fill*0.96)*BH + Math.sin(t*6.5)*0.004*s;
+    fxc.fillStyle = ing.color;
+    fxc.globalAlpha = 0.85;
+    fxc.fillRect(-BH*1.2, liqTop, BH*2.4, BH*2.4);
+    fxc.globalAlpha = 0.35;
+    fxc.fillStyle = '#ffffff';
+    fxc.fillRect(-BH*1.2, liqTop, BH*2.4, 0.006*s);
+    fxc.globalAlpha = 1;
+    fxc.restore();
+  }
+  fxc.fillStyle = 'rgba(190,225,255,0.10)';
+  fxc.fill(path);
+  fxc.strokeStyle = 'rgba(214,238,255,0.95)';
+  fxc.lineWidth = 0.008*s;
+  fxc.stroke(path);
+  fxc.strokeStyle = 'rgba(255,255,255,0.45)';
+  fxc.lineWidth = 0.0045*s;
+  fxc.beginPath();
+  fxc.moveTo(-BW*0.30, top+NH+0.035*s);
+  fxc.lineTo(-BW*0.30, bot-0.04*s);
+  fxc.stroke();
+  fxc.font = `${0.05*s}px sans-serif`;
+  fxc.textAlign = 'center'; fxc.textBaseline = 'middle';
+  fxc.fillText(ing.em, 0, NH*0.55);
+  fxc.restore();
+  const mr = BH/2 + 0.004*s;
+  return { x: P.x + Math.sin(tilt)*mr, y: P.y - Math.cos(tilt)*mr };
+}
+
+function drawStream(m, FM, k, ing, t, s){
+  const cp = { x: m.x + (FM.x-m.x)*0.30, y: m.y - 0.04*s };
+  const N = 16, pts = [];
+  for(let i=0;i<=N;i++) pts.push(bez(m, cp, FM, i/N));
+  const w0 = 0.011*s*(0.35 + 0.8*k);
+  fxc.globalAlpha = 0.8;
+  fxc.fillStyle = ing.color;
+  fxc.beginPath();
+  for(let i=0;i<=N;i++){ const w = w0*(1-0.4*i/N); const pt = pts[i];
+    if(i===0) fxc.moveTo(pt.x-w, pt.y); else fxc.lineTo(pt.x-w, pt.y); }
+  for(let i=N;i>=0;i--){ const w = w0*(1-0.4*i/N); const pt = pts[i]; fxc.lineTo(pt.x+w, pt.y); }
+  fxc.closePath();
+  fxc.fill();
+  fxc.globalAlpha = 0.5;
+  fxc.strokeStyle = 'rgba(255,255,255,0.85)';
+  fxc.lineWidth = w0*0.35;
+  fxc.beginPath();
+  fxc.moveTo(pts[0].x, pts[0].y);
+  for(const pt of pts) fxc.lineTo(pt.x, pt.y);
+  fxc.stroke();
+  for(let i=0;i<4;i++){
+    const u = (t*1.8 + i/4)%1;
+    const pt = bez(m, cp, FM, u);
+    fxc.globalAlpha = 0.5;
+    fxc.fillStyle = '#fff';
+    fxc.beginPath(); fxc.arc(pt.x, pt.y, w0*0.5*(1-0.3*u), 0, 6.2832); fxc.fill();
+  }
+  fxc.globalAlpha = 1;
+}
+
+function drawChunk(pt, c, s, t){
+  const ing = ING[c.ing];
+  fxc.save();
+  fxc.translate(pt.x, pt.y);
+  fxc.rotate(c.spin + t*3);
+  if(c.ing === 'gold'){
+    fxc.shadowColor = ing.color; fxc.shadowBlur = 0.012*s;
+    fxc.fillStyle = ing.color;
+    fxc.beginPath(); fxc.arc(0, 0, 0.008*s, 0, 6.2832); fxc.fill();
+  } else if(c.ing === 'bub'){
+    fxc.strokeStyle = 'rgba(215,242,255,0.95)'; fxc.lineWidth = 0.0035*s;
+    fxc.beginPath(); fxc.arc(0, 0, 0.011*s, 0, 6.2832); fxc.stroke();
+  } else if(c.ing === 'star'){
+    fxc.shadowColor = ing.color; fxc.shadowBlur = 0.014*s;
+    fxc.fillStyle = ing.color;
+    fxc.beginPath();
+    for(let i=0;i<10;i++){
+      const r = (i%2===0 ? 0.014 : 0.006)*s, a = i*Math.PI/5 - Math.PI/2;
+      const x = Math.cos(a)*r, y = Math.sin(a)*r;
+      if(i===0) fxc.moveTo(x,y); else fxc.lineTo(x,y);
+    }
+    fxc.closePath(); fxc.fill();
+  } else { // jelly
+    fxc.strokeStyle = ing.color; fxc.fillStyle = ing.color; fxc.lineWidth = 0.003*s;
+    fxc.beginPath(); fxc.arc(0, 0, 0.013*s, Math.PI, 0); fxc.closePath(); fxc.fill();
+    for(let i=-1;i<=1;i++){
+      fxc.beginPath();
+      fxc.moveTo(i*0.007*s, 0.002*s);
+      fxc.quadraticCurveTo(i*0.009*s + 0.004*s*Math.sin(t*8+i), 0.012*s, i*0.007*s, 0.02*s);
+      fxc.stroke();
+    }
+  }
+  fxc.restore();
+}
+
+function splashAt(x, y, color, s, n){
+  for(let i=0;i<n;i++){
+    fxParticles.push({ x: x+(Math.random()-0.5)*0.02*s, y,
+      vx:(Math.random()-0.5)*0.5*s, vy:-(0.15+Math.random()*0.35)*s,
+      life:0.4+Math.random()*0.15, t0:0.5, c: color });
+  }
+}
+
+function drawFX(dt, t){
+  const W = innerWidth, H = innerHeight, s = Math.min(W, H);
+  fxc.clearRect(0, 0, W, H);
+  const p = state.pour;
+  const F = projScreen(0, 1.14, 0);
+  const FM = { x: F.x, y: F.y - 0.055*s };
+  if(state.mode === 'pour' && camShift > 0.04){
+    drawFunnel(F, FM, s, t, p.strength);
+    if(p.sel){
+      const P = { x: F.x - 0.24*s, y: F.y - 0.155*s };
+      const mouth = drawBottle(P, p.tilt, p.sel, state.bottles[p.sel], s, t);
+      if(p.strength > 0.03){
+        const ing = ING[p.sel];
+        if(ing.liquid){
+          drawStream(mouth, FM, p.strength, ing, t, s);
+          if(Math.random() < p.strength*0.85) splashAt(FM.x, FM.y, ing.color, s, 2);
+        } else if(t - lastChunkT > 0.09/Math.max(p.strength, 0.25)){
+          lastChunkT = t;
+          fxChunks.push({ u:0, ing:p.sel, dur:0.42+Math.random()*0.12, m:{...mouth}, spin:Math.random()*6 });
+        }
+      }
+    }
+  }
+  for(let i=fxChunks.length-1;i>=0;i--){
+    const c = fxChunks[i];
+    c.u += dt/c.dur;
+    if(c.u >= 1){
+      splashAt(FM.x, FM.y, ING[c.ing].color, s, 3);
+      plop();
+      fxChunks.splice(i,1);
+      continue;
+    }
+    const cp = { x: c.m.x + (FM.x-c.m.x)*0.30, y: c.m.y - 0.04*s };
+    drawChunk(bez(c.m, cp, FM, c.u), c, s, t);
+  }
+  for(let i=fxParticles.length-1;i>=0;i--){
+    const q = fxParticles[i];
+    q.life -= dt;
+    if(q.life <= 0){ fxParticles.splice(i,1); continue; }
+    q.x += q.vx*dt; q.y += q.vy*dt; q.vy += 2.2*s*dt;
+    fxc.globalAlpha = Math.max(q.life/q.t0, 0)*0.9;
+    fxc.fillStyle = q.c;
+    fxc.beginPath();
+    fxc.arc(q.x, q.y, 0.005*s*(q.life/q.t0 + 0.4), 0, 6.2832);
+    fxc.fill();
+  }
+  fxc.globalAlpha = 1;
 }
 
 // ============================================================
@@ -1033,6 +1380,10 @@ function frame(now){
   state.mixAmt = Math.max(0, state.mixAmt - dt*0.02);   // liquids very slowly settle
   state.flash = Math.max(0, state.flash - dt*3.0);
 
+  updatePour(dt);
+  const csTarget = state.mode==='pour' ? 0.40 : 0;
+  camShift += (csTarget - camShift) * Math.min(1, dt*5);
+
   if(state.started) evalDiscoveries();
 
   const R = qToMat3(state.quat);
@@ -1064,10 +1415,16 @@ function frame(now){
   gl.uniform1f(U.uGalaxy, active.galaxy?1:0);
   gl.uniform1f(U.uFlash, state.flash);
   gl.uniform1f(U.uSteps, marchSteps);
+  gl.uniform1f(U.uCamShift, camShift);
+  gl.uniform1f(U.uPour, state.pour.strength);
+  const tint = state.pour.sel ? ING[state.pour.sel].tint : [1,1,1];
+  gl.uniform3f(U.uPourTint, tint[0], tint[1], tint[2]);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+  drawFX(dt, t);
 }
 requestAnimationFrame(frame);
+window.__st = state;   // for automated tests
 </script>
 </body>
 </html>
