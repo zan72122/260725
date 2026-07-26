@@ -5,6 +5,14 @@ package.json
 # Reference imagery gathered for internal critique only — never redistributed.
 baby-care-3d/docs/reference/
 
-# Harness output that is regenerated on demand.
-baby-care-3d/docs/shots/console.log
+# Transient per-agent review renders. Regenerate with `node tools/shoot.mjs`.
+# docs/shots/ holds the canonical published set.
+baby-care-3d/docs/probe/
 baby-care-3d/docs/review/
+baby-care-3d/docs/checkpoint/
+baby-care-3d/docs/fix-*/
+baby-care-3d/docs/shots/console.log
+
+# Scratch scripts agents write while iterating.
+baby-care-3d/_*.mjs
+baby-care-3d/_*.html
