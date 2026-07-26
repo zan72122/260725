@@ -1570,7 +1570,7 @@ export function makePictureBook(res, { width = 0.11, depth = 0.14, spreads = 4 }
   leaf.castShadow = true;
   leaf.visible = false;
   group.add(leaf);
-  setHalfUV(leaf, false);   // leaf shows the right-hand page while it lifts
+  // the leaf carries the right-hand page's art while it lifts
   {
     const uv = leafGeo.attributes.uv;
     const cols = NX + 1, rows = NZ + 1;

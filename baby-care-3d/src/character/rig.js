@@ -226,8 +226,11 @@ export class Rig {
       b.userData.rest = b.position.clone();
       b.userData.restQ = b.quaternion.clone();
     }
-    this.skeleton = new THREE.Skeleton(this.order);
+    // The bind-pose inverses are captured by the Skeleton constructor from the
+    // bones' *current* world matrices, so the hierarchy has to be resolved
+    // first — otherwise every inverse is identity and the mesh explodes.
     this.root.updateMatrixWorld(true);
+    this.skeleton = new THREE.Skeleton(this.order);
 
     // half-angle helpers, resolved once
     this.helpers = this.table

@@ -50,19 +50,19 @@ const FOOD_IDS = Object.keys(FOODS);
 
 /* Tray-local slot positions (metres, relative to the tray top centre). */
 const SLOTS = [
-  [-0.150, 0.000, 0.055],   // bottle   (standing, back left)
-  [0.150, 0.000, 0.050],   // juice    (standing, back right)
-  [-0.105, 0.000, -0.055],   // porridge bowl
-  [0.020, 0.000, -0.070],   // apple
-  [-0.020, 0.000, 0.085],   // banana
-  [0.115, 0.000, -0.055],   // riceball
-  [0.075, 0.000, 0.075]    // cookie
+  [-0.165, 0.000, -0.050],   // bottle   (standing, back left)
+  [0.170, 0.000, -0.055],   // juice    (standing, back right)
+  [-0.080, 0.000, 0.075],   // porridge bowl (front left)
+  [0.080, 0.000, 0.078],   // apple    (front right)
+  [0.000, 0.000, -0.078],   // banana   (back centre)
+  [0.175, 0.000, 0.072],   // riceball (front far right)
+  [-0.180, 0.000, 0.076]    // cookie   (front far left)
 ];
 
 const TRAY_Y = 0.452;        // tray top surface, chair-local
 const TRAY_Z = 0.170;
-const TRAY_W = 0.44;
-const TRAY_D = 0.30;
+const TRAY_W = 0.48;
+const TRAY_D = 0.32;
 
 const MOUTH_REACH = 0.085;   // "close enough to eat" radius
 const AAN_REACH = 0.19;      // "あーん" mouth-open radius
@@ -102,7 +102,7 @@ export class FeedActivity {
     this._vFall = new THREE.Vector3();
     this._vLocal = new THREE.Vector3();
     this._quat = new THREE.Quaternion();
-    this._up = new THREE.Vector3();
+    this._upVec = new THREE.Vector3();
     this._mat4 = new THREE.Matrix4();
     this._plane = new THREE.Plane();
     this._rand = S.rng(20260726);
@@ -153,7 +153,7 @@ export class FeedActivity {
         TRAY_Z + SLOTS[FOODS[id].slot][2]);
       g.position.copy(g.userData.slot);
       g.userData.homeQuat = g.quaternion.clone();
-      const proxy = S.hitProxy(g.userData.hit || 0.055, 'food-hit');
+      const proxy = S.hitProxy(g.userData.hit || 0.048, 'food-hit');
       proxy.position.y = g.userData.hitY || 0;
       g.add(proxy);
       this.root.add(g);
@@ -355,7 +355,9 @@ export class FeedActivity {
 
     bin.position.set(0.34, 0, TRAY_Z + 0.10);
     bin.userData.pickId = 'bin';
-    bin.add(S.hitProxy(0.11, 'bin-hit')).position.y = 0.09;
+    const binHit = S.hitProxy(0.11, 'bin-hit');
+    binHit.position.y = 0.09;
+    bin.add(binHit);
     this.root.add(bin);
     this.bin = bin;
     this.binOpen = 0;
@@ -379,8 +381,9 @@ export class FeedActivity {
     collar.position.set(0, 0.088, 0);
     group.add(collar);
 
-    group.position.set(-0.155, 0.42, TRAY_Z - 0.055);
-    group.rotation.x = 0.25;
+    // draped over the front-left corner of the tray, where a child can see it
+    group.position.set(-0.135, 0.505, TRAY_Z + TRAY_D / 2 - 0.025);
+    group.rotation.x = 0.62;
     group.userData.pickId = 'bib';
     group.add(S.hitProxy(0.10, 'bib-hit'));
     this.root.add(group);
@@ -520,8 +523,8 @@ export class FeedActivity {
     g.add(teat);
 
     g.userData.rest = 0;
-    g.userData.hit = 0.075;
-    g.userData.hitY = 0.09;
+    g.userData.hit = 0.062;
+    g.userData.hitY = 0.085;
     return g;
   }
 
@@ -547,7 +550,7 @@ export class FeedActivity {
 
     this.milk.updateWorldMatrix(true, false);
     const q = this.milk.getWorldQuaternion(this._quat).invert();
-    const up = this._up.set(0, 1, 0).applyQuaternion(q);
+    const up = this._upVec.set(0, 1, 0).applyQuaternion(q);
     const uy = Math.abs(up.y) < 0.25 ? 0.25 * Math.sign(up.y || 1) : up.y;
 
     for (const i of this.milkTop) {
@@ -611,7 +614,7 @@ export class FeedActivity {
     this.packDent = 0;
 
     g.userData.rest = 0.043;
-    g.userData.hit = 0.062;
+    g.userData.hit = 0.055;
     return g;
   }
 
@@ -705,7 +708,7 @@ export class FeedActivity {
     this.spoon = spoon;                 // parented to the rig root in build()
 
     g.userData.rest = 0;
-    g.userData.hit = 0.07;
+    g.userData.hit = 0.062;
     g.userData.hitY = 0.03;
     return g;
   }
@@ -795,7 +798,7 @@ export class FeedActivity {
     this.appleCore = core;
 
     g.userData.rest = R * 0.92;
-    g.userData.hit = 0.062;
+    g.userData.hit = 0.050;
     this.appleBites = 0;
     return g;
   }
@@ -857,7 +860,7 @@ export class FeedActivity {
     this.peelCount = 0;
     this.bananaBites = 0;
     g.userData.rest = L * 0.5 + 0.006;
-    g.userData.hit = 0.07;
+    g.userData.hit = 0.055;
     g.rotation.z = 0.15;
     return g;
   }
@@ -992,7 +995,7 @@ export class FeedActivity {
     this.noriFlake = flake;
 
     g.userData.rest = R * 0.55;
-    g.userData.hit = 0.058;
+    g.userData.hit = 0.048;
     this.riceballBites = 0;
     return g;
   }
@@ -1052,7 +1055,7 @@ export class FeedActivity {
 
     g.rotation.x = -0.06;
     g.userData.rest = 0.006;
-    g.userData.hit = 0.055;
+    g.userData.hit = 0.046;
     this.cookieBites = 0;
     return g;
   }
@@ -1153,6 +1156,26 @@ export class FeedActivity {
     if (this.ctx.baby?.group) this.targets.push(this.ctx.baby.group);
   }
 
+  /**
+   * 手前優先ピック. A real mesh always beats an invisible hit proxy, and the
+   * tray counts as background, so tapping a crowded tray picks the thing the
+   * child can actually see — while a near miss still lands on the generous
+   * proxy instead of doing nothing.
+   */
+  _pick(p) {
+    const hits = this.picker.cast(p, this.targets);
+    let best = null;
+    for (const h of hits) {
+      const node = S.owner(h.object, 'pickId');
+      if (!node) continue;
+      const id = node.userData.pickId;
+      const rank = (h.object.userData?.proxy ? 1 : 0) + (id === 'tray' ? 4 : 0);
+      if (!best || rank < best.rank) best = { hit: h, node, id, rank };
+      if (best.rank === 0) break;
+    }
+    return best;
+  }
+
   onPointer(p) {
     if (!this.root || !this._entered) return;
     if (p.type === 'down') this._down(p);
@@ -1162,10 +1185,11 @@ export class FeedActivity {
 
   _down(p) {
     const ctx = this.ctx;
-    const hit = this.picker.first(p, this.targets);
+    const best = this._pick(p);
+    const hit = best?.hit || this.picker.first(p, this.targets);
     if (!hit) return;
-    const node = S.owner(hit.object, 'pickId');
-    const id = node?.userData?.pickId;
+    const node = best?.node;
+    const id = best?.id;
 
     // Wiping wins over everything — it is the "undo" a child reaches for.
     if (this.wipeOut) { this._wipeAt(p, hit); return; }

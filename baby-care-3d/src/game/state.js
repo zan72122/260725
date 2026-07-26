@@ -45,6 +45,7 @@ export const DECAY = {
 export const LOW = 0.34;
 
 const clamp01 = (v) => (typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export class State {
   constructor({ autosave = true, decay = true } = {}) {
@@ -67,6 +68,11 @@ export class State {
 
     this._listeners = new Map();
     this._decayAcc = 0;
+
+    /** Bookkeeping so the UI can tell "here is a delta" from "here is the new
+     *  total, which I already applied" when it is handed a star count. */
+    this.lastStarDelta = 0;
+    this._lastStarAt = -1e9;
 
     this.load();
   }
@@ -175,6 +181,7 @@ export class State {
     const delta = Math.max(0, Math.round(n));
     if (!delta) return this.stars;
     this.stars += delta;
+    this._noteStarChange(delta);
     this.emit('star', { stars: this.stars, delta });
     this._syncStickers();
     this._touch();
@@ -187,9 +194,20 @@ export class State {
     const delta = next - this.stars;
     if (!delta) return;
     this.stars = next;
+    this._noteStarChange(delta);
     this.emit('star', { stars: this.stars, delta });
     this._syncStickers();
     this._touch();
+  }
+
+  /** Seconds since the star total last moved (Infinity if it never has). */
+  starChangedWithin(seconds) {
+    return (now() - this._lastStarAt) / 1000 <= seconds;
+  }
+
+  _noteStarChange(delta) {
+    this.lastStarDelta = delta;
+    this._lastStarAt = now();
   }
 
   /** Directly unlock a sticker by id (or index). Idempotent. */
@@ -208,7 +226,7 @@ export class State {
   /** Stars still needed for the next sticker (0 when the set is complete). */
   starsToNextSticker() {
     if (this.stickers.length >= this.stickerIds.length) return 0;
-    return STARS_PER_STICKER - (this.stars % STARS_PER_STICKER || 0) || STARS_PER_STICKER;
+    return STARS_PER_STICKER - (this.stars % STARS_PER_STICKER);
   }
 
   _syncStickers() {

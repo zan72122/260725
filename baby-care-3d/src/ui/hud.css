@@ -418,6 +418,8 @@ button {
    from the DOM order too (title screen is the previous sibling of #hud). */
 #title-screen.hidden ~ #hud { opacity: 1; visibility: visible; }
 #hud.harness-hidden { display: none !important; }
+/* UI#setHud(false) — must beat the sibling reveal rule below. */
+#hud.is-off { opacity: 0 !important; visibility: hidden !important; }
 #hud > * { pointer-events: none; }
 /* Interactive children still need events (the `#hud >` rule out-specifies
    plain class selectors, so re-enable them explicitly). */

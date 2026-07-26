@@ -138,10 +138,20 @@ export class FoamSystem {
       const d = b.local.distanceTo(_p);
       if (d < bestD) { bestD = d; best = b; }
     }
-    const merge = maxRadius * 1.15;
+    // Tight merge radius: a stroke should lay down a *trail* of blobs that
+    // then swell, not pour everything into one growing ball.
+    const merge = maxRadius * 0.62;
     if (best && bestD < merge) {
       best.target = Math.min(maxRadius, best.target + amount);
       best.stamp = this.time;
+      // neighbours pick up a little too, which is what fuses separate dabs
+      // into one continuous mass instead of a row of beads
+      for (const b of this.blobs) {
+        if (b === best || b.region !== region) continue;
+        if (b.local.distanceTo(_p) < merge * 2.4) {
+          b.target = Math.min(b.max, b.target + amount * 0.30);
+        }
+      }
       return best;
     }
     return this._spawn(region, _p, amount, maxRadius);

@@ -318,6 +318,10 @@ export class WindowUnit {
     parts.push(rbox(w + 0.12, 0.03, 0.16, [0, -hh - 0.03, -t - 0.06], [0.18, 0, 0], 0.008, 2));
 
     const frame = mesh(mergeAll(parts), M.trim, 'windowFrame');
+    // The wall it sits in deliberately does not cast (see room.js), so a
+    // shadow-casting frame would drop a lone rectangle onto a floor that is
+    // otherwise unshadowed. The mullion bars are drawn into the beam instead.
+    frame.castShadow = false;
     this.group.add(frame);
     this._pick.push(frame);
 
@@ -343,7 +347,7 @@ export class WindowUnit {
 
     // snow ledge on the outer sill — hidden unless it is actually snowing
     const ledge = mesh(rbox(w + 0.10, 0.05, 0.15, [0, -hh - 0.018, -t - 0.065], [0.18, 0, 0], 0.022, 2),
-      MAT.makePaint({ color: 0xfdfbff, repeat: 2, seed: 71, gloss: 0.2 }), 'snowLedge');
+      M.snow, 'snowLedge');
     ledge.visible = false;
     ledge.castShadow = false;
     this.group.add(ledge);

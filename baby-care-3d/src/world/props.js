@@ -336,27 +336,35 @@ export class ShadowField {
 export function palette() {
   const P = {};
 
+  // Two nursery woods and one paint tone are all this room needs; every other
+  // surface is the same generator with a different repeat and colour. That
+  // matters twice over — a 512² procedural PBR set costs real milliseconds to
+  // synthesise at boot, and re-using one keeps VRAM flat.
+  const WOOD = { seed: 3, ringScale: 30, satin: 0.42 };
+  const PAINT = { seed: 43, gloss: 0.3 };
+
   P.wall = MAT.makeWall({ base: 0xf7ece3, tint: 0xe4d3c6, repeat: 0.8, seed: 11 });
   P.floor = MAT.makeWood({
     light: 0xdfba90, dark: 0xa5723f, planks: 7, repeat: 2.4, seed: 5,
     ringScale: 44, clearcoat: 0.26, satin: 0.5
   });
-  P.trim = MAT.makePaint({ color: 0xfffaf4, repeat: 1.1, seed: 43, gloss: 0.45 });
-  P.ceiling = MAT.makePaint({ color: 0xfff8f1, repeat: 0.5, seed: 47, gloss: 0.1 });
-  P.dark = MAT.makePaint({ color: 0x6d5a5c, repeat: 0.8, seed: 49, gloss: 0.08 });
 
-  // Two furniture woods: pale beech for the baby pieces, warmer oak for the
-  // big case goods, so the room doesn't read as a single flat-pack set.
-  P.beech = MAT.makeWood({ light: 0xe7c79c, dark: 0xbb8d5c, repeat: 1.4, seed: 3, ringScale: 30, clearcoat: 0.4 });
-  P.oak = MAT.makeWood({ light: 0xd3a271, dark: 0x8a5a30, repeat: 1.2, seed: 13, ringScale: 22, clearcoat: 0.3 });
-  // Hand-worn wood: knobs, crib rails, the toy-box lid edge. Rougher, darker,
-  // no lacquer left — this is where the room stops looking brand new.
-  P.worn = MAT.makeWood({
-    light: 0xd6ab7d, dark: 0x8f6337, repeat: 3.0, seed: 9,
-    ringScale: 18, clearcoat: 0.05, satin: 0.74
-  });
-  P.paintedWhite = MAT.makePaint({ color: 0xfdf5ef, repeat: 1.5, seed: 51, gloss: 0.5 });
-  P.paintedMint = MAT.makePaint({ color: 0xd9e9df, repeat: 1.5, seed: 53, gloss: 0.45 });
+  P.trim = unshare(MAT.makePaint({ color: 0xfffaf4, ...PAINT }), 1.1, { clearcoat: 0.45 });
+  P.ceiling = unshare(MAT.makePaint({ color: 0xfff8f1, ...PAINT }), 0.5, { clearcoat: 0.08 });
+  P.dark = unshare(MAT.makePaint({ color: 0x6d5a5c, ...PAINT }), 0.8, { clearcoat: 0.05 });
+  P.paintedWhite = unshare(MAT.makePaint({ color: 0xfdf5ef, ...PAINT }), 1.5, { clearcoat: 0.55 });
+  P.paintedMint = unshare(MAT.makePaint({ color: 0xd9e9df, ...PAINT }), 1.5, { clearcoat: 0.5 });
+  P.snow = unshare(MAT.makePaint({ color: 0xfdfbff, ...PAINT }), 2.2, { clearcoat: 0.25, roughness: 0.85 });
+  P.paper = unshare(MAT.makePaint({ color: 0xffffff, ...PAINT }), 3, { clearcoat: 0.06 });
+
+  // Pale beech for the baby furniture, warmer oak for the big case goods, and
+  // a hand-worn version for everything fingers actually touch.
+  P.beech = unshare(MAT.makeWood({ light: 0xe7c79c, dark: 0xbb8d5c, ...WOOD, clearcoat: 0.4 }), 1.4);
+  P.oak = unshare(MAT.makeWood({ light: 0xcb9a68, dark: 0x855628, ...WOOD, clearcoat: 0.28 }), 1.1);
+  // Knobs, cot rails, the toy-box pull: rougher, darker, the lacquer gone.
+  P.worn = unshare(MAT.makeWood({ light: 0xc79a6d, dark: 0x7d5528, ...WOOD, clearcoat: 0.04 }), 3.0,
+    { roughness: 1.0, clearcoatRoughness: 0.8 });
+
   P.metal = MAT.makeMetal({ color: 0xcfc8bf, roughness: 0.34 });
   P.brass = MAT.makeMetal({ color: 0xceac78, roughness: 0.3 });
   P.ceramic = MAT.makeCeramic({ color: 0xf3e9dd, repeat: 1.5, seed: 31 });
@@ -368,19 +376,18 @@ export function palette() {
   P.plastic = MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 37, matte: 0.4 });
   P.plush = MAT.makeCloth({ color: 0xffffff, weave: 'knit', threads: 96, repeat: 6, seed: 17, normalScale: 1.2 });
   P.cloth = MAT.makeCloth({ color: 0xffffff, weave: 'plain', threads: 120, repeat: 5, seed: 7 });
-  P.paper = MAT.makePaint({ color: 0xffffff, repeat: 3, seed: 57, gloss: 0.06 });
   P.carpet = MAT.makeCarpet({ color: 0xffffff, repeat: 5, seed: 19, density: 170 });
-  P.leaf = MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 39, matte: 0.62, clearcoat: 0.18 });
+  P.leaf = unshare(MAT.makePlastic({ color: 0xffffff, repeat: 2, seed: 37, matte: 0.4, clearcoat: 0.18 }), 2.6);
   P.leaf.side = THREE.DoubleSide;
   for (const k of ['plastic', 'plush', 'cloth', 'paper', 'carpet', 'leaf']) P[k].vertexColors = true;
 
-  P.curtain = MAT.makeCloth({
-    color: 0xf8e2e4, weave: 'plain', threads: 150, repeat: 3, seed: 23,
+  P.curtain = unshare(MAT.makeCloth({
+    color: 0xf8e2e4, weave: 'plain', threads: 120, repeat: 3, seed: 7,
     sheen: 1.0, roughness: 0.96, normalScale: 0.7
-  });
+  }), 3.2);
   P.curtain.side = THREE.DoubleSide;
 
-  P.shade = MAT.makeCloth({ color: 0xfff2e4, threads: 150, repeat: 2, seed: 61, sheen: 0.5 });
+  P.shade = unshare(MAT.makeCloth({ color: 0xfff2e4, threads: 120, repeat: 2, seed: 7, sheen: 0.5 }), 2.0);
   P.shade.side = THREE.DoubleSide;
   P.shade.emissive = new THREE.Color(0xffc98a);
   P.shade.emissiveIntensity = 0;
@@ -390,6 +397,25 @@ export function palette() {
   });
 
   return P;
+}
+
+/**
+ * materials.js hands back the *shared, memoised* texture objects, so two
+ * materials built from the same generator would fight over `repeat`. Cloning
+ * gives each material its own transform while three still uploads the pixels
+ * once (the GPU upload is keyed on `texture.source`, which clones share).
+ */
+function unshare(mat, repeat, props) {
+  for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']) {
+    if (mat[k]) {
+      const t = mat[k].clone();
+      t.needsUpdate = true;
+      mat[k] = t;
+      if (repeat !== undefined) t.repeat.set(repeat, repeat);
+    }
+  }
+  if (props) Object.assign(mat, props);
+  return mat;
 }
 
 /* ---------------------------------------------------------------- crib --- */
@@ -469,8 +495,10 @@ export function buildCrib(M) {
   const pipeMesh = mesh(tint(pipe, 0xf3c9cd), M.cloth, 'cribPiping');
   g.add(pipeMesh);
 
-  g.add(mesh(tint(drapedBlanket(0.66, 0.66, 0.19, 0.30), 0xf6d3da),
-    M.plush, 'cribBlanket').translateX(0.26).translateY(low + 0.13));
+  // the blanket only folds over the near long edge — enough to see the drop
+  // and the mattress side, without pushing through the rail behind it
+  g.add(mesh(tint(drapedBlanket(0.60, 0.56, 0.22, 0.105), 0xf6d3da),
+    M.plush, 'cribBlanket').translateX(0.24).translateY(low + 0.128));
 
   g.userData.pick = [frame, mat];
   return g;

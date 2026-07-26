@@ -624,7 +624,7 @@ export class PlayActivity {
     ctx.fx?.burst?.('heart', from, 3);
     this._bumpHappy(0.06);
     this._star(1);
-    setTimeout(() => { if (this.ballState === 'thrown') this.ballState = 'rolling'; }, 300);
+    this._after(0.3, () => { if (this.ballState === 'thrown') this.ballState = 'rolling'; });
   }
 
   /* ------------------------------------------------------------ blocks --- */
@@ -986,6 +986,7 @@ export class PlayActivity {
     this.balloon.update(dt, this.t);
 
     // string: the knot is pinned to the balloon, the rest hangs
+    this.balloon.group.updateMatrixWorld(true);
     this.balloon.knotAnchor.getWorldPosition(this._v);
     if (this.ropeLocal) {
       this.ropeLocal.pin(0, this._v);

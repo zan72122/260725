@@ -604,3 +604,187 @@ export function makeRainFilm({ seed = 29, speed = 0.09 } = {}) {
   mat.userData.setAmount = (a) => { mat.opacity = 0.9 * a; mat.visible = a > 0.01; };
   return mat;
 }
+
+/* ============================================================================
+ * Character additions (appended — nothing above this line was modified)
+ * ========================================================================== */
+
+/** Small GLSL helper: cheap 3-octave value noise, shared by the skin extras. */
+const _NOISE_GLSL = /* glsl */`
+  float bcHash(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+  float bcNoise(vec2 p){
+    vec2 i = floor(p), f = fract(p);
+    f = f*f*(3.0-2.0*f);
+    float a = bcHash(i), b = bcHash(i+vec2(1,0)), c = bcHash(i+vec2(0,1)), d = bcHash(i+vec2(1,1));
+    return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+  }
+  float bcFbm(vec2 p){ return bcNoise(p)*0.55 + bcNoise(p*2.3)*0.30 + bcNoise(p*5.1)*0.15; }
+`;
+
+/**
+ * Baby skin: makeSkin() plus per-zone grime and wetness driven by a vertex
+ * attribute. The geometry carries `aZone` = (face, hands, feet, body) soft
+ * masks, so `uDirt` darkens exactly the region that actually got dirty and
+ * fades out naturally at its edges — no decals, no second texture set.
+ */
+export function makeBabySkin(opts = {}) {
+  const mat = makeSkin(opts);
+  const extra = {
+    uDirt:      { value: new THREE.Vector4(0, 0, 0, 0) },
+    uDirtColor: { value: new THREE.Color(0x6a4a2e) },
+    uWet:       { value: 0 },
+    uBlush:     { value: 0 },
+    uGrimeScale:{ value: 9.0 }
+  };
+  Object.assign(mat.userData.uniforms, extra);
+  const base = mat.onBeforeCompile;
+
+  mat.onBeforeCompile = (shader, renderer) => {
+    base(shader, renderer);
+    Object.assign(shader.uniforms, extra);
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        attribute vec4 aZone;
+        varying vec4 vBabyZone;
+        varying vec2 vBabyUv;
+      `)
+      .replace('#include <begin_vertex>', /* glsl */`
+        #include <begin_vertex>
+        vBabyZone = aZone;
+        vBabyUv = uv;
+      `);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        varying vec4 vBabyZone;
+        varying vec2 vBabyUv;
+        uniform vec4  uDirt;
+        uniform vec3  uDirtColor;
+        uniform float uWet;
+        uniform float uGrimeScale;
+        ${_NOISE_GLSL}
+      `)
+      // after the albedo is resolved, before lighting
+      .replace('#include <color_fragment>', /* glsl */`
+        #include <color_fragment>
+        float bcZone = clamp(dot(vBabyZone, uDirt), 0.0, 1.4);
+        float bcN = bcFbm(vBabyUv * uGrimeScale);
+        // smudges, not a flat tint: the noise decides where grime actually sits
+        float bcDirt = smoothstep(0.30, 0.92, bcZone * (0.45 + bcN * 1.05));
+        diffuseColor.rgb = mix(diffuseColor.rgb,
+                               uDirtColor * (0.55 + bcN * 0.55),
+                               bcDirt * 0.88);
+        // wet skin is darker and a touch more saturated
+        diffuseColor.rgb *= mix(1.0, 0.86, uWet);
+      `)
+      .replace('#include <roughnessmap_fragment>', /* glsl */`
+        #include <roughnessmap_fragment>
+        roughnessFactor = clamp(roughnessFactor + bcDirt * 0.30 - uWet * 0.45, 0.04, 1.0);
+      `);
+  };
+  mat.customProgramCacheKey = () => 'baby-skin-sss';
+  mat.userData.setDirt = (v) => extra.uDirt.value.copy(v);
+  mat.userData.setWet = (v) => { extra.uWet.value = v; };
+  return mat;
+}
+
+/** Soft baby hair cards: makeHair() with the strand alpha actually attached. */
+export function makeHairCards({
+  color = 0x8a6242, sheenColor = 0xffd9a8, strands = 9, seed = 5
+} = {}) {
+  const maps = TEX.hairStrand({ strands, seed });
+  const mat = makeHair({ color, sheenColor });
+  mat.map = maps.map;
+  mat.alphaMap = maps.alphaMap;
+  mat.normalMap = maps.normalMap;
+  mat.normalScale = new THREE.Vector2(0.55, 0.55);
+  mat.alphaTest = 0.42;
+  mat.depthWrite = true;
+  mat.needsUpdate = true;
+  return mat;
+}
+
+/** Opaque scalp layer under the cards, so no scalp shows through partings. */
+export function makeScalp({ color = 0x6f4c33 } = {}) {
+  return new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color),
+    roughness: 0.72, metalness: 0,
+    sheen: 0.9, sheenColor: new THREE.Color(0xffd9a8), sheenRoughness: 0.55,
+    envMapIntensity: 0.9
+  });
+}
+
+/** A water droplet clinging to skin. */
+export function makeDroplet({ tint = 0xd8f0ff } = {}) {
+  return memo('droplet' + tint, () => new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(tint),
+    transparent: true, opacity: 0.62,
+    roughness: 0.02, metalness: 0,
+    transmission: 0.9, thickness: 0.003, ior: 1.333,
+    clearcoat: 1, clearcoatRoughness: 0,
+    envMapIntensity: 2.4, depthWrite: false
+  }));
+}
+
+/** A tear: slightly thicker and brighter than a bath droplet, so it reads. */
+export function makeTear() {
+  return memo('tear', () => new THREE.MeshPhysicalMaterial({
+    color: 0xe6f6ff, transparent: true, opacity: 0.78,
+    roughness: 0.02, metalness: 0, transmission: 0.85,
+    thickness: 0.002, ior: 1.333, clearcoat: 1, clearcoatRoughness: 0,
+    envMapIntensity: 2.6, depthWrite: false
+  }));
+}
+
+/** Wet, dark mouth interior. Rendered back-side: we only ever see its inside. */
+export function makeMouthInterior({ color = 0x7d2630 } = {}) {
+  return memo('mouth' + color, () => new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color), roughness: 0.42, metalness: 0,
+    clearcoat: 0.7, clearcoatRoughness: 0.25, side: THREE.BackSide
+  }));
+}
+
+export function makeTongue({ color = 0xe0707e } = {}) {
+  return memo('tongue' + color, () => new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color), roughness: 0.28, metalness: 0,
+    clearcoat: 0.95, clearcoatRoughness: 0.10, sheen: 0.4,
+    sheenColor: new THREE.Color(0xffc0cb)
+  }));
+}
+
+export function makeTooth() {
+  return memo('tooth', () => new THREE.MeshPhysicalMaterial({
+    color: 0xfffdf6, roughness: 0.16, metalness: 0,
+    clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2
+  }));
+}
+
+/** Lash / brow hair: soft, slightly translucent, never jet black on a baby. */
+export function makeLash({ color = 0x4b3428, opacity = 1 } = {}) {
+  return new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(color), roughness: 0.5, metalness: 0,
+    sheen: 0.85, sheenColor: new THREE.Color(0xb08d6a), sheenRoughness: 0.45,
+    side: THREE.DoubleSide, transparent: opacity < 1, opacity
+  });
+}
+
+/** Cheek blush decal — a soft radial wash that hugs the cheek. */
+export function makeBlush({ color = 0xff7d96 } = {}) {
+  return new THREE.MeshBasicMaterial({
+    map: TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 }),
+    color: new THREE.Color(color),
+    transparent: true, opacity: 0, depthWrite: false
+  });
+}
+
+/** The specular catchlight disc that sits on the cornea. */
+export function makeCatchlight({ opacity = 0.85 } = {}) {
+  return new THREE.MeshBasicMaterial({
+    map: TEX.radialSprite({ size: 64, power: 1.5 }),
+    transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, opacity, toneMapped: false
+  });
+}

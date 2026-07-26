@@ -175,9 +175,15 @@ export class UI {
     const s = this.state;
     s.on('meter', ({ name, value }) => { this._paintMeter(name, value); this._refreshNeeds(); });
     s.on('star', ({ stars, delta }) => {
+      if (delta <= 0) { this._paintStars(stars, false); return; }
       /* While stars are in the air the counter ticks up as each one lands. */
-      if (this._flights.length && delta > 0) return;
-      this._paintStars(stars, delta > 0);
+      if (this._flights.length) return;
+      /* Otherwise give ui.star() a beat to launch a flight before snapping. */
+      this._cancelStarSync?.();
+      this._cancelStarSync = this.after(0.3, () => {
+        this._cancelStarSync = null;
+        if (!this._flights.length) this._paintStars(this.state.stars, true);
+      });
     });
     s.on('sticker', ({ id }) => this._onStickerUnlocked(id));
     s.on('muted', () => this._paintSound());
@@ -194,8 +200,9 @@ export class UI {
     if (!(dt > 0)) dt = 0;
     this._time += dt;
 
-    /* Needs drift on the same clock as the render loop. */
-    this.state.update?.(dt);
+    /* Needs drift on the same clock as the render loop — but only once the
+       child is actually playing, never while the title screen is up. */
+    if (this.started) this.state.update?.(dt);
 
     /* Scheduled work (toast lifetimes, celebration beats, …). */
     if (this._timers.length) {
@@ -229,7 +236,8 @@ export class UI {
     this._sfx('start');
     this.els.title?.classList.add('hidden');
     this.els.hud.classList.add('is-on');
-    this.app.setActivity?.('play');
+    const p = this.app.setActivity?.('play');
+    if (p && typeof p.catch === 'function') p.catch((err) => console.error('[ui] first activity failed', err));
     this.after(1.1, () => this.prompt('あかちゃんと あそぼう！', { icon: 'balloon' }));
   }
 
@@ -262,6 +270,10 @@ export class UI {
       btn.classList.toggle('is-active', key === name);
     }
     this.setMood(ACTIVITY_MOOD[name] || 'day');
+  }
+
+  /** Drop every transient hint (prompt, tools, world labels) at once. */
+  clearAll() {
     this.clearTools();
     this.hidePrompt();
     this.clearLabels();
@@ -323,10 +335,20 @@ export class UI {
    */
   star(n = 1, opts = {}) {
     if (opts.absolute) { this.state.setStars(n); return this.state.stars; }
-    const delta = Math.max(1, Math.round(Number(n) || 1));
+
+    const value = Math.max(0, Math.round(Number(n) || 0));
+    if (!value) return this.state.stars;
+
+    /* Some callers (activities/_shared.js `award()`) patch State first and then
+       hand us the new *total*; others hand us a delta. If the number we were
+       given is exactly the total State just moved to, it is an echo — animate
+       it, but do not double-count. */
+    const echo = value === this.state.stars && this.state.starChangedWithin?.(0.6);
+    const delta = echo ? Math.max(1, this.state.lastStarDelta || 1) : value;
+
     this._sfx('star');
     this._flyStar(opts.from ?? opts.at, delta);
-    this.state.addStars(delta);
+    if (!echo) this.state.addStars(delta);
     return this.state.stars;
   }
 
@@ -347,7 +369,12 @@ export class UI {
   _flyStar(from, delta) {
     const target = this._elCenter(this.els.starBox?.querySelector('.star-box__icon'));
     const p0 = this._toScreen(from) || this._lastPointer || { x: innerWidth / 2, y: innerHeight * 0.45 };
-    if (this.harness || !target) { this._paintStars(this.state.stars + delta, true); return; }
+    this._cancelStarSync?.();
+    this._cancelStarSync = null;
+    if (this.harness || !target) {
+      this.after(0.02, () => this._paintStars(this.state.stars, true));
+      return;
+    }
 
     /* One star per point, staggered and jittered so a batch reads as a burst. */
     const n = Math.min(delta, 5);
@@ -689,7 +716,7 @@ export class UI {
   setHud(visible) {
     if (!this.els?.hud) return;
     this.els.hud.classList.toggle('is-on', !!visible);
-    this.els.hud.classList.toggle('harness-hidden', !visible && this.harness);
+    this.els.hud.classList.toggle('is-off', !visible);
   }
 
   _paintSound() {

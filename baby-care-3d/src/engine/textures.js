@@ -809,3 +809,66 @@ export function quilted({
     };
   });
 }
+
+/* ============================================================================
+ * Character additions (appended — nothing above this line was modified)
+ * ========================================================================== */
+
+/**
+ * Alpha-tested hair card. Alpha carves the quad into tapered strands that
+ * thin out toward the tip, which is what stops a hair card reading as a
+ * rectangle of hair-coloured plastic. RGB carries root-to-tip shading.
+ */
+export function hairStrand({ strands = 9, seed = 5, size = 256, wisp = 0.55 } = {}) {
+  return cached(`hair:${strands}:${seed}:${wisp}`, () => {
+    const centres = [];
+    for (let i = 0; i < strands; i++) {
+      centres.push({
+        u: (i + 0.5) / strands + (hash2(i, 0, seed) - 0.5) * (0.55 / strands),
+        w: (0.30 + hash2(i, 1, seed) * 0.42) / strands,
+        drift: (hash2(i, 2, seed) - 0.5) * 0.16,
+        len: 0.62 + hash2(i, 3, seed) * 0.38
+      });
+    }
+    const alpha = (u, v) => {
+      let a = 0;
+      for (const c of centres) {
+        // strands bow sideways as they fall and taper to nothing at the tip
+        const cu = c.u + c.drift * v * v;
+        const taper = Math.max(0, 1 - Math.pow(v / c.len, 2.1));
+        const w = c.w * taper;
+        if (w <= 0) continue;
+        const d = Math.abs(u - cu) / w;
+        a = Math.max(a, Math.max(0, 1 - d * d));
+      }
+      // soften the card's own top edge so roots blend into the scalp
+      return a * (0.35 + 0.65 * smooth(Math.min(1, v * 6)));
+    };
+    const map = generate(size, (u, v, out) => {
+      const a = alpha(u, v);
+      // brighter along the strand's spine and toward the tip: fake anisotropy
+      const shade = 0.62 + a * 0.30 + v * 0.22 + fbm(u, v, 90, 3, seed) * 0.10;
+      out[0] = out[1] = out[2] = Math.min(1, shade);
+      out[3] = a;
+    });
+    const t = toTexture(map, { srgb: true });
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    const nrm = normalFromHeight(size, 1.1, (u, v) => alpha(u, v) * 0.8 + fbm(u, v, 120, 2, seed + 4) * 0.2);
+    const n = toTexture(nrm);
+    n.wrapS = n.wrapT = THREE.ClampToEdgeWrapping;
+    return { map: t, normalMap: n, alphaMap: t };
+  });
+}
+
+/**
+ * Grime lobe used for the dirt shader's break-up noise. Kept as a texture so
+ * the smudge pattern is identical on every device and every screenshot.
+ */
+export function grime({ seed = 91, size = 256 } = {}) {
+  return cached(`grime:${seed}`, () => toTexture(generate(size, (u, v, out) => {
+    const big = fbm(u, v, 6, 4, seed);
+    const fine = worley(u, v, 26, seed + 3).f1;
+    const g = Math.pow(big * 0.7 + fine * 0.3, 1.4);
+    out[0] = g; out[1] = fbm(u, v, 18, 3, seed + 9); out[2] = fine;
+  })));
+}

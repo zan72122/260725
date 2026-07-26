@@ -218,7 +218,6 @@ export function speakerOn(o) {
   const g = uid('sp');
   const body = T('a', '#7c8ea8');
   return svg('speaker-on', `<defs>${lg(g, [[0, '#a9bbd2'], [1, body]])}</defs>
-  <path d="M14 25.5h7.6l9.6-8.6c1.7-1.5 4.3-.3 4.3 2v42.2c0 0 0 0 0 0" fill="none"/>
   <path d="M14 25h7.8l9.4-8.5c1.7-1.6 4.5-.3 4.5 2v27c0 2.3-2.8 3.6-4.5 2L21.8 39H14a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4Z" fill="url(#${g})"/>
   <path d="M21.8 25 31.2 16.5c1.7-1.6 4.5-.3 4.5 2v6.5Z" fill="#fff" opacity=".28"/>
   ${stroke('M42.5 24.5a11 11 0 0 1 0 15', T('b', '#ffb74d'), 3.6)}
@@ -299,6 +298,91 @@ export function chevron(o = {}) {
   return svg('chevron', `<g transform="translate(32 32) scale(${dir} 1) translate(-32 -32)">
     ${stroke('M25 14 43 32 25 50', T('a', '#ff8fb4'), 7)}
   </g>`, o);
+}
+
+/* ------------------------------------------------------------ play kit --- */
+
+/** ボール — bouncy ball. */
+export function ball(o) {
+  const g = uid('bl'), s = uid('sh'), c = uid('cp');
+  return svg('ball', `<defs>
+    ${lg(g, [[0, T('a', '#8fd8ff')], [1, '#3f8fd8']], 0.25, 0, 0.85, 1)}
+    ${sheen(s, 0.32, 0.26, 0.72)}
+    <clipPath id="${c}"><circle cx="32" cy="33" r="25"/></clipPath>
+  </defs>
+  <circle cx="32" cy="33" r="25" fill="url(#${g})"/>
+  <g clip-path="url(#${c})">
+    <path d="M-2 26c14-8 38-8 68 0v14c-30-8-54-8-68 0Z" fill="${T('b', '#fff0a8')}"/>
+    <path d="M-2 30c14-7 38-7 68 0v6c-30-7-54-7-68 0Z" fill="${T('c', '#ff8fb4')}"/>
+  </g>
+  <circle cx="32" cy="33" r="25" fill="url(#${s})"/>`, o);
+}
+
+/** つみき — stacked blocks. */
+export function blocks(o) {
+  const a = uid('b1'), b = uid('b2'), c = uid('b3');
+  return svg('blocks', `<defs>
+    ${lg(a, [[0, '#ffe27a'], [1, '#f0a92e']])}
+    ${lg(b, [[0, '#a8e0ff'], [1, '#4aa8e0']])}
+    ${lg(c, [[0, '#ffb3c8'], [1, '#ef6f96']])}
+  </defs>
+  <rect x="8" y="34" width="23" height="22" rx="5" fill="url(#${a})"/>
+  <rect x="33" y="34" width="23" height="22" rx="5" fill="url(#${b})"/>
+  <rect x="20.5" y="10" width="23" height="22" rx="5" fill="url(#${c})"/>
+  <rect x="11" y="37" width="17" height="6" rx="3" fill="#fff" opacity=".45"/>
+  <rect x="36" y="37" width="17" height="6" rx="3" fill="#fff" opacity=".45"/>
+  <rect x="23.5" y="13" width="17" height="6" rx="3" fill="#fff" opacity=".45"/>`, o);
+}
+
+/** おもちゃばこ — toy box. */
+export function toybox(o) {
+  const g = uid('tx');
+  return svg('toybox', `<defs>${lg(g, [[0, T('a', '#ffcf8f')], [1, '#e08a3c']])}</defs>
+  <circle cx="24" cy="20" r="7" fill="#ff8fb4"/>
+  <path d="M42 10 44.6 17.4 52 20 44.6 22.6 42 30 39.4 22.6 32 20 39.4 17.4Z" fill="#ffd24d"/>
+  <path d="M9 27h46a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z" fill="#f5b25c"/>
+  <path d="M10 37h44v14a5 5 0 0 1-5 5H15a5 5 0 0 1-5-5Z" fill="url(#${g})"/>
+  <rect x="28.5" y="27" width="7" height="29" rx="2" fill="#fff" opacity=".55"/>`, o);
+}
+
+/** いないいないばあ — hands over a face. */
+export function peekaboo(o) {
+  const g = uid('pk');
+  return svg('peekaboo', `<defs>${lg(g, [[0, '#ffe3ce'], [1, '#ffc9a8']])}</defs>
+  <circle cx="32" cy="34" r="21" fill="url(#${g})"/>
+  ${stroke('M25 42c2.6 2.6 5.6 3.9 9 3.9s6.4-1.3 9-3.9', '#c98a6a', 3)}
+  <path d="M6 22c0-2.8 2.4-5 5.2-4.6l12.6 1.8c2.6.4 4.4 2.6 4.2 5.2l-.5 6.2c-.2 2.8-2.8 4.8-5.6 4.3l-12-2.2C7.4 32.2 6 30.2 6 28Z" fill="#ffd9c2" stroke="#e8a882" stroke-width="1.8"/>
+  <path d="M58 22c0-2.8-2.4-5-5.2-4.6l-12.6 1.8c-2.6.4-4.4 2.6-4.2 5.2l.5 6.2c.2 2.8 2.8 4.8 5.6 4.3l12-2.2c2.5-.5 3.9-2.5 3.9-4.7Z" fill="#ffd9c2" stroke="#e8a882" stroke-width="1.8"/>
+  ${stroke('M13 24.5 25 26M13 29 24 30', '#e8b49a', 2)}
+  ${stroke('M51 24.5 39 26M51 29 40 30', '#e8b49a', 2)}`, o);
+}
+
+/** てをふる — waving hand. */
+export function hand(o) {
+  const g = uid('hd');
+  return svg('hand', `<defs>${lg(g, [[0, '#ffe3ce'], [1, '#ffc09a']])}</defs>
+  <path d="M20 30V14a4.5 4.5 0 0 1 9 0v14V10a4.5 4.5 0 0 1 9 0v18V14a4.5 4.5 0 0 1 9 0v24c0 8-6 14-14.5 14S18 46 18 38l-5.6-8.4a4 4 0 0 1 6.2-5Z" fill="url(#${g})"/>
+  <path d="M24.5 20v10M33.5 17v11M42.5 21v9" stroke="#e8b49a" stroke-width="2" stroke-linecap="round" fill="none"/>`, o);
+}
+
+/** おんがく — music note. */
+export function music(o) {
+  const g = uid('ms');
+  return svg('music', `<defs>${lg(g, [[0, T('a', '#c4b0ff')], [1, '#7c5cf0']])}</defs>
+  <path d="M25 44V14.5c0-1.4 1-2.6 2.4-2.9l20-4.4A3 3 0 0 1 51 10v30" fill="none" stroke="url(#${g})" stroke-width="6" stroke-linecap="round"/>
+  <path d="M26 16.5 51 11" stroke="url(#${g})" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <ellipse cx="18.5" cy="45" rx="9" ry="7" fill="url(#${g})" transform="rotate(-16 18.5 45)"/>
+  <ellipse cx="44.5" cy="41" rx="8" ry="6.4" fill="url(#${g})" transform="rotate(-16 44.5 41)"/>`, o);
+}
+
+/** あーん — open mouth (feeding cue). */
+export function mouthIcon(o) {
+  const g = uid('mt');
+  return svg('mouth', `<defs>${lg(g, [[0, '#ff9db8'], [1, '#e05a86']])}</defs>
+  <ellipse cx="32" cy="33" rx="20" ry="23" fill="url(#${g})"/>
+  <path d="M12.4 27.5c5.6-4.6 33.6-4.6 39.2 0-2 3-7.6 4.6-19.6 4.6s-17.6-1.6-19.6-4.6Z" fill="#fff"/>
+  <ellipse cx="32" cy="46" rx="10" ry="7" fill="#ff6f9c"/>
+  <ellipse cx="26" cy="24" rx="4" ry="2.6" fill="#fff" opacity=".55"/>`, o);
 }
 
 /* ------------------------------------------------------- meter symbols --- */
@@ -550,14 +634,14 @@ const ANIMAL_ART = {
     return `<defs>${furGrad(g, '#8fe0a8', '#3f9e6a')}</defs>
       <ellipse cx="12" cy="42" rx="6" ry="4.4" fill="#a8e8c0" transform="rotate(-18 12 42)"/>
       <ellipse cx="52" cy="42" rx="6" ry="4.4" fill="#a8e8c0" transform="rotate(18 52 42)"/>
-      <circle cx="32" cy="20" r="10.5" fill="#a8e8c0"/>
-      ${eye(28, 19, 2.6)}${eye(36, 19, 2.6)}
-      ${mouth('M29 24.5c1.8 1.6 4.2 1.6 6 0', '#3f7d5a', 2.2)}
-      <path d="M32 25c12 0 20 6.8 20 15.5S44 56 32 56s-20-6.8-20-15.5S20 25 32 25Z" fill="url(#${g})"/>
-      <path d="M32 30 40 35.5 37 45h-10l-3-9.5Z" fill="#d8f5e2" opacity=".85"/>
-      <circle cx="19" cy="41" r="3.4" fill="#d8f5e2" opacity=".7"/>
-      <circle cx="45" cy="41" r="3.4" fill="#d8f5e2" opacity=".7"/>
-      ${blush(21.5, 22)}${blush(42.5, 22)}`;
+      <circle cx="32" cy="18" r="12" fill="#a8e8c0"/>
+      ${eye(27.6, 17, 2.8)}${eye(36.4, 17, 2.8)}
+      ${mouth('M28.6 23c2 1.8 4.8 1.8 6.8 0', '#3f7d5a', 2.2)}
+      <path d="M32 28c12 0 20 6.4 20 14.8S44 56 32 56s-20-4.8-20-13.2S20 28 32 28Z" fill="url(#${g})"/>
+      <path d="M32 32.5 39.5 37.5 36.8 46h-9.6l-2.7-8.5Z" fill="#d8f5e2" opacity=".85"/>
+      <circle cx="19.5" cy="42" r="3.4" fill="#d8f5e2" opacity=".7"/>
+      <circle cx="44.5" cy="42" r="3.4" fill="#d8f5e2" opacity=".7"/>
+      ${blush(21.5, 20)}${blush(42.5, 20)}`;
   },
   giraffe(id) {
     const g = uid(id);
@@ -630,13 +714,33 @@ export function sticker(id, o = {}) {
 export const ICONS = {
   bottle, bathtub, onesie, balloon, moon, star, apple, book,
   speakerOn, speakerOff, home, check, exclamation, close, play,
-  arrowDown, chevron, bubble, smile, spark, heart, paw
+  arrowDown, chevron, bubble, smile, spark, heart, paw,
+  ball, blocks, toybox, peekaboo, hand, music, mouth: mouthIcon
 };
 
-/** Look an icon up by name; unknown names render nothing rather than throw. */
+/** Friendly aliases so gameplay code can say what it means. */
+export const ICON_ALIAS = {
+  tub: 'bathtub', bath: 'bathtub', shower: 'bathtub', soap: 'bubble',
+  shirt: 'onesie', clothes: 'onesie', dress: 'onesie', romper: 'onesie',
+  milk: 'bottle', feed: 'bottle', food: 'apple', eat: 'mouth',
+  sleep: 'moon', night: 'moon', clean: 'bubble', water: 'bubble',
+  happy: 'smile', smiley: 'smile', energy: 'spark', bolt: 'spark',
+  toy: 'ball', bounce: 'ball', blocks3: 'blocks', tidy: 'toybox',
+  wave: 'hand', tap: 'hand', point: 'hand', song: 'music', xylophone: 'music',
+  sticker: 'book', album: 'book', reward: 'star', ok: 'check',
+  alert: 'exclamation', warn: 'exclamation', love: 'heart', arrow: 'arrowDown'
+};
+
+/** Look an icon up by name (or alias); unknown names render nothing. */
 export function icon(name, opts) {
-  const fn = ICONS[name];
+  if (!name) return '';
+  const fn = ICONS[name] || ICONS[ICON_ALIAS[name]];
   return fn ? fn(opts) : '';
+}
+
+/** True when `name` resolves to real art (used to pick a sensible fallback). */
+export function hasIcon(name) {
+  return !!(name && (ICONS[name] || ICONS[ICON_ALIAS[name]]));
 }
 
 /** Meter → symbol mapping used by the HUD. */

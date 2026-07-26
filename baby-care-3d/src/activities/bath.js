@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import * as MAT from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WaterSurface, WaterlineRing, TapStream, SteamVeil, DynamicTube, rng } from '../fx/water.js';
 import { FoamSystem } from '../fx/foam.js';
 
@@ -91,6 +92,30 @@ function roundedBox(w, h, d, r, seg = 5) {
   }
   geo.computeVertexNormals();
   return geo;
+}
+
+/**
+ * Bake a set of transformed parts down to one geometry. Draw calls, not
+ * triangles, are the budget in this project — a stool with four legs has no
+ * business costing five of them. Source geometries are consumed.
+ */
+function mergeParts(parts) {
+  const clones = [];
+  const sources = new Set();
+  const q = new THREE.Quaternion(), m = new THREE.Matrix4();
+  const pv = new THREE.Vector3(), sv = new THREE.Vector3();
+  for (const p of parts) {
+    const g = p.geo.clone();
+    q.setFromEuler(new THREE.Euler(...(p.rot || [0, 0, 0])));
+    m.compose(pv.set(...(p.pos || [0, 0, 0])), q, sv.set(...(p.scale || [1, 1, 1])));
+    g.applyMatrix4(m);            // transforms normals too — no recompute needed
+    clones.push(g);
+    sources.add(p.geo);
+  }
+  const out = mergeGeometries(clones, false);
+  for (const g of clones) g.dispose();
+  for (const g of sources) g.dispose();
+  return out;
 }
 
 /** Chrome pipework: a smooth tube through a handful of control points. */
@@ -283,6 +308,7 @@ export class BathActivity {
     this._hopT = -1;
     this._flying = [];
     this._disposables = [];
+    this._timers = [];
     this._touchedMaterials = new Set();
     this._steamOverride = null;
     this._splashPulse = 0;
@@ -312,8 +338,8 @@ export class BathActivity {
       this.tub.rotation.y = new THREE.Euler().setFromQuaternion(
         anchor.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
     } else {
-      this.tub.position.set(0.42, 0, 0.22);
-      this.tub.rotation.y = -0.18;
+      this.tub.position.set(0.26, 0, 0.14);
+      this.tub.rotation.y = -0.16;
     }
     this.root.add(this.tub);
 
@@ -389,31 +415,22 @@ export class BathActivity {
     const wood = MAT.makeWood({ light: 0xe6c79a, dark: 0x9a6a42, seed: 12, repeat: 2, clearcoat: 0.4 });
     this._materials(wood);
     const legGeo = new THREE.CylinderGeometry(0.019, 0.024, STAND_H, 12);
-    this._disposables.push(legGeo);
+    const railGeo = roundedBox(0.66, 0.018, 0.026, 0.008, 3);
+    const shelfGeo = roundedBox(0.60, 0.014, 0.30, 0.007, 3);
     const spanX = 0.30, spanZ = 0.20;
+    const parts = [];
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const leg = new THREE.Mesh(legGeo, wood);
-      leg.position.set(sx * spanX, STAND_H / 2, sz * spanZ);
-      leg.rotation.z = -sx * 0.06;
-      leg.rotation.x = sz * 0.05;
-      leg.castShadow = leg.receiveShadow = true;
-      this.tub.add(leg);
+      parts.push({ geo: legGeo, pos: [sx * spanX, STAND_H / 2, sz * spanZ],
+                   rot: [sz * 0.05, 0, -sx * 0.06] });
     }
     // cross rails + a slatted shelf for the bottles
-    const railGeo = roundedBox(0.66, 0.018, 0.026, 0.008, 3);
-    this._disposables.push(railGeo);
-    for (const sz of [-1, 1]) {
-      const r = new THREE.Mesh(railGeo, wood);
-      r.position.set(0, 0.10, sz * spanZ);
-      r.castShadow = r.receiveShadow = true;
-      this.tub.add(r);
-    }
-    const shelfGeo = roundedBox(0.60, 0.014, 0.30, 0.007, 3);
-    this._disposables.push(shelfGeo);
-    const shelf = new THREE.Mesh(shelfGeo, wood);
-    shelf.position.set(0, 0.093, 0);
-    shelf.castShadow = shelf.receiveShadow = true;
-    this.tub.add(shelf);
+    for (const sz of [-1, 1]) parts.push({ geo: railGeo, pos: [0, 0.10, sz * spanZ] });
+    parts.push({ geo: shelfGeo, pos: [0, 0.093, 0] });
+    const geo = mergeParts(parts);
+    this._disposables.push(geo);
+    const stand = new THREE.Mesh(geo, wood);
+    stand.castShadow = stand.receiveShadow = true;
+    this.tub.add(stand);
   }
 
   _buildBowl() {
@@ -448,25 +465,19 @@ export class BathActivity {
 
     /* --- drain --------------------------------------------------------- */
     const metal = this._materials(MAT.makeMetal({ color: 0xd9dee4, roughness: 0.18 }).clone());
-    const drainWell = new THREE.CylinderGeometry(0.030, 0.026, 0.012, 20);
-    this._disposables.push(drainWell);
-    const well = new THREE.Mesh(drainWell, metal);
-    well.position.set(0.0, 0.0295, 0.0);
-    well.receiveShadow = true;
-    this.bowl.add(well);
     const grateGeo = new THREE.TorusGeometry(0.020, 0.0035, 8, 24);
     grateGeo.rotateX(Math.PI / 2);
-    this._disposables.push(grateGeo);
-    const grate = new THREE.Mesh(grateGeo, metal);
-    grate.position.set(0, 0.0355, 0);
-    this.bowl.add(grate);
     const barGeo = roundedBox(0.042, 0.003, 0.005, 0.0015, 2);
-    this._disposables.push(barGeo);
-    for (let i = 0; i < 3; i++) {
-      const b = new THREE.Mesh(barGeo, metal);
-      b.position.set(0, 0.0355, (i - 1) * 0.010);
-      this.bowl.add(b);
-    }
+    const drainParts = [
+      { geo: new THREE.CylinderGeometry(0.030, 0.026, 0.012, 20), pos: [0, 0.0295, 0] },
+      { geo: grateGeo, pos: [0, 0.0355, 0] }
+    ];
+    for (let i = 0; i < 3; i++) drainParts.push({ geo: barGeo, pos: [0, 0.0355, (i - 1) * 0.010] });
+    const drainGeo = mergeParts(drainParts);
+    this._disposables.push(drainGeo);
+    const drain = new THREE.Mesh(drainGeo, metal);
+    drain.receiveShadow = true;
+    this.bowl.add(drain);
   }
 
   _buildMixer() {
@@ -476,47 +487,31 @@ export class BathActivity {
     this.tub.add(g);
     this.mixer = g;
 
-    const baseGeo = new THREE.CylinderGeometry(0.045, 0.055, 0.020, 24);
-    this._disposables.push(baseGeo);
-    const base = new THREE.Mesh(baseGeo, chrome);
-    base.position.y = 0.010;
-    base.castShadow = base.receiveShadow = true;
-    g.add(base);
-
-    const colGeo = pipe([
-      [0, 0.02, 0], [0, 0.30, 0], [0, 0.56, 0], [0, 0.66, 0.02],
-      [0.06, 0.705, 0.10], [0.17, 0.715, 0.20], [0.22, 0.700, 0.26]
-    ], 0.0135, 60, 12);
-    this._disposables.push(colGeo);
-    const col = new THREE.Mesh(colGeo, chrome);
-    col.castShadow = col.receiveShadow = true;
-    g.add(col);
-
-    const tipGeo = new THREE.CylinderGeometry(0.019, 0.016, 0.026, 18);
-    this._disposables.push(tipGeo);
-    const tip = new THREE.Mesh(tipGeo, chrome);
-    tip.position.set(0.232, 0.688, 0.268);
-    tip.rotation.z = 0.35;
-    tip.castShadow = true;
-    g.add(tip);
-    this.spoutMesh = tip;
+    const bodyGeo = mergeParts([
+      { geo: new THREE.CylinderGeometry(0.045, 0.055, 0.020, 24), pos: [0, 0.010, 0] },
+      { geo: pipe([
+          [0, 0.02, 0], [0, 0.30, 0], [0, 0.56, 0], [0, 0.66, 0.02],
+          [0.06, 0.705, 0.10], [0.17, 0.715, 0.20], [0.22, 0.700, 0.26]
+        ], 0.0135, 60, 12) },
+      { geo: new THREE.CylinderGeometry(0.019, 0.016, 0.026, 18),
+        pos: [0.232, 0.688, 0.268], rot: [0, 0, 0.35] },
+      { geo: pipe([[-0.11, 0.50, 0], [0, 0.505, 0], [0.11, 0.50, 0]], 0.011, 24, 10) },
+      { geo: new THREE.CylinderGeometry(0.011, 0.013, 0.010, 14), pos: [-0.115, 0.548, 0] },
+      { geo: new THREE.CylinderGeometry(0.011, 0.013, 0.010, 14), pos: [0.115, 0.548, 0] }
+    ]);
+    this._disposables.push(bodyGeo);
+    const body = new THREE.Mesh(bodyGeo, chrome);
+    body.castShadow = body.receiveShadow = true;
+    g.add(body);
 
     // spout tip expressed in bowl space, where the stream lives
     this.spoutTip = new THREE.Vector3(
       g.position.x + 0.232, g.position.y + 0.678 - STAND_H, g.position.z + 0.272);
 
     /* --- the two knobs -------------------------------------------------- */
-    const crossGeo = pipe([[-0.11, 0.50, 0], [0, 0.505, 0], [0.11, 0.50, 0]], 0.011, 24, 10);
-    this._disposables.push(crossGeo);
-    const cross = new THREE.Mesh(crossGeo, chrome);
-    cross.castShadow = true;
-    g.add(cross);
-
     const knobGeo = new THREE.SphereGeometry(0.030, 20, 14);
     knobGeo.scale(1, 0.78, 1);
     this._disposables.push(knobGeo);
-    const capGeo = new THREE.CylinderGeometry(0.011, 0.013, 0.010, 14);
-    this._disposables.push(capGeo);
 
     const hotMat = this._materials(MAT.makePlastic({ color: 0xe8503f, seed: 71, matte: 0.24, clearcoat: 1 }));
     const coldMat = this._materials(MAT.makePlastic({ color: 0x3f8fe8, seed: 72, matte: 0.24, clearcoat: 1 }));
@@ -525,17 +520,11 @@ export class BathActivity {
     this.knobHot.position.set(-0.115, 0.522, 0);
     this.knobHot.castShadow = true;
     g.add(this.knobHot);
-    const hotCap = new THREE.Mesh(capGeo, chrome);
-    hotCap.position.set(-0.115, 0.548, 0);
-    g.add(hotCap);
 
     this.knobCold = new THREE.Mesh(knobGeo, coldMat);
     this.knobCold.position.set(0.115, 0.522, 0);
     this.knobCold.castShadow = true;
     g.add(this.knobCold);
-    const coldCap = new THREE.Mesh(capGeo, chrome);
-    coldCap.position.set(0.115, 0.548, 0);
-    g.add(coldCap);
 
     /* --- temperature gauge on the front of the tub --------------------- */
     const gaugeBody = roundedBox(0.14, 0.036, 0.014, 0.014, 4);
@@ -575,11 +564,14 @@ export class BathActivity {
     const head = new THREE.Group();
     this.tub.add(head);
     this.showerHead = head;
-    this.showerHome = new THREE.Vector3(-0.40, 0.86, -0.30);
+    this.showerHome = new THREE.Vector3(-0.32, 0.74, -0.22);
     head.position.copy(this.showerHome);
     head.rotation.z = 0.5;
 
-    const cupGeo = new THREE.CylinderGeometry(0.046, 0.036, 0.028, 26);
+    const cupGeo = mergeParts([
+      { geo: new THREE.CylinderGeometry(0.046, 0.036, 0.028, 26) },
+      { geo: new THREE.CylinderGeometry(0.014, 0.017, 0.11, 16), pos: [0, 0.072, 0] }
+    ]);
     this._disposables.push(cupGeo);
     const cup = new THREE.Mesh(cupGeo, chrome);
     cup.castShadow = true;
@@ -591,13 +583,6 @@ export class BathActivity {
       this._materials(MAT.makePlastic({ color: 0xdcdfe4, seed: 75, matte: 0.55 })));
     face.position.y = -0.016;
     head.add(face);
-
-    const gripGeo = new THREE.CylinderGeometry(0.014, 0.017, 0.11, 16);
-    this._disposables.push(gripGeo);
-    const grip = new THREE.Mesh(gripGeo, chrome);
-    grip.position.set(0.0, 0.072, 0.0);
-    grip.castShadow = true;
-    head.add(grip);
 
     // hose — re-pathed every frame as the head is dragged around
     const hoseMat = this._materials(MAT.makeMetal({ color: 0xc9d0d8, roughness: 0.34 }).clone());
@@ -644,21 +629,17 @@ export class BathActivity {
     this.tub.add(stool);
     this.caddy = stool;
 
-    const topGeo = roundedBox(0.26, 0.020, 0.20, 0.012, 4);
-    this._disposables.push(topGeo);
-    const top = new THREE.Mesh(topGeo, wood);
-    top.position.y = 0.34;
+    const legGeo = new THREE.CylinderGeometry(0.011, 0.014, 0.34, 10);
+    const stoolParts = [{ geo: roundedBox(0.26, 0.020, 0.20, 0.012, 4), pos: [0, 0.34, 0] }];
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      stoolParts.push({ geo: legGeo, pos: [sx * 0.10, 0.17, sz * 0.072],
+                        rot: [sz * 0.05, 0, -sx * 0.05] });
+    }
+    const stoolGeo = mergeParts(stoolParts);
+    this._disposables.push(stoolGeo);
+    const top = new THREE.Mesh(stoolGeo, wood);
     top.castShadow = top.receiveShadow = true;
     stool.add(top);
-    const legGeo = new THREE.CylinderGeometry(0.011, 0.014, 0.34, 10);
-    this._disposables.push(legGeo);
-    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const l = new THREE.Mesh(legGeo, wood);
-      l.position.set(sx * 0.10, 0.17, sz * 0.072);
-      l.rotation.z = -sx * 0.05; l.rotation.x = sz * 0.05;
-      l.castShadow = true;
-      stool.add(l);
-    }
 
     /* --- shampoo bottle with a working pump ---------------------------- */
     const bottle = new THREE.Group();
@@ -692,14 +673,13 @@ export class BathActivity {
     pump.position.y = 0.186;
     bottle.add(pump);
     this.pump = pump;
-    const stemGeo = new THREE.CylinderGeometry(0.0065, 0.0065, 0.036, 12);
-    this._disposables.push(stemGeo);
-    const stem = new THREE.Mesh(stemGeo, collarMat);
-    stem.position.y = 0.018;
-    pump.add(stem);
-    const spoutGeo = pipe([[0, 0.036, 0], [0.008, 0.040, 0], [0.024, 0.036, 0], [0.030, 0.026, 0]], 0.0072, 20, 8);
-    this._disposables.push(spoutGeo);
-    const ps = new THREE.Mesh(spoutGeo, collarMat);
+    const pumpGeo = mergeParts([
+      { geo: new THREE.CylinderGeometry(0.0065, 0.0065, 0.036, 12), pos: [0, 0.018, 0] },
+      { geo: pipe([[0, 0.036, 0], [0.008, 0.040, 0], [0.024, 0.036, 0], [0.030, 0.026, 0]],
+                  0.0072, 20, 8) }
+    ]);
+    this._disposables.push(pumpGeo);
+    const ps = new THREE.Mesh(pumpGeo, collarMat);
     ps.castShadow = true;
     pump.add(ps);
 
@@ -758,28 +738,19 @@ export class BathActivity {
     this.tub.add(rail);
 
     const postGeo = new THREE.CylinderGeometry(0.010, 0.013, 0.66, 12);
-    this._disposables.push(postGeo);
-    for (const sx of [-1, 1]) {
-      const p = new THREE.Mesh(postGeo, chrome);
-      p.position.set(sx * 0.22, 0.33, 0);
-      p.castShadow = p.receiveShadow = true;
-      rail.add(p);
-    }
     const footGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.012, 18);
-    this._disposables.push(footGeo);
-    for (const sx of [-1, 1]) {
-      const f = new THREE.Mesh(footGeo, chrome);
-      f.position.set(sx * 0.22, 0.006, 0);
-      f.receiveShadow = true;
-      rail.add(f);
-    }
     const barGeo = new THREE.CylinderGeometry(0.0095, 0.0095, 0.46, 14);
     barGeo.rotateZ(Math.PI / 2);
-    this._disposables.push(barGeo);
-    const bar = new THREE.Mesh(barGeo, chrome);
-    bar.position.set(0, 0.655, 0);
-    bar.castShadow = true;
-    rail.add(bar);
+    const railParts = [{ geo: barGeo, pos: [0, 0.655, 0] }];
+    for (const sx of [-1, 1]) {
+      railParts.push({ geo: postGeo, pos: [sx * 0.22, 0.33, 0] });
+      railParts.push({ geo: footGeo, pos: [sx * 0.22, 0.006, 0] });
+    }
+    const railGeo = mergeParts(railParts);
+    this._disposables.push(railGeo);
+    const railMesh = new THREE.Mesh(railGeo, chrome);
+    railMesh.castShadow = railMesh.receiveShadow = true;
+    rail.add(railMesh);
 
     const towelGeo = drapedTowel(0.30, 0.0125, 0.20, 0.26, 16, 34);
     this._disposables.push(towelGeo);
@@ -796,8 +767,8 @@ export class BathActivity {
 
   _buildBasket() {
     const g = new THREE.Group();
-    g.position.set(0.80, 0, 0.36);
-    g.rotation.y = 0.4;
+    g.position.set(-0.60, 0, 0.42);
+    g.rotation.y = 0.5;
     this.tub.add(g);
     this.basket = g;
 
@@ -830,7 +801,7 @@ export class BathActivity {
     this._disposables.push(geo);
     const m = new THREE.Mesh(geo,
       this._materials(MAT.makeTerry({ color: 0xffdcea, repeat: 3, seed: 84 })));
-    m.position.set(0.02, 0.010, 0.58);
+    m.position.set(0.02, 0.010, 0.50);
     m.rotation.y = 0.12;
     m.receiveShadow = true;
     m.castShadow = false;
@@ -848,37 +819,28 @@ export class BathActivity {
     const yellow = this._materials(MAT.makePlastic({ color: 0xffcf2e, seed: 85, matte: 0.28, clearcoat: 0.9 }));
     const dBody = new THREE.SphereGeometry(0.052, 22, 16);
     dBody.scale(1.22, 0.86, 0.98);
-    this._disposables.push(dBody);
-    const db = new THREE.Mesh(dBody, yellow);
+    const duckGeo = mergeParts([
+      { geo: dBody },
+      { geo: new THREE.ConeGeometry(0.030, 0.055, 14), pos: [-0.056, 0.020, 0], rot: [0, 0, -0.9] },
+      { geo: new THREE.SphereGeometry(0.033, 18, 14), pos: [0.040, 0.052, 0] }
+    ]);
+    this._disposables.push(duckGeo);
+    const db = new THREE.Mesh(duckGeo, yellow);
     db.castShadow = true;
     duck.add(db);
-    const tail = new THREE.ConeGeometry(0.030, 0.055, 14);
-    this._disposables.push(tail);
-    const dt = new THREE.Mesh(tail, yellow);
-    dt.position.set(-0.056, 0.020, 0);
-    dt.rotation.z = -0.9;
-    dt.castShadow = true;
-    duck.add(dt);
-    const dHead = new THREE.SphereGeometry(0.033, 18, 14);
-    this._disposables.push(dHead);
-    const dh = new THREE.Mesh(dHead, yellow);
-    dh.position.set(0.040, 0.052, 0);
-    dh.castShadow = true;
-    duck.add(dh);
     const beak = new THREE.ConeGeometry(0.014, 0.030, 12);
     this._disposables.push(beak);
     const bk = new THREE.Mesh(beak, this._materials(MAT.makePlastic({ color: 0xff8a3d, seed: 86, matte: 0.3 })));
     bk.position.set(0.070, 0.048, 0);
     bk.rotation.z = -Math.PI / 2;
     duck.add(bk);
-    const eyeGeo = new THREE.SphereGeometry(0.0055, 10, 8);
+    const eyeGeo = mergeParts([
+      { geo: new THREE.SphereGeometry(0.0055, 10, 8), pos: [0.055, 0.060, -0.020] },
+      { geo: new THREE.SphereGeometry(0.0055, 10, 8), pos: [0.055, 0.060, 0.020] }
+    ]);
     this._disposables.push(eyeGeo);
-    const eyeMat = this._materials(MAT.makePlastic({ color: 0x2a1f22, seed: 87, matte: 0.1, clearcoat: 1 }));
-    for (const sz of [-1, 1]) {
-      const e = new THREE.Mesh(eyeGeo, eyeMat);
-      e.position.set(0.055, 0.060, sz * 0.020);
-      duck.add(e);
-    }
+    duck.add(new THREE.Mesh(eyeGeo,
+      this._materials(MAT.makePlastic({ color: 0x2a1f22, seed: 87, matte: 0.1, clearcoat: 1 }))));
     this.duck = duck;
     this.floaters.push({ obj: duck, x: 0.19, z: 0.11, ry: -0.6, buoy: 0.026, vy: 0, spin: 0.22 });
 
@@ -926,20 +888,21 @@ export class BathActivity {
     const star = new THREE.Group();
     this.bowl.add(star);
     const armGeo = roundedBox(0.028, 0.070, 0.026, 0.012, 4);
-    this._disposables.push(armGeo);
-    const starMat = this._materials(MAT.makePlastic({ color: 0xff8ac4, seed: 90, matte: 0.34, clearcoat: 0.8 }));
-    for (let i = 0; i < 5; i++) {
-      const a = new THREE.Mesh(armGeo, starMat);
-      const ang = (i / 5) * Math.PI * 2;
-      a.position.set(Math.sin(ang) * 0.030, 0, Math.cos(ang) * 0.030);
-      a.rotation.set(Math.cos(ang) * 0.5, ang, -Math.sin(ang) * 0.5);
-      a.castShadow = true;
-      star.add(a);
-    }
     const coreGeo = new THREE.SphereGeometry(0.030, 16, 12);
     coreGeo.scale(1, 0.55, 1);
-    this._disposables.push(coreGeo);
-    const core = new THREE.Mesh(coreGeo, starMat);
+    const starParts = [{ geo: coreGeo }];
+    for (let i = 0; i < 5; i++) {
+      const ang = (i / 5) * Math.PI * 2;
+      starParts.push({
+        geo: armGeo,
+        pos: [Math.sin(ang) * 0.030, 0, Math.cos(ang) * 0.030],
+        rot: [Math.cos(ang) * 0.5, ang, -Math.sin(ang) * 0.5]
+      });
+    }
+    const starGeo = mergeParts(starParts);
+    this._disposables.push(starGeo);
+    const starMat = this._materials(MAT.makePlastic({ color: 0xff8ac4, seed: 90, matte: 0.34, clearcoat: 0.8 }));
+    const core = new THREE.Mesh(starGeo, starMat);
     core.castShadow = true;
     star.add(core);
     this.floaters.push({ obj: star, x: 0.06, z: -0.16, ry: 0.2, buoy: 0.010, vy: 0, spin: 0.3 });
@@ -964,25 +927,29 @@ export class BathActivity {
     mat.roughness = 0.30;
     mat.clearcoat = 0.7;
     const rand = rng(6607);
+    const parts = [];
     for (let i = 0; i < 9; i++) {
       const len = 0.030 + rand() * 0.030;
       const geo = new THREE.ConeGeometry(0.0085, len, 7, 3);
       const p = geo.attributes.position;
       for (let k = 0; k < p.count; k++) {
-        const y = p.getY(k);
-        const t = (y + len / 2) / len;
-        p.setX(k, p.getX(k) + Math.sin(t * 2.2) * 0.008);
+        const t = (p.getY(k) + len / 2) / len;
+        p.setX(k, p.getX(k) + Math.sin(t * 2.2) * 0.008);   // strands hang, not spike
       }
       geo.computeVertexNormals();
-      this._disposables.push(geo);
-      const s = new THREE.Mesh(geo, mat);
       const a = (i / 9) * Math.PI * 2 + 0.4;
       const rad = 0.052 + rand() * 0.012;
-      s.position.set(Math.cos(a) * rad, 0.012 - len * 0.35, Math.sin(a) * rad * 0.85);
-      s.rotation.set(Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5);
-      s.castShadow = true;
-      g.add(s);
+      parts.push({
+        geo,
+        pos: [Math.cos(a) * rad, 0.012 - len * 0.35, Math.sin(a) * rad * 0.85],
+        rot: [Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5]
+      });
     }
+    const strandGeo = mergeParts(parts);
+    this._disposables.push(strandGeo);
+    const strands = new THREE.Mesh(strandGeo, mat);
+    strands.castShadow = true;
+    g.add(strands);
   }
 
   /** A wordless "look here" marker — a 4-year-old reads this, not text. */
@@ -1009,23 +976,36 @@ export class BathActivity {
     this.cueChevron = chev;
   }
 
+  /**
+   * The three shots this activity needs, authored in tub-local metres and
+   * pushed through the tub transform so they follow the room's anchor.
+   * `tub` has to work for the whole ritual because the app snaps to it on
+   * entry; the other two tighten in once a phase actually changes.
+   */
   _registerCameras() {
     const rig = this.ctx.cameraRig;
     if (!rig?.addPreset) return;
     this.tub.updateMatrixWorld(true);
-    const c = this.tub.getWorldPosition(new THREE.Vector3());
+    const w = (x, y, z) => {
+      const v = new THREE.Vector3(x, y, z);
+      this.tub.localToWorld(v);
+      return [v.x, v.y, v.z];
+    };
     const add = (name, pos, target, fov, focus) => {
       try {
-        rig.addPreset(name, {
-          pos: [c.x + pos[0], pos[1], c.z + pos[2]],
-          target: [c.x + target[0], target[1], c.z + target[2]],
-          fov, focusRange: focus
-        });
+        rig.addPreset(name, { pos: w(...pos), target: w(...target), fov, focusRange: focus });
       } catch (e) { /* the rig may not accept overrides — never fatal */ }
     };
-    add('tub', [0.30, 1.00, 1.12], [-0.02, 0.50, 0.0], 34, 0.22);
-    add('bath-face', [0.16, 0.84, 0.66], [0.0, 0.62, 0.0], 30, 0.13);
-    add('bath-dry', [0.30, 0.86, 1.06], [0.02, 0.42, 0.52], 33, 0.20);
+    // wide enough for the tub, the mixer and the baby standing on the mat
+    add('tub', [0.56, 1.12, 1.62], [0.00, 0.36, 0.22], 34, 0.26);
+    // over the rim, tight on a baby sitting in the water
+    add('bath-face', [0.42, 1.02, 1.10], [0.02, 0.50, 0.02], 36, 0.17);
+    // the towel-and-dryer stage on the mat
+    add('bath-dry', [0.38, 0.74, 1.66], [0.02, 0.32, 0.50], 33, 0.20);
+  }
+
+  _goTo(preset, seconds = 1.1) {
+    try { this.ctx.cameraRig?.goTo?.(preset, seconds); } catch (e) { /**/ }
   }
 
   /* ============================================================ enter ==== */
@@ -1086,6 +1066,7 @@ export class BathActivity {
   }
 
   dispose() {
+    this._timers.length = 0;
     this._restoreMaterials();
     this.water.dispose();
     this.stream.dispose();
@@ -1122,6 +1103,24 @@ export class BathActivity {
   _world(obj, x, y, z) {
     obj.updateMatrixWorld();
     return obj.localToWorld(new THREE.Vector3(x, y, z));
+  }
+
+  /**
+   * Simulation-time delay. Deliberately not `setTimeout`: the screenshot
+   * harness advances `update(dt)` in a tight synchronous loop, so anything
+   * scheduled on the wall clock would simply never fire.
+   */
+  _after(seconds, fn, tag) {
+    if (tag) this._timers = this._timers.filter(t => t.tag !== tag);
+    this._timers.push({ t: seconds, fn, tag });
+  }
+
+  _tickTimers(dt) {
+    for (let i = this._timers.length - 1; i >= 0; i--) {
+      const t = this._timers[i];
+      t.t -= dt;
+      if (t.t <= 0) { this._timers.splice(i, 1); t.fn(); }
+    }
   }
 
   _sfx(name, opts) { try { this.ctx.audio?.play?.(name, opts); } catch (e) { /* optional */ } }
@@ -1172,7 +1171,7 @@ export class BathActivity {
   _placeBabyOnMat() {
     const b = this.ctx.baby;
     if (!b?.group) return;
-    const p = this._world(this.tub, 0.02, 0.019, 0.58);
+    const p = this._world(this.tub, 0.02, 0.019, 0.50);
     b.group.position.copy(p);
     b.group.rotation.set(0, this.tub.rotation.y + 0.30, 0);
     b.playPose?.('stand', { seconds: 0.5 });
@@ -1191,6 +1190,7 @@ export class BathActivity {
         this._cueAt(this._babyPoint('body'), 0.10);
         break;
       case 'fill':
+        this._goTo('tub');
         this._prompt('じゃぐちを ひねって おゆを ためよう', 'tap');
         this._cueAt(this._world(this.mixer, 0.232, 0.70, 0.27), 0.075);
         ctx.baby?.lookAt?.(this._world(this.mixer, 0.232, 0.66, 0.27));
@@ -1207,12 +1207,15 @@ export class BathActivity {
         this._prompt('ごしごし きれいに あらってあげよう', 'sponge');
         this._cueAt(this._babyPoint('body'), 0.11);
         this.foam.setBubbleRate(this.tier >= 1 ? 1.2 : 0.4);
+        this._goTo('bath-face');
         break;
       case 'shampoo':
         this._prompt('シャンプーを おして あたまを あわあわに', 'shampoo');
         this._cueAt(this._world(this.shampoo, 0.02, 0.23, 0), 0.06);
         break;
       case 'rinse':
+        // bring the head to hand rather than leaving it on its dock
+        this.showerHead.position.set(-0.26, STAND_H + 0.50, 0.10);
         this._prompt('シャワーで あわを ながそう', 'shower');
         this._cueAt(this.showerHead.getWorldPosition(new THREE.Vector3()), 0.08);
         this.foam.setBubbleRate(0.4);
@@ -1220,6 +1223,7 @@ export class BathActivity {
       case 'dry':
         this._prompt('タオルで ふきふき しよう', 'towel');
         this._cueAt(this.towelHome, 0.10);
+        this._goTo('bath-dry');
         break;
       case 'dryer':
         this._prompt('ドライヤーで かわかそう', 'dryer');
@@ -1413,12 +1417,12 @@ export class BathActivity {
     this._toast(stained ? 'よごれた おふく、せんたくかごへ！' : 'おふくを かごに いれたよ');
     this._sfx('giggle');
 
-    setTimeout(() => {
+    this._after(0.9, () => {
       if (!this.root) return;
       this._undressing = false;
       this.ctx.baby?.setMood?.('neutral');
       this._setPhase('fill');
-    }, 900);
+    }, 'undress');
   }
 
   /* ---------------------------------------------------------- 2. fill --- */
@@ -1569,9 +1573,9 @@ export class BathActivity {
 
     // --- upward stroke on a lathered head sculpts the horn --------------
     if (this._lastPointerY != null && p) {
-      const dy = this._lastPointerY - p.y;
-      if (dy > 3) this._scrubStrokeUp = Math.min(1, this._scrubStrokeUp + dy * 0.004);
-      else if (dy < -3) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp - 0.02);
+      const dy = this._lastPointerY - p.y;          // screen-up is positive
+      if (dy > 0.5) this._scrubStrokeUp = Math.min(1, this._scrubStrokeUp + dy * 0.010);
+      else if (dy < -0.5) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp + dy * 0.004);
     }
 
     if (now - this._lastScrub < 0.07) return;
@@ -1579,11 +1583,17 @@ export class BathActivity {
 
     if (this.shampooUsed && dHead < headR * 2.6) {
       this.foam.add('head', worldPoint, 0.020, 0.032);
+      // a second, offset dab so one pass over the crown actually covers it
+      _v.copy(worldPoint).add(_v2.set(
+        (this.rand() - 0.5) * headR * 0.9,
+        (this.rand() - 0.2) * headR * 0.5,
+        (this.rand() - 0.5) * headR * 0.9));
+      this.foam.add('head', _v, 0.014, 0.030);
       ctx.fx?.burst?.('bubble', worldPoint, 2);
       this.dirt.hair = Math.max(0, this.dirt.hair - 0.14);
       ctx.baby?.setDirt?.('hair', this.dirt.hair);
       ctx.baby?.setFoam?.('hair', Math.min(1, this.foam.density('head') * 3));
-      if (this._scrubStrokeUp > 0.25) {
+      if (this._scrubStrokeUp > 0.25 && this.foam.density('head') > 0.09) {
         this.foam.setHorn(Math.min(1, this.foam.hornTarget + 0.09));
         ctx.fx?.burst?.('sparkle', head.clone().setY(head.y + headR * 1.6), 2);
         if (this.foam.hornAmount > 0.5 && !this._hornCheered) {
@@ -1682,10 +1692,18 @@ export class BathActivity {
       return;
     }
     const headW = this.showerHead.getWorldPosition(_v);
-    // the spray lands a little below the head — that is where foam clears
-    const target = _v2.copy(headW).setY(headW.y - 0.24);
-    const removed = this.foam.rinse(target, 0.135, dt, 0.30);
-    this.droplets.wipe(target, 0.05);
+    // The jet is a widening cone, so sample it at three stations down its
+    // length. Foam only leaves where the water actually reaches — aiming is
+    // the whole mechanic.
+    let removed = 0;
+    const target = _v2.copy(headW).setY(headW.y - 0.22);
+    for (let i = 0; i < 3; i++) {
+      const drop = 0.09 + i * 0.11;
+      _v3.copy(headW).setY(headW.y - drop);
+      const r = 0.075 + drop * 0.28;
+      removed += this.foam.rinse(_v3, r, dt, 0.34);
+      this.droplets.wipe(_v3, r * 0.45);
+    }
 
     if (this.time - (this._lastRinseFx || 0) > 0.09) {
       this._lastRinseFx = this.time;
@@ -1699,6 +1717,11 @@ export class BathActivity {
     if (Math.abs(localHead.x) < HALF_X && Math.abs(localHead.z) < HALF_Z) {
       this.water.stir(localHead.x, localHead.z, 0.06, 0.0035);
     }
+
+    // Once the hair is clear, whatever is left slides off into the water on
+    // its own. No fail states — a four-year-old must never get stuck hunting
+    // the last blob of foam.
+    if (this.foam.density('head') < 0.03) this.foam.dissolve(dt, 0.035);
 
     if (this.phase === 'rinse' && this.foam.total() < 0.02 && this.foam.blobs.length === 0) {
       this._sfx('chime');
@@ -1715,6 +1738,7 @@ export class BathActivity {
     this._placeBabyOnMat();
     ctx.baby?.setMood?.('happy');
     ctx.baby?.gesture?.('shiver');
+    this._goTo('bath-dry');
     this.wet = 1;
     ctx.baby?.setWet?.(1);
     this._applyWetSkin(1);
@@ -1728,7 +1752,6 @@ export class BathActivity {
     this.foam.setBubbleRate(0);
     for (const f of this.floaters) f.obj.visible = true;
     this._setPhase('dry');
-    try { ctx.cameraRig?.goTo?.('bath-dry', 1.0); } catch (e) { /**/ }
   }
 
   /* ----------------------------------------------------------- 5. dry --- */
@@ -1770,10 +1793,10 @@ export class BathActivity {
     this.dryer.rotateX(Math.PI / 2);
     ctx.baby?.setMood?.('happy');
     this._cueHide();
-    setTimeout(() => {
+    this._after(1.5, () => {
       if (!this.root || this.phase !== 'dryer') return;
       this._finish();
-    }, 1500);
+    }, 'dryer');
   }
 
   _finish() {
@@ -1798,11 +1821,10 @@ export class BathActivity {
     this._setPhase('done');
   }
 
-  _moodResetSoon(ms = 1600) {
-    clearTimeout(this._moodT);
-    this._moodT = setTimeout(() => {
+  _moodResetSoon(seconds = 1.6) {
+    this._after(seconds, () => {
       if (this.root && this.phase !== 'done') this.ctx.baby?.setMood?.('neutral');
-    }, ms);
+    }, 'mood');
   }
 
   /* -------------------------------------------------------- wet skin ---- */
@@ -1831,6 +1853,7 @@ export class BathActivity {
     if (!this.root) return;
     const ctx = this.ctx;
     this.time += dt;
+    this._tickTimers(dt);
     ctx.baby?.group?.updateMatrixWorld?.();
 
     this._syncAnchors();
@@ -1969,7 +1992,7 @@ export class BathActivity {
 
     /* --- foam ---------------------------------------------------------- */
     this.foam.update(dt, ctx);
-    if (this._scrubStrokeUp > 0) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp - dt * 0.7);
+    if (this._scrubStrokeUp > 0) this._scrubStrokeUp = Math.max(0, this._scrubStrokeUp - dt * 0.35);
 
     /* --- waterlines ---------------------------------------------------- */
     this._updateWaterlines(dt);
@@ -2139,7 +2162,10 @@ export class BathActivity {
         }
       } else {
         for (const f of this.floaters) f.obj.visible = v > 0.06;
-        if (v < 0.05 && this.inTub) this._placeBabyOnMat();
+        if (v < 0.05) {
+          this._steamOverride = null;
+          if (this.inTub) this._placeBabyOnMat();
+        }
       }
       if (this.temp < 0.3 && patch.steam) { this.temp = 0.82; this.water.setTemperature(this.temp); }
     }
@@ -2203,6 +2229,7 @@ export class BathActivity {
       this.wetStrands.visible = v > 0.35;
       this._syncAnchors();
       if (v > 0.05) {
+        if (this.water.levelTarget < 0.2) this.foam.clear();
         this.droplets.fill(this.anchors, v);
         if (this.water.levelTarget < 0.2) {
           this._placeBabyOnMat();

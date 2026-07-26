@@ -76,13 +76,13 @@ export class Room {
     this._buildLights();
     this._buildAnchors();
 
-    this.group.add(this._shadowField.build());
-    this.shadows = this.group.children[this.group.children.length - 1];
+    this.shadows = this._shadowField.build();
+    this.group.add(this.shadows);
 
-    this.setMood('day');
     this.setWeather('clear');
     this.setCurtains(1);
-    this.setLamp(false);
+    this.setLamp(false, true);
+    this.setMood('day');
     return this.group;
   }
 
@@ -214,25 +214,25 @@ export class Room {
       g.applyMatrix4(m);
       return g;
     };
-    // profile x = projection into the room, y = height, extruded along +z
-    const B_BACK = [[0, 0, 1], [0, 1, 0], [1, 0, 0]];    // faces +z, runs +x
+    // profile x = projection into the room, y = height, extruded along +z;
+    // every basis is right-handed, so the back-wall runs travel -x
+    const B_BACK = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]];   // faces +z, runs -x
     const B_LEFT = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];    // faces +x, runs +z
     const B_RIGHT = [[-1, 0, 0], [0, 1, 0], [0, 0, -1]]; // faces -x, runs -z
 
     // skirting is interrupted by the doorway, so the back wall gets two runs
     const doorL = DOOR.x - DOOR.w / 2, doorR = DOOR.x + DOOR.w / 2;
-    trim.push(run(SKIRTING, doorL - X0, B_BACK, [X0, 0, Z0]));
-    trim.push(run(SKIRTING, X1 - doorR, B_BACK, [doorR, 0, Z0]));
+    trim.push(run(SKIRTING, doorL - X0, B_BACK, [doorL, 0, Z0]));
+    trim.push(run(SKIRTING, X1 - doorR, B_BACK, [X1, 0, Z0]));
     trim.push(run(SKIRTING, RD, B_LEFT, [X0, 0, Z0]));
     trim.push(run(SKIRTING, RD, B_RIGHT, [X1, 0, Z1]));
-    trim.push(run(RAIL, RW, B_BACK, [X0, 1.98, Z0]));
+    trim.push(run(RAIL, RW, B_BACK, [X1, 1.98, Z0]));
     trim.push(run(RAIL, RD, B_LEFT, [X0, 1.98, Z0]));
     trim.push(run(RAIL, RD, B_RIGHT, [X1, 1.98, Z1]));
 
     // door architrave
     const CASE = [[0, 0], [0.024, 0.006], [0.026, 0.030], [0.016, 0.048], [0.014, 0.070], [0, 0.074]];
     const band = 0.074;
-    const caseBasis = (xa, ya, za) => [xa, ya, za];
     const cm = (len, basis, pos) => {
       const g = P.extrudeProfile(CASE, len, { bevel: 0.0012, curve: 2 });
       const m = new THREE.Matrix4().makeBasis(
@@ -273,3 +273,326 @@ export class Room {
     this.door = door;
     this._pick.push(door.children[0]);
   }
+
+  /* ---------------------------------------------------------- window --- */
+
+  _buildWindow(ctx) {
+    const unit = new WindowUnit({
+      tier: this.tier, palette: this.M, width: WIN.w, height: WIN.h, wall: WALL
+    });
+    unit.build(ctx);
+    unit.group.position.set(X0, WIN.sill + WIN.h / 2, WIN.z);
+    unit.group.rotation.y = Math.PI / 2;    // local +z (room side) -> world +x
+    this.group.add(unit.group);
+    this.window = unit;
+  }
+
+  /* -------------------------------------------------------- furniture --- */
+
+  _place(obj, x, y, z, ry = 0) {
+    obj.position.set(x, y, z);
+    obj.rotation.y = ry;
+    this.group.add(obj);
+    if (obj.userData.pick) this._pick.push(...obj.userData.pick);
+    return obj;
+  }
+
+  _buildFurniture() {
+    const M = this.M;
+    const S = this._shadowField;
+
+    /* --- cot, with the mobile clamped to its far post -------------------- */
+    this.crib = this._place(P.buildCrib(M), -1.45, 0, -2.28);
+    S.add(-1.45, -2.28, 0.70, 0.40, { opacity: 0.55, softness: 0.75 });
+    this.mobile = this._place(P.buildMobile(M), -2.02, 0.78, -2.56, 0.35);
+
+    /* --- changing dresser ------------------------------------------------ */
+    this.dresser = this._place(P.buildDresser(M), 0.15, 0, -2.52);
+    S.add(0.15, -2.52, 0.56, 0.30, { opacity: 0.55, softness: 0.9 });
+
+    this.nightlight = this._place(P.buildNightlight(M), 0.56, 0.905, -2.40, 0.4);
+
+    /* --- wardrobe -------------------------------------------------------- */
+    this.wardrobe = this._place(P.buildWardrobe(M), 2.41, 0, -1.55, -Math.PI / 2);
+    S.add(2.41, -1.55, 0.32, 0.56, { opacity: 0.58, softness: 0.95 });
+
+    /* --- shelf (with its books, teddy, rings and lamp) ------------------- */
+    this.shelf = this._place(P.buildShelf(M), 0.10, 1.24, -2.66);
+    this.lamp = this.shelf.userData.lamp;
+
+    /* --- toy box --------------------------------------------------------- */
+    this.toybox = this._place(P.buildToyBox(M), -2.30, 0, 1.05, Math.PI / 2);
+    S.add(-2.30, 1.05, 0.26, 0.40, { opacity: 0.5, softness: 0.8 });
+
+    /* --- high chair and play table --------------------------------------- */
+    this.highchair = this._place(P.buildHighchair(M), 1.72, 0, -0.35, 2.35);
+    S.add(1.72, -0.35, 0.26, 0.26, { opacity: 0.45, softness: 0.55 });
+
+    this.table = this._place(P.buildPlayTable(M), 1.45, 0, 0.78, 0.4);
+    S.add(1.45, 0.78, 0.33, 0.33, { opacity: 0.42, softness: 0.6 });
+    S.add(1.02, 0.95, 0.16, 0.16, { opacity: 0.35, softness: 0.5 });
+    S.add(1.86, 0.60, 0.16, 0.16, { opacity: 0.35, softness: 0.5 });
+
+    /* --- laundry basket, plant, pouffe ----------------------------------- */
+    this.basket = this._place(P.buildBasket(M), 1.02, 0, -2.36, 0.5);
+    S.add(1.02, -2.36, 0.27, 0.27, { opacity: 0.5, softness: 0.7 });
+
+    this.plant = this._place(P.buildPlant(M), 2.25, 0, 1.42, 0.9);
+    S.add(2.25, 1.42, 0.30, 0.30, { opacity: 0.45, softness: 0.6 });
+
+    this.pouffe = this._place(P.buildPouffe(M), -1.62, 0, 0.62, 0.3);
+    S.add(-1.62, 0.62, 0.32, 0.32, { opacity: 0.42, softness: 1.1 });
+
+    /* --- rug ------------------------------------------------------------- */
+    this.rug = P.buildRug(M, { radius: 1.18 });
+    this.rug.position.set(0.05, 0, 0.35);
+    this.group.add(this.rug);
+    // the rug's own soft occlusion, wider and much fainter than a prop's
+    S.add(0.05, 0.35, 1.30, 1.30, { opacity: 0.16, softness: 2.4, y: 0.002 });
+  }
+
+  /* --------------------------------------------------------- dressing --- */
+
+  _buildDressing() {
+    const M = this.M;
+    const wallZ = Z0 + 0.022;
+
+    // pictures over the cot, hung a degree or two off true
+    this.pictures = P.buildPictures(M, [
+      { x: -0.40, y: 0.06, w: 0.44, h: 0.34, art: 0, tilt: 0.018 },
+      { x: 0.10, y: 0.20, w: 0.30, h: 0.38, art: 3, tilt: -0.030 },
+      { x: 0.11, y: -0.22, w: 0.34, h: 0.26, art: 2, tilt: 0.012 }
+    ]);
+    this.pictures.position.set(-1.42, 1.52, wallZ);
+    this.group.add(this.pictures);
+    this._pick.push(...(this.pictures.userData.pick || []));
+
+    // a fourth picture on the right-hand wall, seen edge-on from the camera
+    this.picture2 = P.buildPictures(M, [{ x: 0, y: 0, w: 0.34, h: 0.42, art: 1, tilt: -0.02 }]);
+    this.picture2.position.set(X1 - 0.022, 1.60, 0.35);
+    this.picture2.rotation.y = -Math.PI / 2;
+    this.group.add(this.picture2);
+
+    this.clock = P.buildClock(M, { r: 0.125 });
+    this.clock.position.set(1.02, 1.66, wallZ + 0.01);
+    this.group.add(this.clock);
+
+    // bunting slung across the back-left corner
+    this.bunting = P.buildBunting(M, [X0 + 0.05, 2.32, -1.60], [0.62, 2.14, wallZ + 0.02], {
+      n: 12, sag: 0.26
+    });
+    this.group.add(this.bunting);
+  }
+
+  /* ---------------------------------------------------------- clutter --- */
+
+  _buildClutter() {
+    // hand-placed so nothing ever lands inside a piece of furniture
+    const spots = [
+      [-0.62, 0.92], [0.52, 1.18], [-1.22, 0.10], [0.92, 0.62], [-0.28, -0.38],
+      [0.38, -0.18], [1.08, 1.42], [-1.58, 1.44], [0.70, -0.92], [-0.86, -1.05]
+    ];
+    this._clutterRig = P.buildClutter(this.M, spots, { seed: 77 });
+    this._clutterRig.group.position.set(0, 0, 0);
+    this.group.add(this._clutterRig.group);
+    this._pick.push(...this._clutterRig.meshes);
+
+    // one shared blob under the mess, from the engine's own contact shadow
+    this._clutterShadow = contactShadow(1.7, 0.0, 2.6);
+    this._clutterShadow.position.set(0.0, 0.006, 0.35);
+    this.group.add(this._clutterShadow);
+  }
+
+  /* ----------------------------------------------------------- lights --- */
+
+  _buildLights() {
+    // A soft bounce sitting just inside the window. The global rig owns the
+    // key; this only fills the reveal and the wall beside it, which is what
+    // makes the opening read as a hole rather than a poster.
+    this.windowBounce = new THREE.PointLight(0xdfeeff, 1.6, 4.6, 2);
+    this.windowBounce.position.set(X0 + 0.45, WIN.sill + WIN.h * 0.55, WIN.z);
+    this.windowBounce.castShadow = false;
+    this.group.add(this.windowBounce);
+
+    this.nightGlow = new THREE.PointLight(0xffb877, 0, 1.6, 2);
+    this.nightGlow.position.set(0.56, 0.96, -2.40);
+    this.group.add(this.nightGlow);
+
+    // the shelf lamp drives the rig's own "practical" so it lights the baby
+    const p = this.ctx?.lighting?.practical;
+    if (p) {
+      this.group.updateMatrixWorld(true);
+      this.lamp.getWorldPosition(p.position);
+      p.position.y += 0.20;
+      p.distance = 3.4;
+      p.decay = 2;
+    }
+  }
+
+  /* ---------------------------------------------------------- anchors --- */
+
+  _buildAnchors() {
+    const A = (name, x, y, z, ry = 0) => {
+      const o = new THREE.Object3D();
+      o.name = 'anchor:' + name;
+      o.position.set(x, y, z);
+      o.rotation.y = ry;
+      this.group.add(o);
+      this._anchors.set(name, o);
+      return o;
+    };
+    A('crib', -1.45, 0.52, -2.28);                  // mattress top
+    A('tub', -0.92, 0.0, 0.98, 0.25);               // sits in the window light
+    A('highchair', 1.72, 0.0, -0.35, 2.35);
+    A('playmat', 0.05, 0.02, 0.40);
+    A('wardrobe', 2.41, 0.0, -1.55, -Math.PI / 2);
+    A('window', X0 + 0.10, WIN.sill + WIN.h / 2, WIN.z, Math.PI / 2);
+    A('shelf', 0.10, 1.26, -2.60);
+    A('toybox', -2.30, 0.45, 1.05, Math.PI / 2);
+    A('rug', 0.05, 0.015, 0.35);
+    A('table', 1.45, 0.44, 0.78, 0.4);
+  }
+
+  /* ================================================================ api === */
+
+  anchor(name) {
+    return this._anchors.get(name) || null;
+  }
+
+  pickables() {
+    return [...this._pick, ...(this.window ? this.window.pickables() : []), this.rug, this.floor];
+  }
+
+  /** 'day' | 'golden' | 'evening' | 'night' — room-side dressing only; the
+   *  global light rig is the app's business. */
+  setMood(name) {
+    if (!['day', 'golden', 'evening', 'night'].includes(name)) return;
+    this.mood = name;
+    this.window?.setMood(name);
+    const night = name === 'night';
+    const evening = name === 'evening';
+    // contact shadows have to soften as the key light does, or props start to
+    // look stuck-on at night
+    this.shadows?.userData.setGlobal(night ? 0.45 : evening ? 0.78 : 1);
+    this._bounceBase = { day: 1.75, golden: 1.55, evening: 0.75, night: 0.30 }[name];
+    // nobody leaves a nursery dark: the lamps come on by themselves after dark
+    if (!this._lampForced) this.setLamp(night || evening, true);
+  }
+
+  setWeather(name) {
+    if (!['clear', 'rain', 'snow'].includes(name)) return;
+    this.weather = name;
+    this.window?.setWeather(name);
+    // an overcast sky is a bigger, softer, cooler source: dimmer bounce, but
+    // spread wider so the room still reads as daylit
+    this._bounceScale = name === 'rain' ? 0.55 : name === 'snow' ? 0.8 : 1;
+    this._bounceRange = name === 'clear' ? 4.6 : 5.6;
+  }
+
+  /** 0 = curtains drawn across, 1 = pulled fully back. */
+  setCurtains(open) {
+    this.curtains = THREE.MathUtils.clamp(open, 0, 1);
+    this.window?.setCurtains(this.curtains);
+  }
+
+  setLamp(on, auto = false) {
+    this.lampOn = !!on;
+    if (!auto) this._lampForced = true;
+    this.lamp?.userData.setOn(this.lampOn);
+    this.nightlight?.userData.setOn(this.lampOn);
+    this.nightGlow.intensity = this.lampOn ? 0.55 : 0;
+    const p = this.ctx?.lighting?.practical;
+    if (p) {
+      this._practicalBase = this.lampOn ? 3.2 : 0;
+      p.intensity = this._practicalBase;
+    }
+  }
+
+  /**
+   * Scatter toys on the floor, or tidy them away.
+   *   clutter(true)  — everything out      clutter(false) — everything away
+   *   clutter(n)     — exactly n toys out
+   */
+  clutter(add) {
+    const n = this._clutterRig.set(add);
+    return n;
+  }
+
+  onState(patch = {}) {
+    if (patch.weather) this.setWeather(patch.weather);
+    if (patch.timeOfDay && ['day', 'golden', 'evening', 'night'].includes(patch.timeOfDay)) {
+      this.setMood(patch.timeOfDay);
+      // an explicit state change should move the whole rig, not just the room
+      this.ctx?.lighting?.transitionTo?.(patch.timeOfDay, 1.4);
+    }
+    if (patch.mess !== undefined) this.clutter(patch.mess);
+    if (patch.curtains !== undefined) this.setCurtains(patch.curtains);
+    if (patch.lamp !== undefined) this.setLamp(patch.lamp);
+  }
+
+  reset() {
+    this._lampForced = false;
+    this.clutter(false);
+    this.setCurtains(1);
+    this.setWeather('clear');
+    this.setMood('day');
+    this.setLamp(false, true);
+    this.window?.setWeather('clear', true);
+    this.window?.setMood('day', true);
+    this.window?.setCurtains(1, true);
+  }
+
+  /* =============================================================== tick === */
+
+  update(dt, ctx) {
+    this.time += dt;
+    const t = this.time;
+
+    this.window?.update(dt, ctx);
+
+    // mobile: a slow spin with a touch of bob, never a constant rate — the eye
+    // reads perfectly linear motion as machinery
+    const spin = this.mobile.userData.spin;
+    spin.rotation.y = t * 0.30 + Math.sin(t * 0.7) * 0.10;
+    spin.position.y = 0.60 + Math.sin(t * 0.85) * 0.006;
+    spin.rotation.z = Math.sin(t * 0.6) * 0.02;
+
+    this.bunting.userData.update(t);
+
+    // clock: starts at ten past ten and runs 30× so it is visibly alive
+    const mins = 610 + t * 0.5;
+    this.clock.userData.minute.rotation.z = -(mins % 60) / 60 * Math.PI * 2;
+    this.clock.userData.hour.rotation.z = -((mins % 720) / 720) * Math.PI * 2;
+
+    // toys settling in or being tidied away
+    if (this._clutterRig.update(dt)) {
+      let v = 0;
+      for (const toy of this._clutterRig.toys) v = Math.max(v, toy.v);
+      this._clutterShadow.userData.setOpacity(v * 0.20);
+    }
+
+    /* --- the window's bounce light tracks the sky it is bouncing --------- */
+    const k = 1 - Math.exp(-dt * 2.2);
+    const target = (this._bounceBase ?? 1.6) * (this._bounceScale ?? 1)
+      * (this.window ? 0.55 + 0.55 * this.window.shaftStrength() : 1);
+    this.windowBounce.intensity += (target - this.windowBounce.intensity) * k;
+    this.windowBounce.distance += ((this._bounceRange ?? 4.6) - this.windowBounce.distance) * k;
+    if (this.window) this.windowBounce.color.lerp(this.window.skyTint(), k * 0.6);
+
+    // a practical lamp that sits at one exact intensity looks like a uniform
+    const p = ctx?.lighting?.practical;
+    if (p && this._practicalBase) {
+      p.intensity = this._practicalBase * (1 + Math.sin(t * 6.3) * 0.012 + Math.sin(t * 11.7) * 0.008);
+    }
+  }
+
+  dispose() {
+    this.window?.dispose();
+    this.group.traverse(o => {
+      o.geometry?.dispose?.();
+      if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.());
+      else o.material?.dispose?.();
+    });
+    this.group.clear();
+  }
+}
