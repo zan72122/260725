@@ -197,11 +197,12 @@ class Droplets {
 
   spawn(anchor, local, r) {
     if (this.list.length >= this.cap) return;
+    const runner = this.rand() < 0.32;
     this.list.push({
-      anchor, local: local.clone(), r,
-      vel: 0, run: 0,
+      anchor, local: local.clone(), home: local.clone(), r,
+      vel: 0, runner, delay: runner ? this.rand() * 2.5 : 0,
       wob: this.rand() * 6.28,
-      bottom: local.y - 0.10 - this.rand() * 0.06
+      bottom: local.y - 0.09 - this.rand() * 0.05
     });
   }
 
@@ -229,6 +230,7 @@ class Droplets {
           0.0045 + rand() * 0.004);
       }
     }
+    this.total = this.list.length;
   }
 
   /** Wipe every bead within `radius` of a world point. Returns how many went. */
@@ -244,27 +246,38 @@ class Droplets {
     return n;
   }
 
-  clear() { this.list.length = 0; this.mesh.count = 0; }
+  clear() { this.list.length = 0; this.mesh.count = 0; this.total = 0; }
   get count() { return this.list.length; }
 
   update(dt, time) {
     let n = 0;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const d = this.list[i];
-      // beads hang, swell, then break loose and accelerate down the skin
-      d.vel = Math.min(0.09, d.vel + dt * 0.035);
-      d.local.y -= d.vel * dt;
-      d.local.x += Math.sin(time * 1.7 + d.wob) * dt * 0.002;
-      if (d.local.y < d.bottom) {
-        this.list.splice(i, 1);
-        this._p.copy(d.local);
-        d.anchor.localToWorld(this._p);
-        this.ctx?.fx?.burst?.('splash', this._p, 1, { scale: 0.35 });
-        continue;
+      if (d.runner) {
+        // beads hang, swell, then break loose and accelerate down the skin
+        d.delay -= dt;
+        if (d.delay <= 0) {
+          d.vel = Math.min(0.10, d.vel + dt * 0.05);
+          d.local.y -= d.vel * dt;
+          d.local.x += Math.sin(time * 1.7 + d.wob) * dt * 0.003;
+        }
+        if (d.local.y < d.bottom) {
+          // it drips off — and a fresh one gathers where it started, so the
+          // skin keeps reading as wet until it is actually towelled
+          this._p.copy(d.local);
+          d.anchor.localToWorld(this._p);
+          this.ctx?.fx?.burst?.('splash', this._p, 1, { scale: 0.35 });
+          d.local.copy(d.home);
+          d.vel = 0;
+          d.delay = 1.2 + this.rand() * 2.4;
+        }
+      } else {
+        // clingers only quiver
+        d.local.y = d.home.y + Math.sin(time * 2.3 + d.wob) * 0.0007;
       }
       this._p.copy(d.local);
       d.anchor.localToWorld(this._p);
-      const stretch = 1 + d.vel * 4.0;
+      const stretch = 1 + d.vel * 5.0;
       this._s.set(d.r, d.r * stretch, d.r);
       this._m.compose(this._p, this._q, this._s);
       this.mesh.setMatrixAt(n++, this._m);
@@ -1214,6 +1227,7 @@ export class BathActivity {
         this._cueAt(this._world(this.shampoo, 0.02, 0.23, 0), 0.06);
         break;
       case 'rinse':
+        this._rinseTime = 0;
         // bring the head to hand rather than leaving it on its dock
         this.showerHead.position.set(-0.26, STAND_H + 0.50, 0.10);
         this._prompt('シャワーで あわを ながそう', 'shower');
@@ -1718,10 +1732,12 @@ export class BathActivity {
       this.water.stir(localHead.x, localHead.z, 0.06, 0.0035);
     }
 
-    // Once the hair is clear, whatever is left slides off into the water on
-    // its own. No fail states — a four-year-old must never get stuck hunting
-    // the last blob of foam.
-    if (this.foam.density('head') < 0.03) this.foam.dissolve(dt, 0.035);
+    // Aiming is the mechanic for the first few seconds; after that whatever
+    // is left slides off into the water on its own. No fail states — a
+    // four-year-old must never get stuck hunting the last blob of foam.
+    this._rinseTime = (this._rinseTime || 0) + dt;
+    if (this.foam.density('head') < 0.03) this.foam.dissolve(dt, 0.05);
+    if (this._rinseTime > 4) this.foam.dissolve(dt, 0.012 + (this._rinseTime - 4) * 0.012);
 
     if (this.phase === 'rinse' && this.foam.total() < 0.02 && this.foam.blobs.length === 0) {
       this._sfx('chime');
@@ -1769,7 +1785,7 @@ export class BathActivity {
       this._sfx('squeak');
       this.ctx.fx?.burst?.('sparkle', plane, wiped * 2);
       this.sneezeTimer = 7;
-      this.wet = Math.max(0, this.droplets.count / 26);
+      this.wet = Math.max(0, this.droplets.count / Math.max(1, this.droplets.total || 1));
       this.ctx.baby?.setWet?.(Math.max(0.25, this.wet));
       this._applyWetSkin(Math.max(0.25, this.wet));
       if (this.droplets.count === 0) {
