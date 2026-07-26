@@ -252,9 +252,14 @@ export class SleepActivity {
     const rig = ctx.cameraRig;
     if (!rig?.overridePreset) return;
     rig.setSubject?.(this.shotPivot);
+    // The near rail tops out 0.25 m *above* the sleeping head, so the eye
+    // height is not a taste call: a camera standing `u` metres outside the
+    // rail only sees the face at all above y = 0.76·u + 0.68 (rail top). Each
+    // of these sits ~0.05 m over that line, which puts the rail itself just
+    // inside the bottom of the frame — the baby is genuinely seen *over* it.
     const faceShot = {
       space: 'subject',
-      pos: [-0.45, 0.40, 0.22], target: [0.02, -0.02, 0.03],
+      pos: [-0.583, 0.494, 0.227], target: [-0.011, -0.026, 0.017],
       fov: 32, focusRange: 0.11, dof: 1.30, handheld: 0.45, roll: 0.4
     };
     rig.overridePreset('crib-face', faceShot);
@@ -262,12 +267,12 @@ export class SleepActivity {
     rig.overridePreset('face', faceShot);
     rig.overridePreset('crib', {
       space: 'subject',
-      pos: [-0.62, 0.62, 0.34], target: [0.04, -0.10, 0.02],
+      pos: [-0.845, 0.716, 0.329], target: [-0.011, -0.060, 0.017],
       fov: 36, focusRange: 0.18, dof: 1.15, handheld: 0.50, roll: 0.5
     });
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [-0.54, 0.52, 0.30], target: [0.03, -0.06, 0.02],
+      pos: [-0.700, 0.593, 0.272], target: [-0.011, -0.045, 0.017],
       fov: 34, focusRange: 0.15, dof: 1.20, handheld: 0.55, roll: 0.5
     });
   }

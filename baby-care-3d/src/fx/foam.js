@@ -22,7 +22,6 @@
 import * as THREE from 'three';
 import * as MAT from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng } from './water.js';
 
 const _m = new THREE.Matrix4();
@@ -37,23 +36,32 @@ const BUB = [10, 24, 42];
 /**
  * Icosphere pushed around by a few sines — reads as a clump, not a ball.
  *
- * `IcosahedronGeometry` is **non-indexed**, so `computeVertexNormals()` on it
- * produces flat per-face normals. On a 25 mm blob that read as a chip of
- * quartz, and forty of them read as a heap of gravel on the baby's chest.
- * Welding first is what turns the same silhouette into something soft.
+ * `IcosahedronGeometry` is **non-indexed** and carries per-face UVs, so
+ * `computeVertexNormals()` gives flat per-face normals and `mergeVertices()`
+ * cannot weld anything (the UVs differ at every shared corner). The result was
+ * a 25 mm chip of faceted quartz, and forty of them on a chest read as gravel.
+ *
+ * A blob is a mildly deformed sphere, so the radial direction is an excellent
+ * smooth normal for it — and unlike welding it works on the non-indexed
+ * geometry the UVs need. Soap is soft; this is what makes it look it.
  */
 function clumpGeometry(detail) {
-  const geo = mergeVertices(new THREE.IcosahedronGeometry(1, detail), 1e-5);
+  const geo = new THREE.IcosahedronGeometry(1, detail);
   const p = geo.attributes.position;
+  const nrm = geo.attributes.normal;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     const n = 1
       + 0.13 * Math.sin(x * 7.3 + y * 4.1)
       + 0.10 * Math.sin(y * 9.1 - z * 5.7)
       + 0.07 * Math.sin(z * 11.4 + x * 6.2);
-    p.setXYZ(i, x * n, y * n, z * n);
+    const nx = x * n, ny = y * n, nz = z * n;
+    p.setXYZ(i, nx, ny, nz);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nrm.setXYZ(i, nx / l, ny / l, nz / l);
   }
-  geo.computeVertexNormals();
+  p.needsUpdate = true;
+  nrm.needsUpdate = true;
   return geo;
 }
 

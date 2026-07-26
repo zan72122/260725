@@ -663,11 +663,15 @@ button {
   transition: transform var(--t-med) var(--spring), opacity var(--t-med) var(--ease);
 }
 .star-slot > .ic { width: 100%; height: 100%; }
-/* an empty slot is a printed outline waiting for its sticker */
+/* an empty slot is a printed socket waiting for its sticker — it has to be
+   visible enough that a child can see there is a space to fill */
 .star-slot.is-empty {
-  opacity: .34;
-  filter: grayscale(1) brightness(1.28);
-  box-shadow: inset 0 0 0 .28vmin rgba(150, 108, 130, .22);
+  opacity: .62;
+  filter: grayscale(.92) brightness(.96);
+  background: radial-gradient(circle at 50% 45%,
+      rgba(140, 96, 118, .16) 0%, rgba(140, 96, 118, .05) 62%, rgba(140, 96, 118, 0) 78%);
+  box-shadow: inset 0 0 0 .22vmin rgba(146, 104, 126, .38),
+              inset 0 .18vmin .35vmin rgba(120, 82, 104, .16);
 }
 .star-slot.is-full {
   opacity: 1;

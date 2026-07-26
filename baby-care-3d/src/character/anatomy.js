@@ -466,7 +466,7 @@ export function buildDetail() {
     // ear concha
     dimple(m([0.0700, 0.5290, 0.0040], s), 0.0105, 0.0042, 0.0016);
     // eye socket: a shallow anisotropic scoop so the eyeball sits *in* the face
-    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0300, 0.0215, 0.0340], 0.0172);
+    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0290, 0.0210, 0.0335], 0.0140);
     // the little pad under the eye that makes infants look sleepy-sweet
     blob(m([P.eyeX, P.eyeY - 0.0180, P.eyeZ + 0.004], s), [0.0210, 0.0075, 0.0240], -0.0022);
     // nostril — tucked under the tip, where an infant's actually are
@@ -658,7 +658,7 @@ export function buildPatch(field, opts) {
     axis = null, capStart = 4, capEnd = 4,
     ref = [0, 0, 1], uvRepeat = 7, inflate = 0, collapse = null,
     margin = 0.035, sinkDepth = 0.005, detail = null,
-    tMax = 0.42, uvOffsetV = 0, focus = null
+    tMax = 0.42, uvOffsetV = 0, focus = null, tube = null
   } = opts;
 
   /**
@@ -715,11 +715,30 @@ export function buildPatch(field, opts) {
       const vi = j * (segs + 1) + i;
       let ox, oy, oz, dx, dy, dz;
       if (star) {
-        const theta = Math.PI * warp(j / R, wT[0], wT[1]);
+        const tw = warp(j / R, wT[0], wT[1]);
+        const theta = Math.PI * tw;
         const psi = warp(phi, wP[0], wP[1]) * Math.PI * 2 - Math.PI / 2;   // seam at the back of the head
         const st = Math.sin(theta);
         ox = center[0]; oy = center[1]; oz = center[2];
         dx = st * Math.cos(psi); dy = Math.cos(theta); dz = st * Math.sin(psi);
+        if (tube) {
+          // The jaw→neck junction is *concave*, so it is not star-shaped about
+          // the head's centre: rays there either graze the jaw or slip past it
+          // into the neck, and two adjacent rings land centimetres apart. That
+          // is what produced the ring of hard triangular flaps under the chin.
+          // Below `tube.from` the ray origin slides down the neck axis and the
+          // direction rotates to purely radial, turning the bottom of the star
+          // patch into an ordinary cylindrical loft, which the neck *is*.
+          const k = smoothstep(tube.from, tube.to, tw);
+          const k2 = smoothstep(tube.to, 1.0, tw);
+          ox += (tube.a[0] - center[0]) * k + (tube.b[0] - tube.a[0]) * k2;
+          oy += (tube.a[1] - center[1]) * k + (tube.b[1] - tube.a[1]) * k2;
+          oz += (tube.a[2] - center[2]) * k + (tube.b[2] - tube.a[2]) * k2;
+          const rx = Math.cos(psi), rz = Math.sin(psi);
+          dx += (rx - dx) * k; dy += (0 - dy) * k; dz += (rz - dz) * k;
+          const l = Math.hypot(dx, dy, dz) || 1;
+          dx /= l; dy /= l; dz /= l;
+        }
       } else {
         const f = origins[j];
         const psi = phi * Math.PI * 2 + Math.PI;       // seam at the back of the limb
@@ -989,7 +1008,8 @@ export function buildAnatomy({ tier = 2, uvRepeat = 7 } = {}) {
     center: [0, 0.5330, 0.0060],
     segs: lod.head[0], rings: lod.head[1], tMax: 0.20,
     focus: HEAD_FOCUS, sinkDepth: 0.010,
-    collapse: { from: 0.928, to: [0, 0.4250, 0.0020] }
+    tube: { from: 0.760, to: 0.900, a: [0, 0.4710, 0.0030], b: [0, 0.4300, 0.0010] },
+    collapse: { from: 0.962, to: [0, 0.4180, 0.0010] }
   });
 
   const bodyPatches = [

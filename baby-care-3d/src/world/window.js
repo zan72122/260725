@@ -1163,9 +1163,14 @@ export class WindowUnit {
   }
 
   _writeShaftIntensity(i) {
-    this.shaftU.uIntensity.value = 0.42 * i;
-    this.poolU.uIntensity.value = 0.50 * i;
-    this.moteU.uIntensity.value = 0.42 * Math.min(1.4, i);
+    // Raised across the board. These are *additive* over the scene, so when the
+    // room's exposure went up ~1/5 stop and the ambient came up with it, the
+    // beam's contribution stayed fixed in absolute terms and therefore fell in
+    // relative terms — it stopped being visible as airborne light at all in the
+    // wide shot. The beam is meant to be the best thing in that frame.
+    this.shaftU.uIntensity.value = 0.66 * i;
+    this.poolU.uIntensity.value = 0.72 * i;
+    this.moteU.uIntensity.value = 0.60 * Math.min(1.4, i);
   }
 
   /** What the room should feed its window-bounce light. */

@@ -271,7 +271,11 @@ export function makeCloth({
   roughness = 0.95,
   repeat = 3,
   seed = 7,
-  normalScale = 0.9
+  // 0.9 on a weave whose relief is already exaggerated in the height field put
+  // a 2 mm-deep waffle on a baby's jersey top: it read as a knitted string vest
+  // or a quilted pot-holder, not as soft cotton. Cloth relief is what makes the
+  // *sheen* break up; it is not meant to be legible as geometry.
+  normalScale = 0.6
 } = {}) {
   const maps = TEX.fabric({ color: 0xffffff, weave, threads, seed });
   const mat = new THREE.MeshPhysicalMaterial({
@@ -372,11 +376,18 @@ export function makeWood({
           vec2 wdDetile(vec2 uv, out float joint) {
             float row = floor(uv.y * uPlankRows);
             float rh = wdHash(row * 7.31 + 3.7);
-            // stagger the joints per row so they never line up between courses
-            float bx = uv.x / uJoint + rh * 4.17;
+            /* Board *lengths* vary per course, not just their phase. With a
+             * fixed pitch the joints landed on a lattice: staggered between
+             * rows, but every row's joints exactly `uJoint` apart, which the
+             * eye assembled — together with the plank seams running the other
+             * way — into a grid. The floor read as square tiles rather than as
+             * boards. A ±25% per-course length is what a real pack of flooring
+             * gives you and it destroys the lattice completely. */
+            float pitch = uJoint * (0.78 + rh * 0.5);
+            float bx = uv.x / pitch + rh * 4.17;
             float board = floor(bx);
             float bh = wdHash(board * 19.13 + row * 5.77);
-            joint = 1.0 - smoothstep(0.0, 0.012, min(fract(bx), 1.0 - fract(bx)));
+            joint = 1.0 - smoothstep(0.0, 0.010, min(fract(bx), 1.0 - fract(bx)));
             return vec2(uv.x + bh * 6.31 + rh * 2.19, uv.y);
           }
         `)
@@ -384,8 +395,11 @@ export function makeWood({
           float wdJoint;
           vec2 wdUv = wdDetile(vMapUv, wdJoint);
           diffuseColor *= texture2D( map, wdUv );
-          // the dark line of the butt joint itself
-          diffuseColor.rgb *= 1.0 - wdJoint * 0.55;
+          // The dark line of the butt joint itself. 0.55 was a 45% black line —
+          // as strong as the plank seam, so the two read as equal partners in a
+          // grid instead of "long boards, occasionally jointed". A butt joint
+          // in a fitted floor is a hairline; it should be just visible.
+          diffuseColor.rgb *= 1.0 - wdJoint * 0.26;
         `)
         .replace('#include <roughnessmap_fragment>', /* glsl */`
           float roughnessFactor = roughness;

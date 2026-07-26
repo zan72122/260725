@@ -115,7 +115,7 @@ export const MOODS = {
       // band around 55% with no clean white anywhere. Up 1/5 stop, with the
       // contrast raised to keep the extra light out of the shadows and the
       // vignette pulled back off the corners the furniture actually occupies.
-      saturation: 1.16, contrast: 1.115, warmth: 0.02, vignette: 0.20, exposure: 1.14,
+      saturation: 1.13, contrast: 1.10, warmth: 0.02, vignette: 0.20, exposure: 1.11,
       shadowTint: [0.905, 0.96, 1.12], highTint: [1.035, 1.0, 0.955], split: 0.95
     },
     fog: { color: 0xf1ecf6, density: 0.005 }
@@ -137,7 +137,7 @@ export const MOODS = {
     // costs contrast, and the only way to buy it back without crushing the
     // shadows again is to raise the sun rather than lower the ambient — which
     // is also what actually happens at 4 pm.
-    keyColor: 0xffb877, keyIntensity: 4.75, keyPos: [-6.6, 2.35, 2.80],
+    keyColor: 0xffa85e, keyIntensity: 3.95, keyPos: [-6.6, 2.35, 2.80],
     // Fill and hemi are pulled *down* hard. Late afternoon is a high-contrast
     // hour; carrying `day`'s ambient into it is exactly what made the two moods
     // indistinguishable, because ambient is the half of the image that does not
@@ -147,7 +147,7 @@ export const MOODS = {
     // shadow side of a west-facing nursery is filled by a whole hemisphere of
     // blue sky; at 16:1 the crib simply went black and the mood stopped reading
     // as "late afternoon" and started reading as "underexposed".
-    fillColor: 0xa8c4f0, fillIntensity: 0.34, fillPos: [4.4, 2.4, 3.2],
+    fillColor: 0xb2c6e8, fillIntensity: 0.34, fillPos: [4.4, 2.4, 3.2],
     rimColor: 0xffbe80, rimIntensity: 1.85, rimPos: [0.4, 2.6, -5.2],
     hemiSky: 0xc0d4f4, hemiGround: 0xffbe94, hemiIntensity: 0.14,
     envIntensity: 0.30, shadowSpan: 6.2,
@@ -157,7 +157,7 @@ export const MOODS = {
       // reads as midtone; combined with a blue fill and a blue hemisphere it
       // turned a golden-hour nursery lilac. The key carries the warmth now and
       // the shadows only get the last of the sky.
-      saturation: 1.22, contrast: 1.15, warmth: 0.075, vignette: 0.30, exposure: 1.10,
+      saturation: 1.20, contrast: 1.15, warmth: 0.10, vignette: 0.30, exposure: 1.08,
       shadowTint: [0.90, 0.955, 1.115], highTint: [1.075, 1.0, 0.875], split: 0.9
     },
     fog: { color: 0xffd9b4, density: 0.009 }

@@ -27,7 +27,7 @@ const P = PROPORTIONS;
 /* ------------------------------------------------------------ landmarks --- */
 
 export const FACE = {
-  eye: [0.0298, 0.5318, 0.0498],   // eyeball centre (baby's left)
+  eye: [0.0300, 0.5320, 0.0532],   // eyeball centre (baby's left)
   eyeR: 0.0176,
   lidR: 0.0193,
   brow: [0.0298, 0.5528, 0.0648],

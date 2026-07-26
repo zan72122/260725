@@ -646,7 +646,7 @@ export class BathActivity {
     this.tempPatch = g;
 
     // bezel — same family as the mint rim band, slightly proud, fully bevelled
-    const bezelGeo = roundedBox(0.098, 0.034, 0.012, 0.013, 5);
+    const bezelGeo = roundedBox(0.098, 0.034, 0.014, 0.013, 5);
     this._disposables.push(bezelGeo);
     const bezel = new THREE.Mesh(bezelGeo, this._materials(
       MAT.makePlastic({ color: 0x9fe0d6, seed: 73, matte: 0.34, clearcoat: 0.9 })));
@@ -654,25 +654,28 @@ export class BathActivity {
     bezel.receiveShadow = true;
     g.add(bezel);
 
-    // Recessed window: a shallow pocket *inside* the bezel. The pocket and the
-    // pane both have to finish behind the bezel's front face (+0.006) or the
-    // "recess" protrudes and the reading disappears into its own shadow.
-    const wellGeo = roundedBox(0.076, 0.021, 0.009, 0.006, 4);
+    // Surround: a darker collar that sits half a millimetre behind the bezel
+    // face. Every one of these three parts has to finish at a *different*
+    // depth — coplanar front faces z-fought and the window rendered as a
+    // black slot with the reading invisible inside it.
+    const wellGeo = roundedBox(0.078, 0.021, 0.007, 0.005, 4);
     this._disposables.push(wellGeo);
     const well = new THREE.Mesh(wellGeo, this._materials(
-      MAT.makePlastic({ color: 0x4d5760, seed: 91, matte: 0.62 })));
-    well.position.z = 0.0015;
+      MAT.makePlastic({ color: 0x6d7880, seed: 91, matte: 0.62 })));
+    well.position.z = 0.0035;
     well.receiveShadow = true;
     g.add(well);
 
     // the thermochromic pane itself — lit plastic, one colour at a time
-    const paneGeo = roundedBox(0.062, 0.014, 0.005, 0.0035, 3);
+    const paneGeo = roundedBox(0.066, 0.015, 0.007, 0.0034, 3);
     this._disposables.push(paneGeo);
     this.tempPaneMat = this._materials(MAT.makePlastic({
-      color: 0x7be09a, seed: 74, matte: 0.18, clearcoat: 1
+      color: 0x9ff0b8, seed: 74, matte: 0.12, clearcoat: 1
     }));
     const pane = new THREE.Mesh(paneGeo, this.tempPaneMat);
-    pane.position.z = 0.0035;      // sits in the pocket, 1 mm under the bezel
+    // 1 mm proud of the bezel: a little domed lens, the way a real bath
+    // thermometer reads, and impossible to lose in its own shadow.
+    pane.position.z = 0.0050;
     pane.castShadow = false;
     g.add(pane);
     this.tempPane = pane;
@@ -689,9 +692,11 @@ export class BathActivity {
     g.add(new THREE.Mesh(dots, this._materials(
       MAT.makePlastic({ color: 0xfffaf2, seed: 92, matte: 0.4 }))));
 
-    this._tempCold = new THREE.Color(0x5aa9e6);
-    this._tempOk = new THREE.Color(0x74d69a);
-    this._tempHot = new THREE.Color(0xe8705a);
+    // Light enough to survive the evening grade — the first pass used
+    // mid-tones that came out of the tone map as a black slot.
+    this._tempCold = new THREE.Color(0x8ecdf5);
+    this._tempOk = new THREE.Color(0x9ff0b8);
+    this._tempHot = new THREE.Color(0xff9d84);
   }
 
   _buildShower() {
@@ -2480,7 +2485,7 @@ export class BathActivity {
     // A 0.6 mm breathe on the "just right" reading: enough to catch the eye at
     // closeup, invisible as motion in a still.
     const good = t >= TEMP_OK_MIN && t <= TEMP_OK_MAX;
-    pane.position.z = 0.0035 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
+    pane.position.z = 0.0050 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
   }
 
   _syncAnchors() {

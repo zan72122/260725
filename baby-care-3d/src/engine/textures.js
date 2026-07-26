@@ -487,7 +487,8 @@ export function fabric({
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });
 
-    const normal = normalFromHeight(size, weave === 'terry' ? 2.2 : 1.5, height);
+    const normal = normalFromHeight(
+      size, weave === 'terry' ? 2.0 : weave === 'knit' ? 1.05 : 1.3, height);
 
     const rough = generate(size, (u, v, out) => {
       const h = height(u, v);

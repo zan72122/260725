@@ -139,9 +139,24 @@ const GradeShader = {
       col = (col - minEv) / (maxEv - minEv);
       col = agxDefaultContrastApprox(col);
       col = agxOut * col;
-      // "punchy" look: mild saturation restore after the neutral AgX base
+      /* Saturation restore after the neutral AgX base.
+       *
+       * AgX earns its highlight rolloff by walking colours toward white as they
+       * brighten, and at 1.06 almost none of that was being given back. The
+       * consequence was visible in every frame: a 4.75-intensity amber key
+       * landing on a cream wall came out *pale pink*, the rug came out dusty,
+       * and the whole nursery sat in one washed pastel family with no colour
+       * anywhere strong enough to be called a hue. The frame read "correctly
+       * exposed" and not "lit" — which is the thing that separates a hobby
+       * render from a shipped one.
+       *
+       * 1.18 is applied here rather than in the grade's `uSaturation` on
+       * purpose: at this point we are still working per-channel on the tone
+       * curve's own output, so it undoes AgX's desaturation where AgX did it
+       * (the highlights) instead of pushing the shadows around too.
+       */
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-      col = mix(vec3(l), col, 1.06);
+      col = mix(vec3(l), col, 1.18);
       return max(col, 0.0);
     }
 
@@ -216,7 +231,7 @@ const GradeShader = {
       // this palette is *most of the room*. A warm cream wall lit by a 3.85
       // golden key sits around 0.45–0.60, so the blue shadow tint was landing
       // on it at half strength and the entire nursery came out lilac: the
-      // `golden` mood was chromatically indistinguishable from `day`, and both
+      // golden mood was chromatically indistinguishable from day, and both
       // read cool. A split tone has to touch the shadows only; above ~0.30 the
       // eye is reading local colour, not shadow colour.
       float shadowW = 1.0 - smoothstep(0.010, 0.30, sl);
@@ -241,6 +256,26 @@ const GradeShader = {
       // film grain — animated, luminance-weighted so shadows stay clean ------
       float n = fract(sin(dot(uv * uResolution + uTime * 37.0, vec2(12.9898, 78.233))) * 43758.5453);
       col += (n - 0.5) * uGrain * (0.35 + luma * 0.9);
+
+      /* Ordered dither before the 8-bit write (rubric §4.7 #100).
+       *
+       * Everything above runs in half float and then lands in an 8-bit sRGB
+       * canvas. A gradient that crosses one code value per 30-odd pixels — the
+       * sky through the window, the falloff of the vignette, the shaded half of
+       * a wall, the soft edge of a shadow — quantises into visible Mach bands,
+       * and the eye is far better at spotting a straight contour than it is at
+       * spotting a 1/255 error. The film grain above does not fix this: it is
+       * luminance-weighted, so it thins out to nothing exactly in the dark
+       * smooth areas that band the worst.
+       *
+       * A 4×4 Bayer matrix at ±0.5 LSB decorrelates the rounding for the cost
+       * of five ALU ops, and being *ordered* rather than random it does not add
+       * temporal noise on top of the grain that is there on purpose.
+       */
+      vec2 bp = floor(mod(vUv * uResolution, 4.0));
+      float bayer = mod(bp.x * 5.0 + bp.y * 3.0 + floor(bp.x * 0.5) * 6.0
+                      + floor(bp.y * 0.5) * 9.0, 16.0);
+      col += ((bayer + 0.5) / 16.0 - 0.5) / 255.0;
 
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }
