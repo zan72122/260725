@@ -98,43 +98,74 @@ const SHAFT_FRAG = /* glsl */`
   varying vec3 vPos;
   varying vec3 vWorld;
   uniform sampler2D uNoise;
+  uniform sampler2D uDepth;
   uniform vec3 uColor, uAxis;
+  uniform vec2 uResolution;
   uniform float uLen, uHalfW, uHalfH, uSpread, uTime, uIntensity, uBarX, uBarY, uOpen;
+  uniform float uHasDepth, uNear, uFar, uSoft;
+
+  /** normalize() that can never hand back NaN for a degenerate input. */
+  vec3 safeDir(vec3 v, vec3 fallback) {
+    float l = length(v);
+    return l > 1e-5 ? v / l : fallback;
+  }
 
   void main() {
-    float t = clamp(vPos.z / uLen, 0.0, 1.0);
+    float t = clamp(vPos.z / max(1e-4, uLen), 0.0, 1.0);
     float k = 1.0 + uSpread * t;
-    vec2 s = vec2(vPos.x / (uHalfW * k), vPos.y / (uHalfH * k));
+    vec2 s = vec2(vPos.x / max(1e-4, uHalfW * k), vPos.y / max(1e-4, uHalfH * k));
 
-    // soft rectangular cross-section, softening as the beam travels
-    float soft = mix(0.30, 0.75, t);
-    float ex = 1.0 - smoothstep(1.0 - soft, 1.02, abs(s.x));
-    float ey = 1.0 - smoothstep(1.0 - soft, 1.02, abs(s.y));
+    // Soft rectangular cross-section. The old 0.30 start made the beam's near
+    // end a hard-edged slab; a real shaft has no edge you can point at, it is
+    // an air-density gradient, so it starts soft and only gets softer.
+    float soft = mix(0.50, 0.98, t);
+    float ex = 1.0 - smoothstep(1.0 - soft, 1.04, abs(s.x));
+    float ey = 1.0 - smoothstep(1.0 - soft, 1.04, abs(s.y));
     float edge = ex * ey;
+    // a hotter core down the middle of the beam, which is what makes a shaft
+    // read as a volume rather than a flat card
+    float core = exp(-(s.x * s.x + s.y * s.y) * 1.35);
+    edge *= 0.55 + 0.85 * core;
 
     // curtains eat the beam from the outside in: only |s.x| < uOpen gets through
     edge *= 1.0 - smoothstep(uOpen * 0.82, uOpen, abs(s.x));
 
-    // the mullion and transom carve real bars out of the light
+    // The mullion and transom carve real bars out of the light — and the bar
+    // shadows blur out with distance exactly as a real penumbra does.
+    float bw = 0.045 + 0.16 * t;
     float bars = 1.0
-      - 0.72 * (1.0 - smoothstep(0.0, 0.055, abs(s.x - uBarX)))
-      - 0.60 * (1.0 - smoothstep(0.0, 0.048, abs(s.y - uBarY)));
+      - 0.66 * (1.0 - smoothstep(0.0, bw, abs(s.x - uBarX)))
+      - 0.54 * (1.0 - smoothstep(0.0, bw * 0.9, abs(s.y - uBarY)));
     bars = clamp(bars, 0.0, 1.0);
 
-    float fade = pow(1.0 - t, 1.5) * smoothstep(0.0, 0.06, t);
+    float fade = pow(1.0 - t, 1.25) * smoothstep(0.0, 0.05, t);
 
     // two noise layers drifting down the beam = airborne dust in motion
     float n1 = texture2D(uNoise, vec2(s.x * 0.30 + uTime * 0.011, t * 0.70 - uTime * 0.043)).r;
     float n2 = texture2D(uNoise, vec2(s.y * 0.24 - uTime * 0.008, t * 0.42 - uTime * 0.027)).g;
-    float haze = 0.5 + 0.85 * n1 * n2;
+    float haze = 0.55 + 0.80 * n1 * n2;
 
     // looking straight down the beam would show the flat end cap; fade it out
-    vec3 V = normalize(cameraPosition - vWorld);
-    float axial = 1.0 - abs(dot(V, normalize(uAxis)));
+    vec3 V = safeDir(cameraPosition - vWorld, vec3(0.0, 0.0, 1.0));
+    vec3 A = safeDir(uAxis, vec3(0.0, -1.0, 0.0));
+    float axial = 1.0 - abs(dot(V, A));
 
-    float a = edge * bars * fade * haze * uIntensity * (0.45 + 0.55 * axial);
-    if (a <= 0.001) discard;
-    gl_FragColor = vec4(uColor, a);
+    float a = edge * bars * fade * haze * uIntensity * (0.42 + 0.58 * axial);
+
+    // Soft-particle fade. Without it the prism cuts the floor and the cot with
+    // a razor line and instantly reads as a card, not as lit air. uDepth is the
+    // previous frame's resolved linear depth, which is plenty for a beam that
+    // barely moves.
+    if (uHasDepth > 0.5) {
+      float sceneD = texture2D(uDepth, gl_FragCoord.xy / uResolution).x;
+      float vz = -(viewMatrix * vec4(vWorld, 1.0)).z;
+      float fragD = (vz - uNear) / max(1e-4, uFar - uNear);
+      a *= clamp((sceneD - fragD) * uSoft, 0.0, 1.0);
+    }
+
+    // NaN belt-and-braces: a rogue uniform must never poison the HDR buffer.
+    if (!(a > 0.0015)) discard;
+    gl_FragColor = vec4(uColor, min(a, 1.0));
   }`;
 
 const POOL_FRAG = /* glsl */`
@@ -219,6 +250,144 @@ const SKY = {
   }
 };
 
+/* ------------------------------------------------------------- curtains --- */
+
+const RINGS_PER_PANEL = 7;
+
+/**
+ * The cross-section of a hanging, gathered panel.
+ *
+ * `clothPanel`/`foldCloth` displace a plane by a single sine in z, which is a
+ * corrugated sheet: every fold identical, every fold symmetric, no thickness,
+ * and the panel reads as a striped ribbon rather than cloth (rubric #13, #135).
+ * Three things fix that and all three are in here:
+ *
+ *   · **Asymmetry.** Real gathered cloth has *round lobes and sharp valleys* —
+ *     the fabric bulges toward the viewer and pinches where it is pulled back.
+ *     A raised cosine, not a sine.
+ *   · **Bunching in x.** Cloth conserves arc length, so material crowds toward
+ *     the lobes. Displacing x as well as z is what stops the folds looking
+ *     painted on.
+ *   · **Irregularity.** The pitch and the depth wander, because no curtain in
+ *     any house has six identical pleats.
+ *
+ * @param {number} f  across the panel, −0.5 … 0.5
+ * @param {number} y0 1 at the heading, 0 at the hem
+ * @returns {{x:number, z:number}} x as a fraction of panel width, z in metres
+ */
+function foldProfile(f, y0, { folds = 6, amp = 0.042, gather = 0, drape = 0, sway = 0, seed = 0 }) {
+  // Wandering pitch: a slow modulation of the phase, so no two pleats are the
+  // same width, without ever creating a discontinuity.
+  const base = (f + 0.5) * folds * Math.PI * 2;
+  const phase = base + 0.42 * Math.sin(base * 0.37 + seed) + 0.18 * Math.sin(base * 0.79 - seed * 1.7);
+
+  // Depth wanders too, and dies away at the two vertical edges where the panel
+  // is pinned flat against the wall / the leading edge hangs free.
+  const wander = 0.78 + 0.34 * (0.5 + 0.5 * Math.sin(base * 0.29 + seed * 2.3));
+  // Pleats are gripped hardest just under the heading tape and relax downward.
+  const alongY = 0.55 + 0.45 * Math.pow(y0, 0.55);
+  const depth = amp * wander * alongY * (1 + gather * 0.55);
+
+  // Round lobe toward the room, sharp valley away from it.
+  const lobe = Math.pow(0.5 + 0.5 * Math.cos(phase), 0.62) * 2 - 1;
+  const z = lobe * depth
+          + drape * (1 - y0) * (1 - y0)
+          + sway * (1 - y0) * (1 - y0);
+
+  // Material crowds toward the lobes; the effect grows as the panel gathers.
+  const narrow = 1 - gather * 0.52 * (0.35 + 0.65 * y0);
+  const bunch = -Math.sin(phase) * depth * (0.45 + 0.75 * gather);
+  return { x: f * narrow + bunch / Math.max(1e-4, folds * 0.9), z };
+}
+
+/**
+ * A double-sided cloth panel with real thickness.
+ *
+ * Front and back shells plus a rim, so the hem and the leading edge are solid
+ * at grazing angles instead of vanishing to a line. One geometry, one draw
+ * call. `userData.drape` carries what `drapeFold` needs to re-shape it.
+ */
+function drapedPanel(w, h, { cols = 52, rows = 22, thickness = 0.009 } = {}) {
+  const nx = cols + 1, ny = rows + 1;
+  const layer = nx * ny;
+  const pos = new Float32Array(layer * 2 * 3);
+  const uv = new Float32Array(layer * 2 * 2);
+  for (let l = 0; l < 2; l++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = l * layer + j * nx + i;
+        uv[k * 2] = i / cols;
+        uv[k * 2 + 1] = 1 - j / rows;
+      }
+    }
+  }
+
+  const idx = [];
+  const quad = (a, b, c, d) => { idx.push(a, b, d, b, c, d); };
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const a = j * nx + i, b = a + 1, c = a + nx + 1, d = a + nx;
+      quad(a, b, c, d);                                            // front
+      quad(layer + d, layer + c, layer + b, layer + a);            // back
+    }
+  }
+  // rim: hem, heading and the two vertical edges
+  for (let i = 0; i < cols; i++) {
+    const t0 = i, t1 = i + 1;
+    quad(layer + t1, layer + t0, t0, t1);                          // heading
+    const b0 = rows * nx + i, b1 = b0 + 1;
+    quad(b0, b1, layer + b1, layer + b0);                          // hem
+  }
+  for (let j = 0; j < rows; j++) {
+    const l0 = j * nx, l1 = l0 + nx;
+    quad(l0, l1, layer + l1, layer + l0);
+    const r0 = j * nx + cols, r1 = r0 + nx;
+    quad(layer + r0, layer + r1, r1, r0);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.userData.drape = { w, h, cols, rows, thickness, layer };
+  drapeFold(g, {});
+  return g;
+}
+
+/** Re-shape a `drapedPanel` in place. Cheap enough to run while animating. */
+function drapeFold(g, shape) {
+  const info = g.userData.drape;
+  const { w, h, cols, rows, thickness, layer } = info;
+  const pos = g.attributes.position;
+  const nx = cols + 1;
+  const e = 0.5 / cols;
+
+  for (let j = 0; j <= rows; j++) {
+    const y0 = 1 - j / rows;
+    for (let i = 0; i <= nx - 1; i++) {
+      const f = i / cols - 0.5;
+      const p = foldProfile(f, y0, shape);
+      // Offset the back shell along the surface normal, not blindly along −z,
+      // or the shell pinches to zero thickness on the steep flanks of a fold.
+      const pa = foldProfile(f - e, y0, shape);
+      const pb = foldProfile(f + e, y0, shape);
+      let tx = (pb.x - pa.x) * w, tz = pb.z - pa.z;
+      const tl = Math.hypot(tx, tz) || 1;
+      const nxn = tz / tl, nzn = -tx / tl;
+
+      const x = p.x * w;
+      const y = (y0 - 0.5) * h - (1 - y0) * 0.012;
+      const k = j * nx + i;
+      pos.setXYZ(k, x, y, p.z);
+      pos.setXYZ(layer + k, x - nxn * thickness, y, p.z - nzn * thickness);
+    }
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
+
 /* ============================================================== the unit === */
 
 export class WindowUnit {
@@ -256,6 +425,11 @@ export class WindowUnit {
     this._buildCurtains();
     this.setMood(this.mood, true);
     this.setWeather(this.weather, true);
+    // Aim the beam *before* anyone can render it. `update()` would do this on
+    // the first tick, but `App.init()` calls `renderer.compile()` and the
+    // harness renders warm-up frames, so "the first tick" is not the first
+    // frame the beam is drawn in.
+    this._updateBeam(ctx);
     return this.group;
   }
 
@@ -525,14 +699,21 @@ export class WindowUnit {
 
     this.shaftU = {
       uNoise: { value: noise },
+      uDepth: { value: null },
       uColor: { value: new THREE.Color(SKY.day.shaft) },
-      uAxis: { value: new THREE.Vector3(0.6, -0.65, -0.45) },
+      // Never left unset: the shader normalises this every fragment, and a
+      // zero-length axis would give NaN alpha, which an additive HalfFloat
+      // buffer propagates as a black hole the size of the beam.
+      uAxis: { value: new THREE.Vector3(0.6, -0.65, -0.45).normalize() },
+      uResolution: { value: new THREE.Vector2(1, 1) },
       uLen: { value: 1 }, uHalfW: { value: 1 }, uHalfH: { value: 1 },
       uSpread: { value: spread },
       uTime: { value: 0 },
       uIntensity: { value: 0.16 },
       uBarX: { value: this.barX }, uBarY: { value: this.barY },
-      uOpen: { value: 1 }
+      uOpen: { value: 1 },
+      uHasDepth: { value: 0 }, uNear: { value: 0.1 }, uFar: { value: 60 },
+      uSoft: { value: 26 }
     };
     const shaftMat = new THREE.ShaderMaterial({
       uniforms: this.shaftU,
@@ -647,47 +828,60 @@ export class WindowUnit {
     this.panelW = hw + 0.14;
     this.panelH = h + 0.36;
     this.panels = [];
-    this.rings = [];
-    const ringGeo = new THREE.TorusGeometry(0.024, 0.005, 6, 16);
+    const ringGeo = new THREE.TorusGeometry(0.024, 0.005, 8, 18);
     ringGeo.rotateY(Math.PI / 2);
 
     for (const sx of [-1, 1]) {
-      const geo = clothPanel(this.panelW, this.panelH, {
-        cols: 46, rows: 13, folds: 6, amp: 0.042
-      });
+      const geo = drapedPanel(this.panelW, this.panelH, { cols: 52, rows: 22, thickness: 0.009 });
       const panel = new THREE.Mesh(geo, M.curtain);
       panel.castShadow = true;
       panel.receiveShadow = true;
       panel.name = 'curtain';
       panel.position.set(sx * this.panelW / 2, poleY - this.panelH / 2 - 0.03, poleZ);
       panel.userData.side = sx;
+      panel.userData.seed = sx < 0 ? 3.1 : 8.7;
       this.group.add(panel);
       this.panels.push(panel);
-
-      const items = [];
-      for (let i = 0; i < 7; i++) items.push({ pos: [0, 0, 0] });
-      const rings = instanced(ringGeo, M.brass, items, 'curtainRings');
-      rings.castShadow = false;
-      this.group.add(rings);
-      this.rings.push(rings);
     }
+
+    // One instanced mesh for both panels' rings rather than one each — the
+    // rings share a geometry and a material, so there is no reason to pay for
+    // two draw calls.
+    const items = [];
+    for (let i = 0; i < RINGS_PER_PANEL * 2; i++) items.push({ pos: [0, 0, 0] });
+    const rings = instanced(ringGeo, M.brass, items, 'curtainRings');
+    rings.castShadow = false;
+    rings.frustumCulled = false;
+    this.group.add(rings);
+    this.rings = rings;
+
     this._applyCurtains(this._openNow);
   }
 
   /** Re-fold the panels and slide the rings for an openness of 0..1. */
   _applyCurtains(open) {
     const poleY = this.h / 2 + 0.17, poleZ = 0.14;
-    const sway = Math.sin(this.time * 0.7) * 0.006 * (1 - open);
+    const sway = Math.sin(this.time * 0.7) * 0.008 * (1 - open * 0.6);
+    const rings = this.rings;
+    let slot = 0;
+
     for (const panel of this.panels) {
       const sx = panel.userData.side;
-      foldCloth(panel.geometry, {
+      const narrow = this.panelW * (1 - open * 0.52);
+      // Gathering a curtain does not just squash it: the same amount of cloth
+      // now lives in a narrower run, so the pleats get deeper and there are the
+      // same number of them. That relationship is the whole reason a drawn-back
+      // curtain reads as fabric.
+      const shape = {
         folds: 6,
-        amp: 0.042,
+        amp: 0.030 + 0.052 * open,
         gather: open,
-        drape: 0.02,
-        sway
-      });
-      const narrow = this.panelW * (1 - open * 0.55);
+        drape: 0.026,
+        sway,
+        seed: panel.userData.seed
+      };
+      drapeFold(panel.geometry, shape);
+
       const closedX = sx * this.panelW / 2;
       const openX = sx * (this.w / 2 + 0.14 - narrow / 2);
       panel.position.x = closedX + (openX - closedX) * open;
@@ -695,16 +889,16 @@ export class WindowUnit {
       panel.position.z = poleZ;
 
       // rings ride the top edge of whatever shape the panel is in now
-      const rings = this.rings[sx < 0 ? 0 : 1];
-      for (let i = 0; i < 7; i++) {
-        const u = (i / 6 - 0.5) * narrow;
-        const phase = (u / this.panelW) * Math.PI * 2 * 6;
-        _v.set(panel.position.x + u, poleY - 0.024, poleZ + Math.sin(phase) * 0.038 * (1 + open * 1.9));
+      for (let i = 0; i < RINGS_PER_PANEL; i++) {
+        const f = i / (RINGS_PER_PANEL - 1) - 0.5;
+        const p = foldProfile(f, 1, shape);
+        _v.set(panel.position.x + p.x * this.panelW, poleY - 0.024, poleZ + p.z);
         _q.identity();
-        rings.setMatrixAt(i, _m.compose(_v, _q, _v2.set(1, 1, 1)));
+        rings.setMatrixAt(slot++, _m.compose(_v, _q, _v2.set(1, 1, 1)));
       }
-      rings.instanceMatrix.needsUpdate = true;
     }
+    rings.instanceMatrix.needsUpdate = true;
+
     if (this.shaftU) {
       this.shaftU.uOpen.value = Math.max(0.001, open);
       this.poolU.uOpen.value = Math.max(0.001, open);
@@ -721,12 +915,23 @@ export class WindowUnit {
   _updateBeam(ctx) {
     const key = ctx?.lighting?.key;
     if (key) {
-      _v.copy(key.target.position).sub(key.position).normalize();
+      _v.copy(key.target.position).sub(key.position);
     } else {
-      _v.set(0.62, -0.66, -0.42).normalize();
+      _v.set(0.62, -0.66, -0.42);
     }
+    // A light whose target sits exactly on its own position gives a zero-length
+    // vector; three's normalize() then returns (0,0,0) rather than throwing,
+    // and that zero would reach the shader as uAxis. Fall back explicitly.
+    if (_v.lengthSq() < 1e-8) _v.set(0.62, -0.66, -0.42);
+    _v.normalize();
     if (_v.y > -0.12) _v.y = -0.12;      // never let the beam run uphill
     _v.normalize();
+
+    // The room yaws the whole unit onto a wall; without this the very first
+    // aim runs against a stale identity matrix and the beam points into the
+    // wall for one frame.
+    this.group.updateWorldMatrix(true, false);
+    this.shaft.updateWorldMatrix(true, false);
 
     const origin = this.shaft.getWorldPosition(_v2);
     const len = THREE.MathUtils.clamp((origin.y - 0.02) / -_v.y, 1.0, 6.5);
@@ -925,6 +1130,19 @@ export class WindowUnit {
       rnd.getSize(this._size || (this._size = new THREE.Vector2()));
       const px = this._size.y * (rnd.getPixelRatio ? rnd.getPixelRatio() : 1);
       this.moteU.uPixel.value = (px / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2))) * 0.0016;
+
+      // Soft-particle depth for the beam. The resolved depth target is one
+      // frame behind (it is produced *after* the scene draws), which is exactly
+      // what the FX system does and is invisible on something this slow-moving.
+      rnd.getDrawingBufferSize(this._buf || (this._buf = new THREE.Vector2()));
+      this.shaftU.uResolution.value.copy(this._buf);
+      this.shaftU.uNear.value = cam.near;
+      this.shaftU.uFar.value = cam.far;
+      const depth = ctx?.pipeline?.depthResolve?.texture;
+      if (depth) {
+        this.shaftU.uDepth.value = depth;
+        this.shaftU.uHasDepth.value = 1;
+      }
     }
   }
 

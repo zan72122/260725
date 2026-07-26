@@ -43,6 +43,49 @@ export function fbm(u, v, period, octaves, seed, gain = 0.5, lacunarity = 2) {
   return sum / norm;
 }
 
+/* --- anisotropic (separate period per axis) variants ----------------------
+ * Wood, brushed paint and carpet pile are all *directional*: their features are
+ * many times longer along one axis than the other. The isotropic helpers above
+ * can only fake that by scaling the input coordinates, which silently breaks
+ * tiling (the wrapped cell index no longer lands back on 0 at u = 1) and leaves
+ * a seam. These take a period per axis instead, so a 24 × 400 field is both
+ * genuinely stretched and genuinely tileable.
+ * ----------------------------------------------------------------------- */
+
+function valueNoise2(u, v, px, py, seed) {
+  const x = u * px, y = v * py;
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = smooth(x - xi), yf = smooth(y - yi);
+  const w = (a, b) => hash2(((a % px) + px) % px, ((b % py) + py) % py, seed);
+  const a = w(xi, yi), b = w(xi + 1, yi), c = w(xi, yi + 1), d = w(xi + 1, yi + 1);
+  return (a * (1 - xf) + b * xf) * (1 - yf) + (c * (1 - xf) + d * xf) * yf;
+}
+
+/** Tileable anisotropic fBm. */
+function fbm2(u, v, px, py, octaves, seed, gain = 0.5) {
+  let sum = 0, amp = 1, norm = 0, X = px, Y = py;
+  for (let i = 0; i < octaves; i++) {
+    sum += valueNoise2(u, v, Math.max(1, Math.round(X)), Math.max(1, Math.round(Y)), seed + i * 101) * amp;
+    norm += amp;
+    amp *= gain;
+    X *= 2; Y *= 2;
+  }
+  return sum / norm;
+}
+
+/** Tileable anisotropic ridged noise — fibres, grain streaks, carpet pile. */
+function ridged2(u, v, px, py, octaves, seed) {
+  let sum = 0, amp = 1, norm = 0, X = px, Y = py;
+  for (let i = 0; i < octaves; i++) {
+    const n = Math.abs(valueNoise2(u, v, Math.max(1, Math.round(X)), Math.max(1, Math.round(Y)), seed + i * 71) * 2 - 1);
+    sum += (1 - n) * amp;
+    norm += amp;
+    amp *= 0.5;
+    X *= 2; Y *= 2;
+  }
+  return sum / norm;
+}
+
 /** Tileable ridged noise — good for fibres, grain and cloth slubs. */
 export function ridged(u, v, period, octaves, seed) {
   let sum = 0, amp = 1, norm = 0, p = period;
@@ -204,43 +247,82 @@ export function wood({
   planks = 0, ringScale = 26, satin = 0.42
 } = {}) {
   return cached(`wood:${light}:${dark}:${seed}:${planks}:${ringScale}:${satin}`, () => {
-    // Growth rings: distort v, then take a sawtooth of the distorted coordinate.
+    /* Two things were wrong here and both were visible on the nursery floor.
+     *
+     * 1. GRAIN DIRECTION. `seam(v)` puts the plank joints on lines of constant
+     *    v, so a plank is a band that runs the full width of u — its long axis
+     *    is u. The rings were a sawtooth of *u*, i.e. running straight across
+     *    the board instead of down it (rubric #31). Rings are now a function of
+     *    v, warped by a field stretched along u, which is what produces the
+     *    cathedral arcs of a real flat-sawn board.
+     *
+     * 2. WARP AMPLITUDE. The warp was added in ring-space (`+ warp * 5.5`), so
+     *    it displaced the pattern by up to ±2.75 whole ring periods regardless
+     *    of ringScale. Rings folded back over themselves and the floor read as
+     *    swirled marble / formica. Real figure stays well under one period.
+     *
+     * `ringScale` is also remapped rather than used raw: callers were asking
+     * for 108 rings across a tile, ~4.7 texels per ring at 512², which no
+     * amount of filtering can resolve. It is treated as a fineness hint and
+     * clamped to something the texture — and the eye at floor distance — can
+     * actually carry: roughly 3–9 growth rings across the width of one plank.
+     */
+    const rows = Math.max(1, Math.round(planks));
+    const perPlank = planks
+      ? Math.max(3, Math.min(9, Math.round((ringScale / rows) * 0.45)))
+      : Math.max(4, Math.min(40, Math.round(ringScale * 0.42)));
+    const ringFreq = planks ? perPlank * rows : perPlank;   // integer ⇒ tiles in v
+
     const rings = (u, v) => {
-      const plankRow = planks ? Math.floor(v * planks) : 0;
-      const off = planks ? hash2(plankRow, 0, seed + 17) : 0;
-      const warp = fbm(u + off, v, 8, 4, seed + plankRow * 13) - 0.5;
-      const g = (u + off) * ringScale + warp * 5.5;
+      const row = planks ? Math.floor(v * rows) % rows : 0;
+      const off = planks ? hash2(row, 0, seed + 17) : 0;
+      // Long, low-frequency figure stretched down the board (period 4 in u,
+      // 11 in v) plus a slower second lobe. Together well under one ring pitch.
+      const warp = (fbm2(u, v, 4, 11, 3, seed + row * 13) - 0.5) * 0.86
+                 + (fbm2(u, v, 2, 5, 2, seed + 61 + row) - 0.5) * 0.34;
+      const g = (v + off) * ringFreq + warp;
       let r = g - Math.floor(g);
       r = Math.abs(r * 2 - 1);
-      // fine fibre streaks running along the grain
-      const streak = ridged(u * 0.35 + off, v * 3.0, 160, 3, seed + 31);
-      return Math.min(1, r * 0.78 + streak * 0.22);
+      // A growth ring is a narrow dark line between wide pale bands, not a
+      // symmetric triangle wave.
+      r = Math.pow(r, 1.45);
+      // fine fibre streaks running *along* the grain
+      const streak = ridged2(u, v, 24, 260, 3, seed + 31);
+      return Math.min(1, r * 0.70 + streak * 0.30);
     };
 
     const seam = (v) => {
       if (!planks) return 0;
-      const f = v * planks;
+      const f = v * rows;
       const d = Math.abs(f - Math.round(f));
-      return Math.max(0, 1 - d * planks * 6);
+      return Math.max(0, 1 - d * rows * 4.5);
     };
+
+    // Boards are cut from different logs: a floor with every plank the same
+    // tone is the giveaway that it is a texture and not a floor.
+    const plankTone = (v) => (planks ? hash2(Math.floor(v * rows) % rows, 7, seed + 3) - 0.5 : 0);
 
     const map = generate(size, (u, v, out) => {
       let t = rings(u, v);
       // knots
       const w = worley(u, v, 5, seed + 41);
-      if (w.f1 < 0.12 && w.id > 0.72) t = Math.min(1, t + (0.12 - w.f1) * 6);
-      const c = mixHex(light, dark, t * 0.85);
-      const s = 1 - seam(v) * 0.55;
+      if (w.f1 < 0.10 && w.id > 0.78) t = Math.min(1, t + (0.10 - w.f1) * 5.5);
+      const c = mixHex(light, dark, t * 0.72);
+      const s = (1 - seam(v) * 0.62) * (1 + plankTone(v) * 0.15);
       out[0] = c[0] * s; out[1] = c[1] * s; out[2] = c[2] * s;
     });
 
+    // Grain sits almost flush on a finished board; the plank joint is the only
+    // real groove, so the seam carries most of the relief.
     const normal = normalFromHeight(size, 1.15, (u, v) =>
-      rings(u, v) * 0.55 + seam(v) * 0.9 + fbm(u, v, 200, 2, seed + 60) * 0.12);
+      rings(u, v) * 0.22 + seam(v) * 1.05 + ridged2(u, v, 30, 320, 2, seed + 60) * 0.16);
 
     const rough = generate(size, (u, v, out) => {
       const t = rings(u, v);
-      const r = satin + t * 0.22 + seam(v) * 0.2;
-      out[0] = out[1] = out[2] = Math.min(1, r);
+      // late wood (the dark rings) is denser and takes the lacquer differently
+      const r = satin + t * 0.26 + seam(v) * 0.22
+              + (fbm2(u, v, 5, 13, 2, seed + 88) - 0.5) * 0.10;
+      out[0] = out[1] = out[2] = Math.min(1, Math.max(0.05, r));
     });
 
     return {
@@ -318,24 +400,36 @@ export function fabric({
  */
 export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 } = {}) {
   return cached(`rug:${color}:${seed}:${density}`, () => {
+    /* The rug read as sandpaper, not pile. 170 Worley cells across a 512²
+     * texture is 3 texels per tuft: below the Nyquist limit of the generator
+     * itself, so what shipped was aliased hash noise with a bit of colour on
+     * it. A tuft needs ~10 texels to have a shape at all, so the requested
+     * density is treated as a hint and clamped to that. The detail that is lost
+     * comes back as *relief* — the normal strength goes up, because what makes
+     * cut pile read is the way raking light catches the tops of the tufts, not
+     * per-tuft albedo speckle.
+     */
+    const cells = Math.max(8, Math.min(Math.round(density * 0.28), Math.floor(size / 10)));
+    // The pile lies in a direction: long, soft bands (the "vacuum stripe")
+    // stretched across the rug, which is most of what sells a cut pile.
+    const lay = (u, v) => fbm2(u, v, 5, 14, 3, seed + 5);
     const height = (u, v) => {
-      const w = worley(u, v, density, seed);
-      const tuft = Math.pow(1 - w.f1, 1.6);
-      const sweep = fbm(u, v, 9, 3, seed + 5);
-      return tuft * 0.72 + sweep * 0.28;
+      const w = worley(u, v, cells, seed);
+      const tuft = Math.pow(1 - w.f1, 1.35);
+      return tuft * 0.62 + lay(u, v) * 0.38;
     };
     const map = generate(size, (u, v, out) => {
-      const w = worley(u, v, density, seed);
-      const h = Math.pow(1 - w.f1, 1.6);
-      const sweep = fbm(u, v, 9, 3, seed + 5);
-      // pile direction changes reflectance — that's the "vacuum stripe" look
-      const shade = 0.72 + h * 0.34 + (sweep - 0.5) * 0.14 + w.id * 0.06;
+      const w = worley(u, v, cells, seed);
+      const h = Math.pow(1 - w.f1, 1.35);
+      const sweep = lay(u, v);
+      const shade = 0.78 + h * 0.18 + (sweep - 0.5) * 0.28 + (w.id - 0.5) * 0.05;
       const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });
-    const normal = normalFromHeight(size, 2.6, height);
+    const normal = normalFromHeight(size, 4.2, height);
     const rough = generate(size, (u, v, out) => {
-      out[0] = out[1] = out[2] = 0.95 - height(u, v) * 0.06;
+      // tuft tops catch a faint sheen; the roots are pure scatter
+      out[0] = out[1] = out[2] = 0.98 - height(u, v) * 0.16;
     });
     return {
       map: toTexture(map, { srgb: true }),

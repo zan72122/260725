@@ -21,6 +21,87 @@ function memo(key, build) {
   return _cache.get(key);
 }
 
+/* ------------------------------------------------------- texture views --- */
+
+/**
+ * Every `TEX.*` generator memoises its canvas synthesis, so two materials built
+ * from the same generator are handed back *the same* `THREE.Texture` objects.
+ * Writing `repeat` (or `offset`) on one of them therefore reaches across into
+ * every other material sharing that cache entry, and the last writer wins in
+ * whatever order the scene happens to be assembled. Retuning the tiling on the
+ * floor planks would silently re-tile the cot, the shelves and the toy box too.
+ *
+ * The fix is that each material gets its own *view* of the shared pixels.
+ * `texture.clone()` copies the sampler state and gives the copy its own
+ * transform (`repeat` / `offset` / `center` / `rotation`) while keeping the
+ * same `source`. That is genuinely free on the GPU: `WebGLTextures` maps
+ * `texture.source` → uploads, and picks the `WebGLTexture` with a cache key
+ * built purely from sampler state (wrap, filters, anisotropy, format,
+ * colourspace — see `getTextureCacheKey`, which deliberately does not include
+ * the transform). Views with matching sampler state therefore resolve to the
+ * one upload that already exists.
+ *
+ * So the expensive half stays memoised — the procedural synthesis in
+ * textures.js still runs once per distinct surface — and only these
+ * few-dozen-byte wrappers are per material.
+ */
+const _views = new Set();
+
+/** One private, disposable view of a shared cached texture. */
+function view(tex) {
+  if (!tex || tex.isTexture !== true || tex.isRenderTargetTexture) return tex;
+  const v = tex.clone();          // `Texture.copy()` already flags needsUpdate
+  _views.add(v);
+  return v;
+}
+
+/**
+ * Every texture slot a MeshPhysicalMaterial can carry, so a material never
+ * keeps a cached texture object by accident.
+ */
+const MAP_SLOTS = [
+  'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'alphaMap',
+  'bumpMap', 'displacementMap', 'emissiveMap', 'lightMap', 'specularMap',
+  'specularColorMap', 'specularIntensityMap', 'sheenColorMap',
+  'sheenRoughnessMap', 'clearcoatMap', 'clearcoatNormalMap',
+  'clearcoatRoughnessMap', 'iridescenceMap', 'iridescenceThicknessMap',
+  'transmissionMap', 'thicknessMap', 'anisotropyMap'
+];
+
+/**
+ * Give `mat` its own view of every texture it holds, then optionally stamp a
+ * tiling onto those views. Call this instead of touching `mat.map.repeat`.
+ *
+ * A texture that arrives in more than one slot stays a *single* shared view —
+ * `TEX.hairStrand()` hands the same canvas back as both `map` and `alphaMap`,
+ * and splitting those into two objects would cost a second texture unit for no
+ * reason. (This is the one thing it does better than the local `unshare()` in
+ * world/props.js, which clones per slot.)
+ *
+ * @param {THREE.Material} mat
+ * @param {{ repeat?: number|THREE.Vector2, offset?: THREE.Vector2 }} [opts]
+ * @returns {THREE.Material} `mat`, for chaining.
+ */
+export function unshare(mat, { repeat, offset } = {}) {
+  if (!mat) return mat;
+  const seen = new Map();          // cached texture -> this material's view
+  for (const slot of MAP_SLOTS) {
+    const shared = mat[slot];
+    if (!shared || shared.isTexture !== true) continue;
+    let v = seen.get(shared);
+    if (v === undefined) { v = view(shared); seen.set(shared, v); }
+    mat[slot] = v;
+  }
+  for (const v of seen.values()) {
+    if (repeat !== undefined) {
+      if (repeat.isVector2) v.repeat.copy(repeat);
+      else v.repeat.set(repeat, repeat);
+    }
+    if (offset !== undefined) v.offset.copy(offset);
+  }
+  return mat;
+}
+
 /* ---------------------------------------------------------------- skin --- */
 
 /**
@@ -56,9 +137,7 @@ export function makeSkin({
     envMapIntensity: 1.0
   });
   mat.normalScale.set(0.35, 0.35);
-  mat.map.repeat.set(poreScale, poreScale);
-  mat.normalMap.repeat.set(poreScale, poreScale);
-  mat.roughnessMap.repeat.set(poreScale, poreScale);
+  unshare(mat, { repeat: poreScale });
 
   const uniforms = {
     uSubsurface: { value: new THREE.Color(subsurface) },
@@ -155,7 +234,7 @@ export function makeCloth({
     envMapIntensity: 0.8
   });
   mat.normalScale.set(normalScale, normalScale);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -186,7 +265,7 @@ export function makeWood({
     envMapIntensity: 0.9
   });
   mat.normalScale.set(0.7, 0.7);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   // Multiply the grain darks in via the base colour so we keep one texture set
   // for every wood tone in the game.
   mat.color.lerp(new THREE.Color(dark), 0.25);
@@ -208,7 +287,7 @@ export function makeWall({ base = 0xf3e7f2, tint = 0xe6d3ec, repeat = 4, seed = 
       envMapIntensity: 0.85
     });
     mat.normalScale.set(0.45, 0.45);
-    for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+    unshare(mat, { repeat });
     return mat;
   });
 }
@@ -228,7 +307,7 @@ export function makeCarpet({ color = 0xffd7e6, repeat = 3, seed = 19, density = 
     envMapIntensity: 0.7
   });
   mat.normalScale.set(1.5, 1.5);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -246,7 +325,7 @@ export function makeCeramic({ color = 0xffffff, repeat = 2, seed = 31, tint = 0 
     envMapIntensity: 1.35
   });
   mat.normalScale.set(0.28, 0.28);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -266,7 +345,7 @@ export function makePlastic({
     envMapIntensity: 1.0
   });
   mat.normalScale.set(0.25, 0.25);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -284,7 +363,7 @@ export function makePaint({ color = 0xfffaf6, repeat = 2, seed = 43, gloss = 0.3
     envMapIntensity: 0.95
   });
   mat.normalScale.set(0.35, 0.35);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -293,13 +372,13 @@ export function makePaint({ color = 0xfffaf6, repeat = 2, seed = 43, gloss = 0.3
 export function makeMetal({ color = 0xd8dde2, roughness = 0.22, seed = 61 } = {}) {
   return memo(`metal${color}${roughness}`, () => {
     const maps = TEX.ceramic({ color: 0xffffff, seed, peel: 0.6 });
-    return new THREE.MeshPhysicalMaterial({
+    return unshare(new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(color),
       normalMap: maps.normalMap,
       roughness,
       metalness: 1.0,
       envMapIntensity: 1.5
-    });
+    }));
   });
 }
 
@@ -428,8 +507,10 @@ export function makeHair({ color = 0x6b4a34, sheenColor = 0xffd9a8 } = {}) {
 
 /** Bath water — transmissive, with two scrolling normal layers. */
 export function makeWater({ tint = 0xbfe6ff, opacity = 0.72 } = {}) {
-  const n1 = TEX.waterNormal({ seed: 53, scale: 6 });
-  const n2 = TEX.waterNormal({ seed: 91, scale: 11 });
+  // Private views: `tick()` writes a scroll offset every frame and that offset
+  // is per-surface state, so the tub and the sink must not share one texture.
+  const n1 = view(TEX.waterNormal({ seed: 53, scale: 6 }));
+  const n2 = view(TEX.waterNormal({ seed: 91, scale: 11 }));
   const mat = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(tint),
     transparent: true,
@@ -474,7 +555,7 @@ export function makeFoam({ color = 0xfffdfa } = {}) {
       envMapIntensity: 1.4
     });
     m.normalScale.set(1.4, 1.4);
-    return m;
+    return unshare(m);
   });
 }
 
@@ -517,6 +598,11 @@ export function applyWetness(material, amount) {
 export function disposeAll() {
   for (const m of _cache.values()) m.dispose?.();
   _cache.clear();
+  // Each view holds a reference on the shared GPU texture — three refcounts
+  // uploads per `source` — so releasing the cached originals in TEX.disposeAll()
+  // is not enough on its own; the wrappers have to go too.
+  for (const v of _views) v.dispose();
+  _views.clear();
 }
 
 /* ============================================================================
@@ -541,7 +627,7 @@ export function makeQuilt({
     envMapIntensity: 0.85
   });
   mat.normalScale.set(1.25, 1.25);
-  for (const m of [mat.map, mat.normalMap, mat.roughnessMap]) m.repeat.set(repeat, repeat);
+  unshare(mat, { repeat });
   return mat;
 }
 
@@ -569,6 +655,7 @@ export function makeWindowGlass({ tint = 0xe8f2ff, roughness = 0.075, opacity = 
     side: THREE.DoubleSide
   });
   mat.normalScale.set(0.07, 0.07);
+  unshare(mat);
   return mat;
 }
 
@@ -579,9 +666,9 @@ export function makeWindowGlass({ tint = 0xe8f2ff, roughness = 0.075, opacity = 
  */
 export function makeRainFilm({ seed = 29, speed = 0.09 } = {}) {
   const maps = TEX.rainSheet({ seed });
-  const alpha = maps.alphaMap.clone();
-  const normal = maps.normalMap.clone();
-  alpha.needsUpdate = normal.needsUpdate = true;
+  // Private views — `tick()` scrolls these, and `rainSheet()` is memoised.
+  const alpha = view(maps.alphaMap);
+  const normal = view(maps.normalMap);
   alpha.wrapS = alpha.wrapT = normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
   const mat = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(0xf2f8ff),
@@ -698,8 +785,9 @@ export function makeHairCards({
   const maps = TEX.hairStrand({ strands, seed });
   const mat = makeHair({ color, sheenColor });
   mat.map = maps.map;
-  mat.alphaMap = maps.alphaMap;
+  mat.alphaMap = maps.alphaMap;      // same object as .map — unshare() keeps it so
   mat.normalMap = maps.normalMap;
+  unshare(mat);
   mat.normalScale = new THREE.Vector2(0.55, 0.55);
   mat.alphaTest = 0.42;
   mat.depthWrite = true;
@@ -774,7 +862,7 @@ export function makeLash({ color = 0x4b3428, opacity = 1 } = {}) {
 /** Cheek blush decal — a soft radial wash that hugs the cheek. */
 export function makeBlush({ color = 0xff7d96 } = {}) {
   return new THREE.MeshBasicMaterial({
-    map: TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 }),
+    map: view(TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 })),
     color: new THREE.Color(color),
     transparent: true, opacity: 0, depthWrite: false
   });
@@ -783,7 +871,7 @@ export function makeBlush({ color = 0xff7d96 } = {}) {
 /** The specular catchlight disc that sits on the cornea. */
 export function makeCatchlight({ opacity = 0.85 } = {}) {
   return new THREE.MeshBasicMaterial({
-    map: TEX.radialSprite({ size: 64, power: 1.5 }),
+    map: view(TEX.radialSprite({ size: 64, power: 1.5 })),
     transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending, opacity, toneMapped: false
   });

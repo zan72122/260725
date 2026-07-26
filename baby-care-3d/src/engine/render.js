@@ -346,15 +346,24 @@ export class RenderPipeline {
       const gtao = new GTAOPass(scene, camera, size.x, size.y);
       gtao.output = GTAOPass.OUTPUT.Default;
       gtao.updateGtaoMaterial({
-        radius: 0.42,
-        distanceExponent: 1.4,
-        thickness: 0.55,
-        scale: 1.35,
+        // A nursery is a room of small objects sitting on big flat surfaces.
+        // The old 0.42 m radius only ever caught the last centimetre of a
+        // contact, which is why the AO buffer came back almost pure white and
+        // every prop still read as pasted on. 0.8 m is roughly "the width of
+        // the crib", so legs, plinths and the rug edge all darken properly.
+        radius: 0.80,
+        distanceExponent: 1.0,
+        thickness: 1.0,
+        scale: 2.0,
         samples: tier === TIER.HIGH ? 16 : 8,
         distanceFallOff: 1.0,
         screenSpaceRadius: false
       });
+      // Wider denoise: with the G-buffer coming from the scene depth (below)
+      // the raw AO is noisier, and 8 px of Poisson left a visible crawl.
+      gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 13, rings: 2, samples: 16 });
       gtao.blendIntensity = 1.0;
+      this._wireGtaoToSceneDepth(gtao, target.depthTexture);
       composer.addPass(gtao);
       this.gtao = gtao;
     }
@@ -403,6 +412,50 @@ export class RenderPipeline {
     composer.passes[composer.passes.length - 1].renderToScreen = true;
   }
 
+  /**
+   * Make GTAO read the *scene* depth buffer instead of rendering its own
+   * depth+normal G-buffer.
+   *
+   * Two separate problems, one fix.
+   *
+   * 1. CORRECTNESS. `GTAOPass._overrideVisibility()` only hides Points and
+   *    Lines before it re-renders the scene with `MeshNormalMaterial`. Every
+   *    *transparent* mesh therefore lands in the AO G-buffer as if it were
+   *    solid: the window's volumetric light shaft, its floor pool, the contact
+   *    shadow blobs, the glazing, the sky and cloud planes. The light shaft is
+   *    a three-metre prism seen nearly edge-on, so GTAO measured near-total
+   *    self-occlusion across its whole silhouette and the Default output
+   *    (`colour × AO`) multiplied that region of the frame to pure black — the
+   *    giant black polygon in the upper left of the wide shot. Reading the real
+   *    scene depth instead means only depth-*writing* geometry occludes, which
+   *    is exactly the set of surfaces that should.
+   *
+   * 2. COST. The G-buffer render was a second full traversal of the scene
+   *    (plus its own transmission resolve): ~190 of the frame's 524 draw calls.
+   *    Skipping it is free — with no normal texture the GTAO shader falls back
+   *    to reconstructing view normals from depth derivatives, which for a room
+   *    of large smooth surfaces is visually equivalent.
+   *
+   * There is no feedback loop here: GTAO samples the depth attachment while
+   * rendering into its own `gtaoRenderTarget` / `pdRenderTarget`, and its final
+   * blend into the composer buffer does not bind a depth sampler.
+   *
+   * `setGBuffer()` is not used because in r180 it dereferences
+   * `this.normalRenderTarget.depthTexture` on a branch that never creates one.
+   */
+  _wireGtaoToSceneDepth(gtao, depthTexture) {
+    gtao._renderGBuffer = false;              // skip the scene re-render
+    gtao.depthTexture = depthTexture;
+    gtao.normalTexture = null;
+    for (const m of [gtao.gtaoMaterial, gtao.pdMaterial]) {
+      m.defines.NORMAL_VECTOR_TYPE = 0;       // 0 = reconstruct from depth
+      m.defines.DEPTH_SWIZZLING = 'x';
+      m.uniforms.tDepth.value = depthTexture;
+      m.uniforms.tNormal.value = null;
+      m.needsUpdate = true;
+    }
+  }
+
   /** Pull focus onto a world-space point (the baby, usually). */
   focusOn(worldPos, range = 0.30) {
     const v = worldPos.clone().applyMatrix4(this.camera.matrixWorldInverse);
@@ -440,7 +493,10 @@ export class RenderPipeline {
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
     }
-    this.gtao?.setSize(w, h);
+    // GTAO samples the scene depth attachment, so it has to be sized in
+    // drawing-buffer pixels, not CSS pixels, or the AO lands at the wrong scale
+    // on any display with devicePixelRatio > 1.
+    this.gtao?.setSize(size.x, size.y);
     this.depthResolve?.setSize(size.x, size.y);
   }
 
