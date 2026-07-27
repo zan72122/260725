@@ -380,9 +380,16 @@ export function wood({
      */
     // Rings per unit radius, measured in board widths. `ringScale` stays a
     // fineness hint; the clamp keeps a board between roughly 1 and 4 rings.
+    /* The `planks = 0` coordinate is mirrored about the middle of the tile so
+     * that it stays tileable, which means the ring family is traversed *four*
+     * times across the tile, not once. At ringScale × 1.9 that was ~15 rings on
+     * a 512² map, and with the boxUV scale the furniture uses it put a rib
+     * every 25 mm on the chest of drawers — which, with the grain also driving
+     * the normal map, made a 1.2 m oak carcass read as corrugated cardboard
+     * (rubric §4.2 #21). Halved. */
     const ringR = planks
       ? Math.max(4, Math.min(9, (ringScale / rows) * 0.85))
-      : Math.max(10, Math.min(56, ringScale * 1.9));
+      : Math.max(6, Math.min(30, ringScale * 0.85));
     // Grain fibres run *along* the board (long in u, narrow in v). "Narrow"
     // still has to mean several texels: size/8 is the finest octave a 512² map
     // can hand to a mip chain without it turning into hash noise.
@@ -543,7 +550,12 @@ export function wood({
     // sparkle, and the normal map is where grazing-angle aliasing hurts most
     // (the specular lobe swings the full width of the highlight per pixel).
     const normal = normalFromHeight(size, 1.15, (u, v) =>
-      rings(u, v) * 0.22 + (planks ? relief(v) : seam(v) * 1.05)
+      // Grain relief on a *lacquered* board is a few microns — you can barely
+      // feel it. At 0.22 the chest of drawers had a visible corrugation, so
+      // furniture keeps the grain almost flush and lets the albedo carry it;
+      // the floor keeps more because a waxed timber floor genuinely does have
+      // proud late-wood you can catch a raking sun on.
+      rings(u, v) * (planks ? 0.22 : 0.075) + (planks ? relief(v) : 0)
       + (planks ? 0 : ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085));
 
     const rough = generate(size, (u, v, out) => {

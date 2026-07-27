@@ -406,7 +406,7 @@ export function makeWood({
             /* Analytic lines have no mip chain, so this has to antialias
              * itself or it turns into a dotted crawl at grazing angles. The
              * half-width is the greater of the real 3 mm and half the change in
-             * `bx` across one pixel, which makes the joint fade out smoothly to
+             * 'bx' across one pixel, which makes the joint fade out smoothly to
              * a uniform slight darkening once it is finer than the display can
              * carry, instead of flickering on and off. */
             float bw = max(0.0025, fwidth(bx) * 0.5);
@@ -419,8 +419,8 @@ export function makeWood({
           /* THE bright dotted hairline down every plank joint (defect D22, the
            * one that survived four passes of retuning the texture itself).
            *
-           * `wdDetile` slides the sample window along u by a hash of the *plank
-           * row*, which is `floor(uv.y * uPlankRows)` — a step function. So on
+           * wdDetile() slides the sample window along u by a hash of the *plank
+           * row*, which is floor(uv.y * uPlankRows) -- a step function. So on
            * the one pixel row where a plank boundary crosses the quad, dFdy of
            * the shifted uv is not "half a texel", it is six whole tile widths.
            * The hardware reads that as "this pixel covers the entire texture"
