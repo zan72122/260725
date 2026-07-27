@@ -147,9 +147,9 @@ export const MOODS = {
       // band around 55% with no clean white anywhere. Up 1/5 stop, with the
       // contrast raised to keep the extra light out of the shadows and the
       // vignette pulled back off the corners the furniture actually occupies.
-      saturation: 1.11, contrast: 1.10, warmth: 0.015, vignette: 0.20, exposure: 1.17,
+      saturation: 1.11, contrast: 1.10, warmth: 0.015, vignette: 0.14, exposure: 1.17,
       shadowTint: [0.895, 0.955, 1.14], highTint: [1.035, 1.0, 0.955], split: 1.0,
-      black: 0.085
+      black: 0.085, white: 1.05
     },
     fog: { color: 0xf1ecf6, density: 0.005 }
   },
@@ -233,8 +233,8 @@ export const MOODS = {
       // above neutral, the highlight tint is halved, and the shadow tint is
       // pushed *further* blue rather than the whole frame being pushed warm —
       // same overall warmth, twice the chromatic range.
-      saturation: 1.06, contrast: 1.14, warmth: 0.010, vignette: 0.24, exposure: 1.22,
-      shadowTint: [0.845, 0.935, 1.21], highTint: [1.025, 1.0, 0.955], split: 1.05,
+      saturation: 1.06, contrast: 1.14, warmth: 0.010, vignette: 0.15, exposure: 1.22,
+      shadowTint: [0.845, 0.935, 1.21], highTint: [1.025, 1.0, 0.955], split: 1.05, white: 1.06,
       // The deepest black point of the four daylight-ish moods: golden hour is
       // the one time of day whose whole identity is a long dark shadow next to
       // a hot rim of sun.
@@ -260,9 +260,9 @@ export const MOODS = {
     hemiSky: 0xb4c6f4, hemiGround: 0xf0bc9c, hemiIntensity: 0.135,
     envIntensity: 0.235, shadowSpan: 5.2,
     grade: {
-      saturation: 1.10, contrast: 1.09, warmth: 0.05, vignette: 0.38, exposure: 1.00,
+      saturation: 1.10, contrast: 1.09, warmth: 0.05, vignette: 0.30, exposure: 1.00,
       shadowTint: [0.83, 0.92, 1.21], highTint: [1.03, 1.0, 0.95], split: 1.15,
-      black: 0.105
+      black: 0.105, white: 1.10
     },
     fog: { color: 0xdcd6ee, density: 0.016 }
   },
@@ -286,9 +286,9 @@ export const MOODS = {
       // 8.9%. The whole difference is the practical (see `practicalTrim`), but
       // the grade was also carrying a +6% exposure into a mood that wants to be
       // under, not over.
-      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.50, exposure: 1.03,
+      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.40, exposure: 0.98,
       shadowTint: [0.80, 0.90, 1.26], highTint: [1.025, 1.0, 0.955], split: 1.2,
-      black: 0.092
+      black: 0.092, white: 1.32
     },
     fog: { color: 0x3b3f66, density: 0.030 }
   }
@@ -453,7 +453,7 @@ export class LightingRig {
    */
   _installPracticalTrim(light) {
     let raw = light.intensity;
-    this._practicalTrim = 0.26;
+    this._practicalTrim = 0.20;
     Object.defineProperty(light, 'intensity', {
       configurable: true,
       get: () => raw * this._practicalTrim,
@@ -650,7 +650,8 @@ export class LightingRig {
       shadowTint: L3(a.grade.shadowTint || NEUTRAL, b.grade.shadowTint || NEUTRAL),
       highTint: L3(a.grade.highTint || NEUTRAL, b.grade.highTint || NEUTRAL),
       split: L(a.grade.split ?? 1, b.grade.split ?? 1, t),
-      black: L(a.grade.black ?? 0, b.grade.black ?? 0, t)
+      black: L(a.grade.black ?? 0, b.grade.black ?? 0, t),
+      white: L(a.grade.white ?? 1.2, b.grade.white ?? 1.2, t)
     };
 
     // Weather grades the frame as well as lighting it: overcast is cool, low

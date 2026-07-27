@@ -330,19 +330,19 @@ const SKY = {
     // "overcast" no matter what the room is doing.
     top: 0x3f86d4, mid: 0x84bcec, hor: 0xd7e7f2, sun: 0xfff6e2,
     sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.30,
-    gain: 6.80, ground: 0x8aa76e, aerial: 0.44,
+    gain: 8.50, ground: 0x8aa76e, aerial: 0.44,
     shaft: 0xfff2dc, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
   },
   golden: {
     top: 0x4f86cc, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
     sunPos: [0.435, 0.455], sunSize: 0.030, glow: 0.40, stars: 0, haze: 0.44,
-    gain: 7.00, ground: 0x9a9a5c, aerial: 0.54,
+    gain: 8.80, ground: 0x9a9a5c, aerial: 0.54,
     shaft: 0xffd7a0, shaftI: 1.55, cloud: 0xffe6cc, cloudA: 0.92
   },
   evening: {
     top: 0x33417a, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
     sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.62,
-    gain: 3.40, ground: 0x67765a, aerial: 0.48,
+    gain: 4.00, ground: 0x67765a, aerial: 0.48,
     shaft: 0xffc79c, shaftI: 0.72, cloud: 0xd8bfc4, cloudA: 0.85
   },
   night: {

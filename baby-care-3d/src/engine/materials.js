@@ -1117,7 +1117,8 @@ export function makeBabySkin(opts = {}) {
     uDirtColor: { value: new THREE.Color(0x6a4a2e) },
     uWet:       { value: 0 },
     uBlush:     { value: 0 },
-    uGrimeScale:{ value: 9.0 }
+    uGrimeScale:{ value: 9.0 },
+    uDirtDebug: { value: 0 }
   };
   Object.assign(mat.userData.uniforms, extra);
   const base = mat.onBeforeCompile;
@@ -1148,6 +1149,7 @@ export function makeBabySkin(opts = {}) {
         uniform vec3  uDirtColor;
         uniform float uWet;
         uniform float uGrimeScale;
+        uniform float uDirtDebug;
         ${_NOISE_GLSL}
       `)
       // after the albedo is resolved, before lighting
@@ -1162,6 +1164,7 @@ export function makeBabySkin(opts = {}) {
                                bcDirt * 0.88);
         // wet skin is darker and a touch more saturated
         diffuseColor.rgb *= mix(1.0, 0.86, uWet);
+        if (uDirtDebug > 0.5) diffuseColor.rgb = vec3(bcZone, bcN, bcDirt);
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>

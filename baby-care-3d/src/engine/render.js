@@ -291,7 +291,14 @@ const GradeShader = {
       // still below the local-colour threshold on a lit cream wall (which now
       // sits 0.45–0.62) but reaches the whole shadow side of the room.
       float shadowW = 1.0 - smoothstep(0.006, 0.44, sl);
-      float highW = smoothstep(0.45, 0.98, sl);
+      // The warm highlight tint has to *release* at the very top. A real
+      // specular is the colour of the source and a genuinely blown highlight is
+      // neutral; carrying a 0.955 blue multiplier all the way to the ceiling
+      // meant the brightest pixel the pipeline could produce was an amber one,
+      // whose display luminance is capped around 0.93 however hard it is
+      // driven. That is most of why the measured set had zero pixels over 0.95
+      // even after the sky was three stops up.
+      float highW = smoothstep(0.45, 0.95, sl) * (1.0 - 0.85 * smoothstep(0.86, 1.02, sl));
       col *= mix(vec3(1.0), uShadowTint, shadowW * uSplit);
       col *= mix(vec3(1.0), uHighTint, highW * uSplit);
 
@@ -538,7 +545,7 @@ export class RenderPipeline {
     // the window, the lamp shade, a specular hit — can ever fire it.
     const bloom = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      tier === TIER.LOW ? 0.24 : 0.30,   // strength
+      tier === TIER.LOW ? 0.30 : 0.40,   // strength
       0.66,                              // radius
       1.02                               // threshold
     );

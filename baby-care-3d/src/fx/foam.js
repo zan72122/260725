@@ -48,7 +48,7 @@ const BUB = [10, 24, 42];
 const SIZE = {
   head: [0.0065, 0.0195, 1.9],
   body: [0.0060, 0.0165, 2.0],
-  water: [0.0085, 0.0235, 1.7]
+  water: [0.0075, 0.0195, 1.8]
 };
 
 /**
@@ -472,16 +472,19 @@ export class FoamSystem {
       const k = (i + 0.5) / nWater;
       const a = i * 2.39996;
       const rad = Math.sqrt(k) * (0.82 + rand() * 0.40);
-      _p.set(Math.cos(a) * rad * 0.200 + (rand() - 0.5) * 0.020,
+      _p.set(Math.cos(a) * rad * 0.175 + (rand() - 0.5) * 0.018,
              0.001 + rand() * 0.005,
-             Math.sin(a) * rad * 0.135 + (rand() - 0.5) * 0.015);
+             Math.sin(a) * rad * 0.118 + (rand() - 0.5) * 0.014);
       const b = this._spawn('water', _p, 0.02, SIZE.water[1]);
       b.target = pickRadius(rand, 'water', this._sizeK);
       b.r = b.target;
       // Floating suds sit half under. Flatten them *vertically* — which means
       // dropping the random tumble for a yaw-only rotation, or the squash axis
       // lands anywhere and the raft goes back to being balls on a mirror.
-      b.squash = 0.56 + rand() * 0.30;
+      // `flat` also opts out of the tumbled blobs' squash/stretch coupling: at
+      // a low squash that coupling stretches z, and 100 of them all yawed into
+      // the same plane read at 400% as a bed of eggs rather than as froth.
+      b.flat = 0.50 + rand() * 0.24;
       b.quat.setFromEuler(new THREE.Euler(0, rand() * 6.28, 0));
     }
 
@@ -560,7 +563,13 @@ export class FoamSystem {
 
       const wob = 1 + Math.sin(this.time * 2.2 + b.phase) * 0.035;
       const s = b.r * wob * scaleK;
-      _s.set(s, s * b.squash, s * (1.8 - b.squash));
+      if (b.flat !== undefined) {
+        // volume-preserving vertical squash, round in plan
+        const w = 1 / Math.sqrt(b.flat);
+        _s.set(s * w, s * b.flat, s * w);
+      } else {
+        _s.set(s, s * b.squash, s * (1.8 - b.squash));
+      }
       _m.compose(_wp, b.quat, _s);
       this.mesh.setMatrixAt(n++, _m);
       if (n >= this.capacity) break;
