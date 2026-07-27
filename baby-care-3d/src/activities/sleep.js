@@ -1013,7 +1013,9 @@ export class SleepActivity {
     } catch (e) { this.lullaby = null; }
     snd(ctx, 'baby.yawn', { gain: 0.5 });
 
-    ctx.ui?.prompt?.('はみがき しようね', { icon: 'brush' });
+    const first = this._hintStep();
+    this.promptTarget = first.at || null;
+    ctx.ui?.prompt?.(first.text, { icon: first.icon });
     ctx.ui?.meter?.('energy', clamp(this.sleepiness, 0, 1));
   }
 
@@ -1867,6 +1869,28 @@ export class SleepActivity {
 
   _after(seconds, fn) { this._timers.push({ at: this.t + seconds, fn }); }
 
+  /**
+   * The bedtime routine's next step, together with the *object* it is about.
+   *
+   * `at` is what the HUD aims its arrow at, and UI#prompt withholds the whole
+   * bubble when that object is not on screen. That is deliberate: the shipped
+   * `50-sleep-crib` frame told a four-year-old to brush teeth with no
+   * toothbrush anywhere in the picture, because enter() fired the first line
+   * of the routine unconditionally and nothing ever checked it could be
+   * obeyed.
+   */
+  _hintStep() {
+    const t = this.todo;
+    if (!t.teeth) return { text: 'はみがき しようね', icon: 'brush', at: this.brush?.group, look: this.brushHome };
+    if (!t.pajama) return { text: 'パジャマに きがえよう', icon: 'pajama', at: this.pajamaProp, look: this.pajamaProp?.position };
+    if (!t.curtains) return { text: 'カーテンを しめよう', icon: 'curtain', at: this.windowPos, look: this.windowPos };
+    if (this.lampOn) return { text: 'でんきを けそう', icon: 'lamp', at: this.lampGroup, look: this.lampGroup?.position };
+    if (!this.teddyGiven) return { text: 'くまさんを どうぞ', icon: 'teddy', at: this.teddy?.group, look: this.teddyHome };
+    if (this.bookPagesRead < this.book.spreads) return { text: 'えほんを よもうか', icon: 'book', at: this.book?.group, look: this.bookHome };
+    // Nothing left to fetch — so name nothing, and the arrow stays down.
+    return { text: 'とんとん…ゆっくりね', icon: 'pat', at: null, look: null };
+  }
+
   _hintUpdate(dt) {
     if (this.asleep || this.brushing) return;
     this._hintTimer -= dt;
@@ -1874,16 +1898,8 @@ export class SleepActivity {
     this._hintTimer = 10;
 
     const ctx = this.ctx;
-    const t = this.todo;
-    let hint = null;
-    if (!t.teeth) hint = { text: 'はみがき しようね', icon: 'brush', look: this.brushHome };
-    else if (!t.pajama) hint = { text: 'パジャマに きがえよう', icon: 'pajama', look: this.pajamaProp.position };
-    else if (!t.curtains) hint = { text: 'カーテンを しめよう', icon: 'curtain', look: this.windowPos };
-    else if (this.lampOn) hint = { text: 'でんきを けそう', icon: 'lamp', look: this.lampGroup.position };
-    else if (!this.teddyGiven) hint = { text: 'くまさんを どうぞ', icon: 'teddy', look: this.teddyHome };
-    else if (this.bookPagesRead < this.book.spreads) hint = { text: 'えほんを よもうか', icon: 'book', look: this.bookHome };
-    else hint = { text: 'とんとん…ゆっくりね', icon: 'pat', look: null };
-
+    const hint = this._hintStep();
+    this.promptTarget = hint.at || null;
     ctx.ui?.prompt?.(hint.text, { icon: hint.icon });
     if (hint.look) {
       ctx.baby?.lookAt?.(hint.look.clone ? hint.look.clone() : hint.look);

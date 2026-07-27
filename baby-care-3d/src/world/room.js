@@ -780,6 +780,39 @@ export class Room {
     }
   }
 
+  /**
+   * Rewrite the two instances reserved for the subject so a dark core follows
+   * the baby across the floor and fades out as he is picked up. Two matrices
+   * and two colours a frame; no extra draw call, no extra material.
+   */
+  _updateSubjectShadow(ctx) {
+    const im = this.shadows;
+    const i = this._subjectIdx;
+    if (!im || i === undefined) return;
+    const b = ctx?.baby?.group;
+    let op = 0, x = 0.05, z = 0.40, gy = 0;
+    if (b) {
+      b.getWorldPosition(_sv);
+      x = _sv.x; z = _sv.z;
+      gy = this.surfaceY(x, z);
+      // he is only *in contact* while he is on the floor; in the cot, the tub
+      // or the high chair the core has to be gone, not merely faint
+      op = THREE.MathUtils.clamp(1 - Math.max(0, _sv.y - gy) * 9, 0, 1);
+    }
+    _sq.identity();
+    // wide haze, then the tight core — same two-lobe shape ShadowField.pair()
+    // gives every prop, so the baby grounds exactly the way the furniture does
+    for (const [k, r, o, soft] of [[0, 0.34, 0.30, 0.60], [1, 0.17, 0.88, 2.4]]) {
+      _sv.set(x, gy + 0.005 + k * 0.0008, z);
+      _ss.set(r * 2, 1, r * 2);
+      im.setMatrixAt(i + k, _sm.compose(_sv, _sq, _ss));
+      _sc.setRGB(o * op, soft, 1);
+      im.setColorAt(i + k, _sc);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }
+
   dispose() {
     this.window?.dispose();
     this.group.traverse(o => {

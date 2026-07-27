@@ -306,9 +306,26 @@ export function shadowBlobMaterial(color = 0x3d2130) {
         vec2 q = abs(vUv - 0.5) * 2.0;
         float d = length(q);
         float k = 1.0 + vC.g * 6.0;
+        /* The reason the tight cores never read (defect D18).
+         *
+         * pow(1 - d, k) has its maximum at exactly one point — the centre —
+         * and at the k a "tight" core asks for (12 to 20) it has collapsed to
+         * a tenth of its opacity by d = 0.15. So the only genuinely dark part
+         * of a contact shadow was a disc a few millimetres across sitting
+         * *directly underneath the object that casts it*, where it is occluded
+         * by definition. Every blob in the room was therefore contributing its
+         * soft outer haze and nothing else, which is precisely the "no contact
+         * hardening anywhere in the set" the critique measured.
+         *
+         * A real contact shadow is not a point maximum. It is fully dark over
+         * the whole contact patch and then falls off hard just outside it. So
+         * a tight core now gets a *plateau*: full opacity out to p, then the
+         * same steep rolloff. Wide hazes (softness < 0.8) are unchanged, so
+         * every existing call keeps the silhouette it was tuned for. */
+        float p = clamp((vC.g - 0.8) * 0.30, 0.0, 0.55);
         float a;
         if (vC.b > 0.99) {
-          a = pow(max(0.0, 1.0 - d), k);
+          a = pow(max(0.0, 1.0 - max(0.0, d - p) / (1.0 - p)), k);
         } else if (vC.b > 0.5) {
           float ring = (vC.b - 0.5) * 2.0;
           float w = max(0.04, 1.0 - ring);
@@ -1170,27 +1187,39 @@ export function buildWardrobe(M) {
 
 /* ----------------------------------------------------------------- rug --- */
 
+/** Pile height of the nursery rug, in metres. Exported because anything that
+ *  sits *on* the rug — a toy, a block tower, the baby, and above all a contact
+ *  shadow — has to be lifted onto the pile rather than buried inside it. */
+export const RUG_PILE = 0.026;
+
 /**
  * Round tufted rug. Built as a radial grid so the pile can dish very slightly
  * in the middle and — the good bit — one edge can lift off the floor where
  * someone has caught it with a foot.
+ *
+ * The shape of the outline and the pattern are both authored here rather than
+ * in the texture, and `mesh.userData.height(x, z)` hands the surface back so
+ * callers can ground things on it. See the D24 note on the binding below.
  */
-export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
+export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
   const base = new THREE.Color(0xdf9dae);
   const band = new THREE.Color(0xfdf4e7);
   const edge = new THREE.Color(0xc57e92);
-  const bind = new THREE.Color(0xb87286);          // the woven binding tape
-  const under = new THREE.Color(0x7d4a58);         // hessian backing, in shade
+  const bind = new THREE.Color(0x8f5568);          // the woven binding tape
+  const under = new THREE.Color(0x5c3441);         // hessian backing, in shade
   const c = new THREE.Color();
 
   const liftAngle = 2.35;
-  const PILE = 0.021;
+  const PILE = RUG_PILE;
 
-  // The pattern is *not* concentric with the outline. A hand-tufted rug is
-  // drawn on a stretched backing, so the medallion sits proud of centre and
-  // the outline itself wanders by a couple of centimetres.
-  const OX = 0.085, OZ = -0.062;
+  /* The pattern is *not* concentric with the outline, and the previous 85 mm
+   * offset on a 1.18 m radius was 7% — far too small to read as anything but a
+   * rendering wobble, which is why the critique kept calling this "a perfectly
+   * concentric bullseye". A hand-tufted rug is drawn freehand on a stretched
+   * backing: the medallion sits well proud of centre and no ring closes on
+   * itself the same distance from the middle all the way round. */
+  const OX = 0.215, OZ = -0.155;
   const outline = (a) => radius * (1 + 0.020 * Math.sin(a * 3 + 0.7)
                                      + 0.012 * Math.sin(a * 5 - 2.1)
                                      - 0.008 * Math.cos(a * 2 + 1.4));
@@ -1202,6 +1231,23 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
     const perp = (x * 0.57 + z * 0.82) - 0.34;         // distance across it
     return Math.exp(-(perp * perp) / 0.026)
       * (0.55 + 0.45 * Math.cos(Math.min(1, Math.abs(t) / 1.5) * Math.PI));
+  };
+
+  /* Height of the pile, in the rug's own frame. Pulled out of the vertex loop
+     so `userData.height` can answer the same question for a contact shadow. */
+  const pileY = (x, z) => {
+    const r = Math.hypot(x, z);
+    const a = Math.atan2(z, x);
+    const rr = Math.min(1, r / outline(a));
+    let d = a - liftAngle;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    let y = PILE - rr * rr * 0.004;
+    y -= traffic(x, z) * 0.0078;
+    y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
+    y += Math.sin(a * 3 + rr * 6) * 0.0016 + Math.sin(a * 11 - rr * 17) * 0.0008;
+    y += Math.exp(-((rr - 0.55) ** 2) / 0.012) * Math.exp(-((a - 4.1) ** 2) / 0.35) * 0.010;
+    return y;
   };
 
   const put = (x, z, y, u, v, colr) => {
@@ -1218,28 +1264,25 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
       const R = outline(a);
       const r = rr * R;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
-
-      let d = a - liftAngle;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-
-      // pile thickness, dished centre, trodden path, tuft breakup, and the
-      // one corner someone has caught with a foot
-      let y = PILE - rr * rr * 0.004;
-      y -= traffic(x, z) * 0.0078;
-      y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
-      y += Math.sin(a * 3 + rr * 6) * 0.0016 + Math.sin(a * 11 - rr * 17) * 0.0008;
-      // a soft ruck: the rug has been shoved and never quite pulled straight
-      y += Math.exp(-((rr - 0.55) ** 2) / 0.012) * Math.exp(-((a - 4.1) ** 2) / 0.35) * 0.010;
+      const y = pileY(x, z);
 
       // pattern distance is measured from the *offset* centre
       const pd = Math.hypot(x - OX, z - OZ) / radius;
-      const wob = Math.sin(a * 5 + 1.1) * 0.018 + Math.sin(a * 9) * 0.008;
+      /* Freehand wobble. At ±0.026 of the radius this was 30 mm on a 2.4 m rug
+       * — a hairline, invisible at any distance the rug is ever seen from, so
+       * every band still closed as a circle. At ±0.11 it is 130 mm and the
+       * bands visibly wander, which is the whole difference between a tufted
+       * rug and a dartboard. Three incommensurate harmonics so no lobe repeats
+       * around the circle. */
+      const wob = Math.sin(a * 5 + 1.1) * 0.055
+                + Math.sin(a * 9 - 0.4) * 0.026
+                + Math.sin(a * 3 - 0.6) * 0.032;
       if (rr > 0.955) c.copy(edge).lerp(bind, 0.35);
       else if (pd > 0.885 + wob) c.copy(edge);
-      else if (pd > 0.795 + wob && pd < 0.835 + wob) c.copy(band);   // pin stripe
+      else if (pd > 0.795 + wob && pd < 0.845 + wob) c.copy(band);   // pin stripe
       else if (pd > 0.545 + wob && pd < 0.720 + wob) c.copy(band);
-      else if (pd < 0.300 + wob * 0.35) c.copy(band);                // medallion
+      // the medallion is scalloped, not round — a hooked rug's centre motif
+      else if (pd < 0.300 + wob * 0.5 + Math.sin(a * 8 + 2.0) * 0.035) c.copy(band);
       else c.copy(base);
       // wear: the trodden line and the very outer edge are faded and greyed.
       // Kept deliberately narrow — a wash over the whole rug just kills the
@@ -1254,17 +1297,30 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
 
   /* --- bound edge: a rolled hem with real thickness -------------------- */
   /* The bead of binding around the edge is the whole reason a rug reads as an
-     object lying on a floor rather than a decal printed on it, so it is
-     modelled as a real rolled section: the tape crests at full pile height,
-     bulges ~15 mm proud of the pile, turns down, and tucks back underneath.
-     Seen at gameplay distance that is a 20 mm lit-and-shaded bead all the way
-     round the silhouette. */
+   * object lying on a floor rather than a decal printed on it. It was already
+   * modelled — and it was still invisible, for two measurable reasons:
+   *
+   *   · SIZE. The bead crested at 1.013 R and turned under by 1.031 R, so it
+   *     projected 37 mm beyond the pile. Seen from standing height at the
+   *     establishing shot's 420 px/m that is 15 px *before* foreshortening and
+   *     3–4 px after it. There was nothing to see.
+   *   · CONTRAST. `bind` was 0xb87286 against an `edge` of 0xc57e92 — a 5%
+   *     value step. Even where the bead did cover a pixel, that pixel was the
+   *     same colour as the pile beside it.
+   *
+   * So the section is now 95 mm wide and 26 mm tall (a genuinely fat cotton
+   * binding tape, which is what a nursery rug has), the tape is two full stops
+   * darker than the field it edges, and the underside rolls to near-black. That
+   * is a lit-and-shaded bead 12–15 px deep all the way round the silhouette in
+   * the wide shot, and it is the single thing that gives the rug thickness.
+   */
   const rimRows = [
-    { rs: 1.013, ys: 1.00, tint: bind, shade: 1.06 },    // crest of the bead
-    { rs: 1.028, ys: 0.66, tint: bind, shade: 0.94 },    // widest point
-    { rs: 1.031, ys: 0.26, tint: bind, shade: 0.74 },    // turning under
-    { rs: 1.012, ys: 0.03, tint: under, shade: 0.52 },
-    { rs: 0.962, ys: 0.004, tint: under, shade: 0.40 }   // tucked under, on the floor
+    { rs: 1.000, ys: 1.14, tint: bind, shade: 1.12 },    // tape turns up over the pile
+    { rs: 1.030, ys: 1.06, tint: bind, shade: 1.00 },    // crest of the bead
+    { rs: 1.058, ys: 0.70, tint: bind, shade: 0.80 },    // widest point
+    { rs: 1.066, ys: 0.30, tint: bind, shade: 0.58 },    // turning under
+    { rs: 1.046, ys: 0.05, tint: under, shade: 0.42 },
+    { rs: 0.986, ys: 0.004, tint: under, shade: 0.30 }   // tucked under, on the floor
   ];
   for (const row of rimRows) {
     for (let j = 0; j <= segs; j++) {
@@ -1276,8 +1332,10 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
       const lift = 0.055 * Math.exp(-(d * d) / 0.20);
-      const y = (PILE - 0.004) * row.ys + lift * (0.6 + 0.4 * row.ys)
-              + Math.sin(a * 7 + 0.4) * 0.0009;
+      // the tape is stitched on by hand, so its width breathes round the circle
+      const y = (PILE - 0.004) * row.ys * (1 + Math.sin(a * 4 + 1.9) * 0.06)
+              + lift * (0.6 + 0.4 * row.ys)
+              + Math.sin(a * 7 + 0.4) * 0.0011;
       c.copy(row.tint).multiplyScalar(row.shade);
       put(x, z, y, Math.cos(a) * 0.52 + 0.5, Math.sin(a) * 0.52 + 0.5, c);
     }
@@ -1301,6 +1359,12 @@ export function buildRug(M, { radius = 1.16, rings = 24, segs = 84 } = {}) {
   const m = mesh(g, M.carpet, 'rug');
   m.castShadow = false;         // a 16 mm rug casting a shadow map just aliases
   m.userData.radius = radius;
+  m.userData.pile = PILE;
+  /** Surface height in the rug's own frame, or −1 outside the bound edge. */
+  m.userData.height = (x, z) => {
+    const a = Math.atan2(z, x);
+    return Math.hypot(x, z) <= outline(a) * 1.03 ? pileY(x, z) : -1;
+  };
   return m;
 }
 
@@ -1619,7 +1683,19 @@ export function buildPictures(M, list) {
     for (let i = 0; i < uv.count; i++) uv.setXY(i, ox + uv.getX(i) * 0.5, oy + uv.getY(i) * 0.5);
     arts.push(seat(xf(plane, [p.x + sin * 0, p.y, 0.006], [0, 0, t]), p.place));
 
+    /* Glazing UVs are *not* 0..1 per pane. A reflection of the window is a
+     * property of the room, not of the picture: giving every frame the same
+     * copy of the same gradient is what made three pictures hung at three
+     * heights all carry an identical wash, which reads as a print defect
+     * rather than as glass. The pane samples a window of the reflection map
+     * chosen by where it hangs, so each frame catches a different part of the
+     * streak and the set reads as one light source seen in three sheets. */
     const pane = new THREE.PlaneGeometry(p.w * 0.995, p.h * 0.995);
+    const guv = pane.attributes.uv;
+    const gx = 0.5 + p.x * 0.9, gy = 0.5 - p.y * 0.9;
+    for (let i = 0; i < guv.count; i++) {
+      guv.setXY(i, gx + (guv.getX(i) - 0.5) * 1.35, gy + (guv.getY(i) - 0.5) * 1.35);
+    }
     panes.push(seat(xf(pane, [p.x, p.y, 0.0092], [0, 0, t]), p.place));
   }
   g.add(mesh(mergeAll(frames), M.beech, 'pictureFrames'));
@@ -2148,7 +2224,15 @@ const _mm = new THREE.Matrix4();
  * marks, balls, and one instanced contact-shadow sheet with a tight dark core
  * under every single item.
  */
-export function buildClutter(M, spots, { seed = 77 } = {}) {
+export function buildClutter(M, spots, { seed = 77, surfaceY = null } = {}) {
+  /* `surfaceY(x, z)` reports the height of whatever the toy is actually
+   * standing on — bare boards at 0, or the rug's pile at 26 mm. Without it,
+   * every toy on the rug was modelled as standing on the *floor*: sunk 26 mm
+   * into the pile, with its contact shadow buried 26 mm below the surface it
+   * was supposed to be darkening. That is why not one of the sixteen toys in
+   * `62-clutter` had a readable contact shadow while the two that had drifted
+   * onto the bare boards did (defect D18). */
+  const ground = typeof surfaceY === 'function' ? surfaceY : () => 0;
   const group = new THREE.Group();
   group.name = 'clutter';
   const R = rng(seed);
@@ -2213,10 +2297,11 @@ export function buildClutter(M, spots, { seed = 77 } = {}) {
         restY = support(q, size) - (mode === 'corner' ? size * 0.03 : 0);
       }
 
+      const floorY = ground(x, z);
       toys.push({
         kind: wantBall ? 'ball' : 'block',
-        x, z, quat: q, size,
-        base: pile ? stackY + restY : restY,
+        x, z, quat: q, size, floorY,
+        base: floorY + (pile ? stackY + restY : restY),
         color: wantBall ? ballCols[(si + k) % ballCols.length]
           : BLOCK_PAINTS[(si * 3 + k * 5) % BLOCK_PAINTS.length],
         shadow: pile && k > 0 ? 0.35 : 1,
@@ -2265,19 +2350,29 @@ export function buildClutter(M, spots, { seed = 77 } = {}) {
       if (t.kind === 'block') { blockMesh.setMatrixAt(bi, _m4); markMesh.setMatrixAt(bi, _m4); bi++; }
       else ballMesh.setMatrixAt(si++, _m4);
 
-      // wide haze + tight core, both shrinking as the toy is lifted away
+      /* Wide haze + tight core, both shrinking as the toy is lifted away.
+       *
+       * The core used to be scaled to `rr * 1.02` — 73 mm across for a 78 mm
+       * block, i.e. a disc strictly *smaller than the object standing on it*,
+       * and therefore invisible from every camera angle in the game. It is now
+       * 2.2 × the block, so the darkness at the contact patch reads as a hard
+       * rim of shadow escaping from under the block on every side, which is
+       * the thing the eye actually uses to ground an object. */
       const grounded = Math.max(0, 1 - lift * 9);
       const rr = t.size * (0.92 + lift * 4);
-      _v.set(t.x, 0.005, t.z);
+      // 4 mm of clearance: the pile ripples by ±1.6 mm across the 160 mm the
+      // haze covers, and a flat plane laid *on* that surface pokes through it.
+      const sy = t.floorY + 0.004;
+      _v.set(t.x, sy, t.z);
       _q.identity();
-      _s.set(rr * 2.1, 1, rr * 2.1);
+      _s.set(rr * 3.4, 1, rr * 3.4);
       shadows.setMatrixAt(sh, _m4.compose(_v, _q, _s));
-      _c.setRGB(0.30 * v * grounded * t.shadow, 0.5, 1);
+      _c.setRGB(0.26 * v * grounded * t.shadow, 0.45, 1);
       shadows.setColorAt(sh++, _c);
-      _v.y = 0.0056;
-      _s.set(rr * 1.02, 1, rr * 1.02);
+      _v.y = sy + 0.0007;
+      _s.set(rr * 2.2, 1, rr * 2.2);
       shadows.setMatrixAt(sh, _m4.compose(_v, _q, _s));
-      _c.setRGB(0.62 * v * grounded * t.shadow, 2.2, 1);
+      _c.setRGB(0.80 * v * grounded * t.shadow, 1.7, 1);
       shadows.setColorAt(sh++, _c);
     }
     blockMesh.instanceMatrix.needsUpdate = true;
