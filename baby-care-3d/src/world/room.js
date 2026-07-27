@@ -595,7 +595,7 @@ export class Room {
   _trimShadowCasters() {
     const NO_CAST = new Set([
       'doorKnob', 'mobileArm', 'mobileHub', 'mobileCharms', 'dresserKnobs',
-      'changingBolsters', 'nightlightFoot', 'wardrobeHandle', 'wardrobeClothes',
+      'changingBolsters', 'changingMat', 'nightlightFoot', 'wardrobeHandle', 'wardrobeClothes',
       'books', 'bookPages', 'teddyBody', 'ringBase', 'rings', 'lampBase',
       'lampStem', 'toyboxPull', 'stools', 'basketStaves', 'basketHoops',
       'basketLiner', 'plantSoil', 'plantLeaves', 'pouffeSeams', 'pictureFrames',

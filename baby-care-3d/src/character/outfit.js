@@ -44,7 +44,7 @@ export const GARMENTS = {
       // the collar sits low and wide, well clear of the head shell's own rim —
       // an overlapping neckline leaves the two surfaces fighting and shows as
       // a ring of hard flaps under the chin
-      const bodyM = band(0.2430, 0.4235, y);
+      const bodyM = band(0.2430, 0.4390, y);
       // short sleeves: a capsule around the top of each upper arm
       let sl = 0;
       for (const s of [1, -1]) {
@@ -52,7 +52,7 @@ export const GARMENTS = {
         sl = Math.max(sl, 1 - sstep(0.030, 0.052, d));
       }
       // neck hole
-      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4330) / 0.72) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.042 ** 2)));
+      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4300) / 0.70) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.0455 ** 2)));
       return Math.max(bodyM, sl) * Math.max(0, neck);
     },
     // A knit at 120 threads × 8 repeats is a 1 mm rib: below a pixel at any

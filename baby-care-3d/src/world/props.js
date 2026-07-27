@@ -746,36 +746,67 @@ export function buildDresser(M) {
   const g = new THREE.Group();
   g.name = 'dresser';
   const W = 1.06, D = 0.52, H = 0.86;
-  const carcass = [];
 
-  carcass.push(rbox(W - 0.10, 0.085, D - 0.08, [0, 0.043, 0], [0, 0, 0], 0.016, 1.4));
+  /* The chest is built the way a chest is actually built: a face frame with
+   * rails between the drawers, and drawer faces set into it. The old version
+   * left 30–45 mm of open air between the faces, looking straight into an
+   * unlit carcass — at gameplay distance that is a hard black dashed line
+   * that crawls as the camera moves. A 9 mm reveal with a *lit* rail behind
+   * it reads as joinery instead of as a hole, and there is nothing left thin
+   * enough or dark enough to alias. */
+  const FACE = D / 2 + 0.012;        // the plane the drawer faces sit in
+  const RAIL = FACE - 0.010;         // face-frame rails, 10 mm behind them
+  const REV = 0.009;                 // the reveal between faces
+  const zoneY0 = 0.092, zoneY1 = 0.819;
+  const heights = [0.245, 0.245, 0.205];
+
+  const carcass = [];
+  // plinth, brought forward to the face plane so the bottom reveal shows a
+  // lit horizontal surface instead of a hole into the carcass
+  carcass.push(rbox(W - 0.06, zoneY0, D - 0.02, [0, zoneY0 / 2, 0.006], [0, 0, 0], 0.016, 1.4));
   for (const sx of [-1, 1]) {
-    carcass.push(rbox(0.028, 0.70, D - 0.03, [sx * (W / 2 - 0.014), 0.44, -0.005], [0, 0, 0], 0.0126, 1.4));
+    carcass.push(rbox(0.028, 0.74, D - 0.012, [sx * (W / 2 - 0.014), 0.455, 0.004], [0, 0, 0], 0.0126, 1.4));
   }
-  carcass.push(rbox(W - 0.05, 0.70, 0.018, [0, 0.44, -D / 2 + 0.02], [0, 0, 0], 0.006, 1.4));
-  // drawer dividers
-  for (const y of [0.325, 0.555]) {
-    carcass.push(rbox(W - 0.06, 0.016, D - 0.06, [0, y, 0], [0, 0, 0], 0.005, 1.4));
+  carcass.push(rbox(W - 0.05, 0.74, 0.018, [0, 0.455, -D / 2 + 0.02], [0, 0, 0], 0.006, 1.4));
+  // face-frame stiles: the vertical half of the frame, so the side reveals
+  // bottom out on a lit face 10 mm in instead of opening into the carcass
+  for (const sx of [-1, 1]) {
+    carcass.push(rbox(0.040, zoneY1 - zoneY0 + 0.02, D - 0.012,
+      [sx * (W / 2 - 0.020), (zoneY0 + zoneY1) / 2, RAIL - (D - 0.012) / 2 + 0.0001],
+      [0, 0, 0], 0.0035, 1.4));
   }
-  // overhanging top with a generous eased edge
-  carcass.push(rbox(W + 0.045, 0.042, D + 0.03, [0, H - 0.02, 0], [0, 0, 0], 0.0198, 1.2));
-  /* --- drawer fronts (the middle one not pushed home) ------------------ */
+
+  /* --- drawer faces, and the rail behind every reveal ------------------ */
   const proud = [0, 0.032, 0];
-  const fronts = [];
   const knobs = [];
   const knobGeo = lathe([
     [0, 0], [0.009, 0], [0.010, 0.013], [0.021, 0.024], [0.023, 0.034], [0.015, 0.043], [0, 0.045]
   ], 14);
   knobGeo.rotateX(Math.PI / 2);          // face the room
-  const drawerY = [0.19, 0.44, 0.665];
-  drawerY.forEach((y, i) => {
-    const z = D / 2 - 0.006 + proud[i];
-    fronts.push(rbox(W - 0.075, i === 2 ? 0.185 : 0.205, 0.022, [0, y, z], [0, 0, 0], 0.0104, 1.4));
-    for (const sx of [-1, 1]) knobs.push({ pos: [sx * 0.235, y, z + 0.012] });
-  });
 
-  // carcass and drawer fronts are one material in one group: one draw call
-  g.add(mesh(mergeAll([...carcass, ...fronts]), M.oak, 'dresserCarcass'));
+  let y = zoneY0;
+  heights.forEach((hh, i) => {
+    // the rail below this drawer (the bottom one sits on the plinth)
+    if (i > 0) {
+      carcass.push(rbox(W - 0.05, REV + 0.030, D - 0.012, [0, y + REV / 2, RAIL - (D - 0.012) / 2 + 0.0001], [0, 0, 0], 0.0035, 1.4));
+    }
+    y += REV;
+    const cy = y + hh / 2;
+    const z = FACE - 0.016 + proud[i];    // 32 mm face, front at FACE
+    carcass.push(rbox(W - 0.062, hh, 0.032, [0, cy, z], [0, 0, 0], 0.0116, 1.4));
+    for (const sx of [-1, 1]) knobs.push({ pos: [sx * 0.235, cy, z + 0.016] });
+    y += hh;
+  });
+  // the top rail, closing the gap under the slab
+  carcass.push(rbox(W - 0.05, (zoneY1 - y) + 0.030, D - 0.012,
+    [0, (y + zoneY1) / 2, RAIL - (D - 0.012) / 2 + 0.0001], [0, 0, 0], 0.0035, 1.4));
+
+  // overhanging top with a generous eased edge
+  carcass.push(rbox(W + 0.062, 0.048, D + 0.042, [0, H - 0.024, 0.004], [0, 0, 0], 0.0228, 1.2));
+
+  // carcass, face frame and drawer faces are one material in one group: one
+  // draw call, and no inter-mesh self-shadowing to speckle the reveals
+  g.add(mesh(mergeAll(carcass), M.oak, 'dresserCarcass'));
   // Knobs get the worn material: this is where hands actually touch.
   g.add(instanced(knobGeo, M.worn, knobs, 'dresserKnobs'));
 
@@ -1384,23 +1415,35 @@ export function buildBasket(M) {
   g.add(instanced(stave, M.plastic, staves, 'basketStaves'));
 
   const hoops = [];
+  // The two lower hoops are kept well clear of the rim. A hoop sitting a few
+  // millimetres under the rolled lip made a sub-pixel dark seam all the way
+  // round the basket, which crawled as the camera moved — the classic
+  // thin-geometry alias. There is now exactly one ring at the top.
   for (const [y, rr, tr] of [
-    [0.03, rBot + 0.005, 0.0135], [0.15, 0.222, 0.0128],
-    [0.28, 0.242, 0.0132], [H - 0.012, rTop - 0.002, 0.0138]
+    [0.155, 0.223, 0.0132], [0.285, 0.243, 0.0136]
   ]) {
     const t = new THREE.TorusGeometry(rr, tr, 9, 56);
     t.rotateX(Math.PI / 2);
     hoops.push(tint(xf(t, [0, y, 0]), 0xe3cba4));
   }
-  // The rim is a rolled lip, not a cut edge: a fat torus sitting on top of a
-  // short collar, so the silhouette curves over instead of stopping dead.
-  const lip = new THREE.TorusGeometry(rTop, 0.0185, 12, 72);
+  // The rim is a rolled lip, not a cut edge, and it is fat enough (24 mm
+  // section) to hold four or five pixels at the distance the wide shot views
+  // it from, so it shades instead of shimmering.
+  const lip = new THREE.TorusGeometry(rTop - 0.004, 0.0122, 14, 80);
   lip.rotateX(Math.PI / 2);
-  hoops.push(tint(xf(lip, [0, H + 0.004, 0]), 0xe9d3ae));
+  hoops.push(tint(xf(lip, [0, H - 0.002, 0]), 0xe9d3ae));
+  // a turned collar joining the lip down onto the staves, so the transition
+  // is a shaded surface rather than an edge
   hoops.push(tint(lathe([
-    [rTop - 0.006, H - 0.03], [rTop + 0.001, H - 0.012], [rTop + 0.002, H + 0.004]
-  ], 56), 0xdcc39c));
-  hoops.push(tint(lathe([[0, 0], [rBot, 0], [rBot, 0.012], [0, 0.012]], 32), 0xd9bd93));
+    [rTop - 0.018, H - 0.052], [rTop - 0.010, H - 0.040], [rTop - 0.006, H - 0.024],
+    [rTop - 0.006, H - 0.012], [rTop - 0.011, H - 0.002], [rTop - 0.016, H + 0.004]
+  ], 64), 0xdcc39c));
+  // a solid turned base band the staves stand on: 50 mm of shaded surface
+  // rather than a 12 mm disc with a hoop hovering 3 mm above it
+  hoops.push(tint(lathe([
+    [0, 0], [rBot - 0.004, 0], [rBot + 0.006, 0.008], [rBot + 0.010, 0.020],
+    [rBot + 0.006, 0.038], [rBot - 0.004, 0.050], [rBot - 0.012, 0.056], [0, 0.056]
+  ], 48), 0xd9bd93));
   g.add(mesh(mergeAll(hoops, { colors: true }), M.plastic, 'basketHoops'));
 
   /* --- contents: a wash that never got put away ------------------------ */
@@ -1417,37 +1460,22 @@ export function buildBasket(M) {
   lump(-0.07, H - 0.035, 0.05, 1.30, 0.60, 1.15, 0.7, 0xdfe9f2);
   lump(0.09, H - 0.028, -0.04, 1.15, 0.55, 1.05, -0.4, 0xf7dfe4);
   lump(0.02, H + 0.012, 0.07, 0.86, 0.48, 0.78, 0.3, 0xfaf3e6);
-  // a towel spilling over the near rim, and two socks on the way out
-  const spill = new THREE.PlaneGeometry(0.165, 0.20, 8, 14);
-  {
-    const p = spill.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const u = p.getX(i), t = (p.getY(i) + 0.10) / 0.20;    // 0 at the loose end
-      const drop = Math.max(0, 0.70 - t) / 0.70;
-      // it folds over the rim and curls, rather than hanging as a flat card:
-      // the free corner rolls inwards and the sides cup
-      const a = drop * Math.PI * 0.58;
-      p.setXYZ(i,
-        u * (1 - drop * 0.22) + Math.sin(t * 9) * 0.005,
-        H + 0.028 - (1 - Math.cos(a)) * 0.115 + Math.abs(u) * drop * 0.10,
-        rTop - 0.035 + Math.sin(a) * 0.052 + Math.cos(u * 18) * 0.005);
-    }
-    spill.computeVertexNormals();
-  }
-  // cloth needs two sides, and M.cloth is front-facing: give the towel a
-  // reversed underside 4 mm behind, which also reads as real thickness
-  const spillBack = spill.clone();
-  spillBack.translate(0, -0.0045, 0.0045);
-  {
-    const ix = spillBack.getIndex().array;
-    for (let i = 0; i < ix.length; i += 3) { const t = ix[i]; ix[i] = ix[i + 2]; ix[i + 2] = t; }
-    spillBack.getIndex().needsUpdate = true;
-    spillBack.computeVertexNormals();
-  }
-  soft.push(tint(xf(spill, [0.10, 0, 0.02], [0, -0.55, 0]), 0xe9dff0));
-  soft.push(tint(xf(spillBack, [0.10, 0, 0.02], [0, -0.55, 0]), 0xd6c8de));
-  soft.push(tint(xf(roundedBox(0.055, 0.13, 0.032, 0.015, 3), [rTop * 0.72, H + 0.02, rTop * 0.5], [0.5, 0.6, 0.25]), 0xd8e6ef));
-  soft.push(tint(xf(roundedBox(0.05, 0.115, 0.030, 0.014, 3), [-rTop * 0.40, H + 0.055, rTop * 0.62], [1.15, -0.4, 0.5]), 0xf6d7c9));
+  /* Something spilling over the rim, built out of solid rounded volumes
+     rather than a draped plane. A single-sided sheet needed a second surface
+     4 mm behind it to be visible from both sides, and that pair is a thin
+     high-contrast feature at exactly the scale that aliases. A rolled towel
+     lolling over the lip has real thickness from every angle. */
+  const rollA = lathe([
+    [0, 0], [0.038, 0.004], [0.043, 0.018], [0.042, 0.10], [0.044, 0.135],
+    [0.038, 0.150], [0, 0.155]
+  ], 16);
+  rollA.rotateZ(Math.PI / 2);
+  soft.push(tint(xf(rollA, [0.055, H + 0.020, rTop * 0.66], [0.22, 0.75, -0.30]), 0xe9dff0));
+  // its loose end flopped down the outside of the basket
+  soft.push(tint(xf(new THREE.SphereGeometry(0.10, 12, 9),
+    [0.148, H - 0.055, rTop * 0.80], [0, 0.75, 0.42], [0.55, 0.95, 0.30]), 0xe2d5ec));
+  soft.push(tint(xf(roundedBox(0.055, 0.13, 0.034, 0.016, 3), [rTop * 0.66, H + 0.020, -rTop * 0.34], [0.5, 0.6, 0.25]), 0xd8e6ef));
+  soft.push(tint(xf(roundedBox(0.05, 0.115, 0.032, 0.015, 3), [-rTop * 0.40, H + 0.050, rTop * 0.55], [1.15, -0.4, 0.5]), 0xf6d7c9));
   const liner = mesh(mergeAll(soft, { colors: true }), M.cloth, 'basketLiner');
   liner.castShadow = false;
   g.add(liner);

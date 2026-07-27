@@ -1008,7 +1008,7 @@ export function buildAnatomy({ tier = 2, uvRepeat = 7 } = {}) {
     center: [0, 0.5330, 0.0060],
     segs: lod.head[0], rings: lod.head[1], tMax: 0.20,
     focus: HEAD_FOCUS, sinkDepth: 0.010,
-    tube: { from: 0.700, to: 0.925, a: [0, 0.4740, 0.0035], b: [0, 0.4300, 0.0010] },
+    tube: { from: 0.782, to: 0.935, a: [0, 0.4700, 0.0035], b: [0, 0.4300, 0.0010] },
     collapse: { from: 0.962, to: [0, 0.4180, 0.0010] }
   });
 

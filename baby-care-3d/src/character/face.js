@@ -667,11 +667,11 @@ export class Face {
     }
     // the path a tear rolls down: inner canthus → cheek → jaw
     this.tearPath = s => [
-      new THREE.Vector3(0.0175 * s, 0.5245, 0.0625),
-      new THREE.Vector3(0.0245 * s, 0.5110, 0.0640),
-      new THREE.Vector3(0.0330 * s, 0.4960, 0.0605),
-      new THREE.Vector3(0.0385 * s, 0.4805, 0.0510),
-      new THREE.Vector3(0.0400 * s, 0.4680, 0.0400)
+      new THREE.Vector3(0.0180 * s, 0.5230, 0.0680),
+      new THREE.Vector3(0.0250 * s, 0.5100, 0.0690),
+      new THREE.Vector3(0.0330 * s, 0.4955, 0.0655),
+      new THREE.Vector3(0.0385 * s, 0.4800, 0.0560),
+      new THREE.Vector3(0.0400 * s, 0.4672, 0.0450)
     ];
   }
 
@@ -976,9 +976,9 @@ export class Face {
       0.34 + open * 1.55,
       0.55 + open * 0.60);
     g.position.y = FACE.mouth[1] - open * 0.0150;
-    g.position.z = FACE.mouth[2] - 0.0235 - open * 0.0050;
+    g.position.z = FACE.mouth[2] - 0.0235 - open * 0.0165;
     this.tongue.position.y = -0.0072 - open * 0.0030 + (ov.tongue || 0) * 0.004;
-    this.tongue.position.z = 0.0055 + (ov.tongue || 0) * 0.020;
+    this.tongue.position.z = 0.0055 - open * 0.0060 + (ov.tongue || 0) * 0.020;
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';
 
     /* -- cheeks / blush ---------------------------------------------------- */
@@ -1004,10 +1004,10 @@ export class Face {
         free.life = 0;
         free.s = Math.random() < 0.5 ? 1 : -1;
         free.u = 0;
-        free.r = 0.0016 + Math.random() * 0.0012;
+        free.r = 0.0034 + Math.random() * 0.0022;
         free.mesh.visible = true;
       }
-      this._tearSpawn = 0.55 + Math.random() * 0.7;
+      this._tearSpawn = 0.38 + Math.random() * 0.5;
     }
     for (const t of this.tearPool) {
       if (t.life < 0) continue;
