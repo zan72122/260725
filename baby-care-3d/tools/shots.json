@@ -7,9 +7,9 @@
   { "id": "06-baby-sleepy",      "scene": "sleep", "camera": "face",     "warm": 3.0, "hud": false, "tags": ["baby"],   "state": { "mood": "sleepy" }, "note": "Heavy lids, night lighting on skin." },
   { "id": "07-baby-full",        "scene": "play",  "camera": "closeup",  "warm": 2.5, "hud": false, "tags": ["baby"],   "note": "Full body. Judge: proportions, silhouette, cloth, contact shadow." },
 
-  { "id": "10-feed-bottle",      "scene": "feed",  "camera": "table",    "warm": 3.0, "hud": true,  "tags": ["feed"],   "state": { "food": "bottle", "progress": 0.5 }, "note": "Bottle feeding mid-way. Judge: glass transmission, milk volume." },
-  { "id": "11-feed-messy",       "scene": "feed",  "camera": "closeup",  "warm": 4.0, "hud": false, "tags": ["feed"],   "state": { "food": "porridge", "progress": 0.7, "messy": true }, "note": "Food on the face + bib stains." },
-  { "id": "12-feed-apple",       "scene": "feed",  "camera": "table",    "warm": 3.0, "hud": true,  "tags": ["feed"],   "state": { "food": "apple", "progress": 0.4 }, "note": "Bite marks, crumbs, tray." },
+  { "id": "10-feed-bottle",      "scene": "feed",  "camera": "table",      "warm": 3.0, "hud": true,  "tags": ["feed"],   "state": { "food": "bottle", "progress": 0.5 }, "note": "Bottle feeding mid-way, face-to-face across the tray. Judge: the face and the bottle are both whole and both readable; glass transmission, milk volume." },
+  { "id": "11-feed-messy",       "scene": "feed",  "camera": "closeup",    "warm": 4.0, "hud": false, "tags": ["feed"],   "state": { "food": "porridge", "progress": 0.7, "messy": true }, "note": "Food on the face + bib stains, tight on the face and the spoon." },
+  { "id": "12-feed-apple",       "scene": "feed",  "camera": "table-side", "warm": 5.5, "hud": true,  "tags": ["feed"],   "state": { "food": "apple", "progress": 0.78 }, "note": "Two bites in, low three-quarter from the baby's right. Judge: bite marks in the real geometry, crumbs, tray. Must not read as the same moment as 10." },
 
   { "id": "20-bath-fill",        "scene": "bath",  "camera": "tub",      "warm": 3.0, "hud": true,  "tags": ["bath"],   "state": { "water": 0.4, "steam": true }, "note": "Tub filling. Judge: water surface, refraction, steam." },
   { "id": "21-bath-foam",        "scene": "bath",  "camera": "tub",      "warm": 4.0, "hud": false, "tags": ["bath"],   "state": { "water": 0.8, "foam": 0.9, "bubbles": true }, "note": "Foam hair, bubbles, iridescence." },
@@ -24,13 +24,13 @@
   { "id": "40-play-blocks",      "scene": "play",  "camera": "floor",    "warm": 4.0, "hud": true,  "tags": ["play"],   "state": { "toy": "blocks", "stack": 5 }, "note": "Block tower. Judge: physics settle, wood material, AO." },
   { "id": "41-play-collapse",    "scene": "play",  "camera": "floor",    "warm": 5.2, "hud": false, "tags": ["play"],   "state": { "toy": "blocks", "stack": 6, "collapse": true }, "note": "Mid-collapse — motion, contact, dust." },
   { "id": "42-play-ball",        "scene": "play",  "camera": "floor",    "warm": 3.0, "hud": false, "tags": ["play"],   "state": { "toy": "ball" }, "note": "Ball + crawl pose." },
-  { "id": "43-play-balloon",     "scene": "play",  "camera": "wide",     "warm": 3.0, "hud": true,  "tags": ["play"],   "state": { "toy": "balloon" }, "note": "Balloon translucency + string." },
+  { "id": "43-play-balloon",     "scene": "play",  "camera": "toy",      "warm": 5.0, "hud": false, "tags": ["play"],   "state": { "toy": "balloon" }, "note": "Balloon translucency + string, shot close enough to judge both — the balloon and the whole run of string down to its anchor are in frame, with the baby off to one side for scale. HUD off because the care bar sits exactly where the string lands." },
 
   { "id": "50-sleep-crib",       "scene": "sleep", "camera": "crib",     "warm": 3.5, "hud": true,  "tags": ["sleep"],  "state": { "lamp": true, "curtains": 0 }, "note": "Night crib. Judge: warm practical light, blanket cloth, mood." },
   { "id": "51-sleep-asleep",     "scene": "sleep", "camera": "face",     "warm": 5.0, "hud": false, "tags": ["sleep"],  "state": { "asleep": true, "lamp": true }, "note": "Asleep closeup — the money shot for lighting." },
   { "id": "52-sleep-lamp-off",   "scene": "sleep", "camera": "crib",     "warm": 4.0, "hud": false, "tags": ["sleep"],  "state": { "asleep": true, "lamp": false, "curtains": 1 }, "note": "Moonlight only. Judge: does it stay readable and pretty in low key." },
 
   { "id": "60-weather-rain",     "scene": "play",  "camera": "wide",     "warm": 3.0, "hud": false, "tags": ["room"],   "state": { "weather": "rain" }, "note": "Rain on the glass, overcast grade." },
-  { "id": "61-golden-hour",      "scene": "feed",  "camera": "wide",     "warm": 3.0, "hud": false, "tags": ["room"],   "note": "Golden hour light shaft + dust motes." },
+  { "id": "61-golden-hour",      "scene": "feed",  "camera": "table-wide", "warm": 3.0, "hud": false, "tags": ["room"],   "state": { "food": "porridge", "progress": 0.35 }, "note": "Golden hour light shaft + dust motes, raking across the highchair. Judge: the shaft and the falloff — but the baby in the highchair is the subject the light is falling on, and has to be in frame." },
   { "id": "62-clutter",          "scene": "play",  "camera": "wide",     "warm": 3.0, "hud": false, "tags": ["room"],   "state": { "clutter": true }, "note": "Lived-in room with scattered toys." }
 ]

@@ -319,7 +319,10 @@ export class PlayActivity {
     ctx.room?.clutter?.(false);
     ctx.audio?.unlock?.();
     snd(ctx, 'play.chime');
-    ctx.ui?.prompt?.('ボールを ころころ！', { icon: 'ball' });
+    // The target is handed over explicitly: app.setActivity only publishes
+    // `app.activity` after enter() returns, so this one prompt would otherwise
+    // be the only one in the scene with nothing to point at.
+    ctx.ui?.prompt?.('ボールを ころころ！', { icon: 'ball', target: this.ball.group });
 
     // Give the ball a tiny settle so it is never floating on the first frame.
     this.bodies.wake(this.ballEntry);
@@ -367,15 +370,15 @@ export class PlayActivity {
     if (patch.toy === 'blocks') {
       if (this.towerHeight === 0) this._buildTower(4);
       this.ctx.baby?.lookAt?.(this._towerTop());
-      this.ctx.ui?.prompt?.('つみきを ぽん！', { icon: 'blocks' });
+      this.ctx.ui?.prompt?.('つみきを ぽん！', { icon: 'blocks', target: this.towerBase });
       this.tried.blocks = true;
     } else if (patch.toy === 'ball') {
       this._kickBall();
-      this.ctx.ui?.prompt?.('ボールを ころころ！', { icon: 'ball' });
+      this.ctx.ui?.prompt?.('ボールを ころころ！', { icon: 'ball', target: this.ball.group });
       this.tried.ball = true;
     } else if (patch.toy === 'balloon') {
       this._bopBalloon(0.9);
-      this.ctx.ui?.prompt?.('ふうせん ぽーん！', { icon: 'balloon' });
+      this.ctx.ui?.prompt?.('ふうせん ぽーん！', { icon: 'balloon', target: this.balloon.group });
       this.tried.balloon = true;
     }
 
@@ -1204,18 +1207,26 @@ export class PlayActivity {
     const ctx = this.ctx;
     const loose = this.blocks.filter((b) => b.state === 'loose').length;
     const options = [];
-    if (loose >= 3) options.push({ text: 'おかたづけ しよう', icon: 'toybox', look: this.boxMouth });
-    if (!this.tried.ball) options.push({ text: 'ボールを ころころ！', icon: 'ball', look: this.ball.group.position });
-    if (!this.tried.blocks) options.push({ text: 'つみきを ぽん！', icon: 'blocks', look: this.towerBase });
-    if (!this.tried.balloon) options.push({ text: 'ふうせん ぽーん！', icon: 'balloon', look: this.balloonPos });
-    if (!this.tried.music) options.push({ text: 'たたいて おとを だそう', icon: 'music', look: this.xylo.group.position });
-    if (!this.tried.peek) options.push({ text: 'あたまを ちょん！', icon: 'peekaboo', look: ctx.baby?.headWorldPos?.() });
-    if (!options.length) {
-      options.push({ text: 'なにで あそぶ？', icon: 'play', look: this.balloonPos });
-    }
-    const pick = options[this.hintIndex++ % options.length];
-    ctx.ui?.prompt?.(pick.text, { icon: pick.icon });
-    if (pick.look) {
+    const add = (text, icon, target, look) => options.push({ text, icon, target, look });
+    if (loose >= 3) add('おかたづけ しよう', 'toybox', this.toybox?.group || this.boxMouth, this.boxMouth);
+    if (!this.tried.ball) add('ボールを ころころ！', 'ball', this.ball.group, this.ball.group.position);
+    if (!this.tried.blocks) add('つみきを ぽん！', 'blocks', this.towerBase, this.towerBase);
+    if (!this.tried.balloon) add('ふうせん ぽーん！', 'balloon', this.balloon.group, this.balloonPos);
+    if (!this.tried.music) add('たたいて おとを だそう', 'music', this.xylo.group, this.xylo.group.position);
+    if (!this.tried.peek) add('あたまを ちょん！', 'peekaboo', ctx.baby?.group, ctx.baby?.headWorldPos?.());
+    // Names no object, so it is always safe to fall back to.
+    add('なにで あそぼうか？', 'play', null, null);
+
+    // Rotate through the list so the hint varies, but hand the whole ordered
+    // list to the HUD: it drops any step whose toy is not on screen, which is
+    // what stops the balloon framing being captioned "roll the ball" with no
+    // ball anywhere in the picture.
+    const n = options.length;
+    const rotated = [];
+    for (let i = 0; i < n; i++) rotated.push(options[(this.hintIndex + i) % n]);
+    this.hintIndex++;
+    const pick = ctx.ui?.promptChoices?.(rotated) || null;
+    if (pick?.look) {
       ctx.baby?.lookAt?.(pick.look.clone ? pick.look.clone() : pick.look);
       ctx.baby?.gesture?.('point');
     }

@@ -387,9 +387,35 @@ export function wood({
      * every 25 mm on the chest of drawers — which, with the grain also driving
      * the normal map, made a 1.2 m oak carcass read as corrugated cardboard
      * (rubric §4.2 #21). Halved. */
+    /* Furniture (planks = 0) had a second, separate problem, and it is the one
+     * the critique kept calling a "radially symmetric starburst grain" on the
+     * table and both stool tops (D23). The polar-UV half of that was fixed by
+     * boxUV()ing the lathed tops; what was left is that the ring model, on a
+     * single-tile surface, produced **1.7 ring cycles across the whole tile**:
+     * `across` swept ±0.25 board widths, so `rad = hypot(across, 0.30)` only
+     * ranged 0.30 → 0.39, and at ringR ≈ 19 that is under two periods. Two
+     * enormous soft bands per 0.7 m, warped by an fbm of comparable amplitude,
+     * is not timber — it is a pair of dunes, and because the coordinate is
+     * mirrored about the middle of the tile they are dunes with a mirror line
+     * down them. No sawn board looks like that at any scale.
+     *
+     * A board face is now traversed properly: `across` sweeps ±0.375 board
+     * widths against a pith 0.24 behind the face, so `rad` runs 0.24 → 0.45
+     * and the ring family is crossed six or seven times across a tile instead
+     * of 1.7. The spacing stays uneven — wide and plain through the middle,
+     * tightening towards the edges of the sweep — because that non-linearity
+     * is the cathedral, and it is the whole reason this model was chosen over
+     * a sawtooth.
+     *
+     * The count is bounded on BOTH sides for a reason. Pushing it to 35 rings a
+     * tile puts a ring every 22 mm on a 1.2 m chest: sixty dead-parallel ribs
+     * across a flat panel, which is the corrugated cardboard of rubric §4.2
+     * #21 — the exact failure the original low ring count was chosen to avoid.
+     * Six or seven, wandering (see `wu` below), and with the relief and the
+     * sheen banding both pulled down, is figure rather than corrugation. */
     const ringR = planks
       ? Math.max(4, Math.min(9, (ringScale / rows) * 0.85))
-      : Math.max(6, Math.min(30, ringScale * 0.85));
+      : Math.max(8, Math.min(20, ringScale * 0.72));
     // Grain fibres run *along* the board (long in u, narrow in v). "Narrow"
     // still has to mean several texels: size/8 is the finest octave a 512² map
     // can hand to a mip chain without it turning into hash noise.
@@ -406,7 +432,7 @@ export function wood({
        * middle — continuous at v = 0 and v = 1, therefore still tileable. */
       const across = planks
         ? (v * rows - row) - 0.5
-        : Math.abs(v - 0.5) - 0.25;
+        : (Math.abs(v - 0.5) - 0.25) * 1.5;
       // Where the heart of the log sits relative to this board: `pith` is how
       // deep it is behind the face, `lateral` is how far it is off the board's
       // centre line. The spread is the point — some boards come out
@@ -415,16 +441,25 @@ export function wood({
       // mirror-symmetric about the middle of every plank, which is the tell
       // that gives a procedural board away instantly.
       const off2 = planks ? hash2(row, 3, seed + 29) : 0.5;
-      const pith = 0.30 + off * off * 1.7;
+      const pith = (planks ? 0.30 : 0.24) + off * off * 1.7;
       const lateral = (off2 - 0.5) * 1.5;
       const dx = across - lateral;
       const rad = Math.sqrt(dx * dx + pith * pith);
       // The log tapers and its heart wanders, so the whole ring family slides
       // along the length of the board. This is what turns the flat middle of
       // the cathedral into an arch instead of a straight band.
-      const warp = (fbm2(u, v, 3, 9, 3, seed + row * 13) - 0.5) * (1.05 + off * 0.5)
-                 + (fbm2(u, v, 2, 4, 2, seed + 61 + row) - 0.5) * 0.52
-                 + (fbm2(u, v, 7, 23, 2, seed + 131 + row * 7) - 0.5) * 0.16;
+      /* How fast the figure wanders *along* the board. A floor plank is 2.5 m
+       * long and tiled, so three periods across the tile is a long, lazy arch —
+       * right for a floor. A table top is 0.6 m and shows less than one tile,
+       * so at three periods the warp is essentially constant across the whole
+       * part and every growth ring comes out dead straight and dead parallel:
+       * a dozen evenly-spaced lines down a panel, which is corduroy, not
+       * timber. Furniture gets the same wander compressed into the span it
+       * actually occupies. */
+      const wu = planks ? 1 : 2.6;
+      const warp = (fbm2(u, v, 3 * wu, 9, 3, seed + row * 13) - 0.5) * (1.05 + off * 0.5)
+                 + (fbm2(u, v, 2 * wu, 4, 2, seed + 61 + row) - 0.5) * 0.52
+                 + (fbm2(u, v, 7 * wu, 23, 2, seed + 131 + row * 7) - 0.5) * 0.16;
       const g = rad * ringR + off * 3.1 + warp;
       let r = g - Math.floor(g);
       r = Math.abs(r * 2 - 1);
@@ -555,13 +590,19 @@ export function wood({
       // furniture keeps the grain almost flush and lets the albedo carry it;
       // the floor keeps more because a waxed timber floor genuinely does have
       // proud late-wood you can catch a raking sun on.
-      rings(u, v) * (planks ? 0.22 : 0.075) + (planks ? relief(v) : 0)
-      + (planks ? 0 : ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085));
+      rings(u, v) * (planks ? 0.22 : 0.048) + (planks ? relief(v) : 0)
+      + (planks ? 0 : ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.062));
 
     const rough = generate(size, (u, v, out) => {
       const t = rings(u, v);
       // late wood (the dark rings) is denser and takes the lacquer differently
-      const r = satin + t * 0.26 + seam(v) * 0.22
+      /* Late wood takes the lacquer differently — but on a *lacquered* panel
+       * that difference is small, and at 0.26 with clearcoat 0.4 over the top
+       * it was the loudest term on the chest of drawers: a specular band per
+       * growth ring, which is what turned figure into corrugation. The floor
+       * keeps the full value; it is waxed, not lacquered, and seen at a
+       * grazing angle where the sheen difference is the material. */
+      const r = satin + t * (planks ? 0.26 : 0.13) + seam(v) * 0.22
               + (fbm2(u, v, 5, 13, 2, seed + 88) - 0.5) * 0.10;
       out[0] = out[1] = out[2] = Math.min(1, Math.max(0.05, r));
     });
@@ -726,7 +767,7 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
         + (dr - 0.5) * 0.26           // wool mottle   — reads across the room
         + (cl - 0.5) * 0.13           // clumping      — reads at a metre
         + (sweep - 0.5) * 0.15        // directional lay
-        + h * 0.15                    // loop crowns   — reads at 30 cm
+        + h * 0.115                   // loop crowns   — reads at 30 cm
         // Per loop. White noise by construction — an independent hash per cell
         // — so it is the one term that can only ever *become* stipple when the
         // rug is minified. Kept as a whisper and gated by the clump field, so a
@@ -738,7 +779,7 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
     // 2.8 was tuned to make a 12 mm hatch visible. With the hatch gone and the
     // loop three times the size, 1.8 rakes a loop properly and leaves nothing
     // for the pixel grid to beat against.
-    const normal = normalFromHeight(size, 1.8, height);
+    const normal = normalFromHeight(size, 1.55, height);
     const rough = generate(size, (u, v, out) => {
       // loop crowns catch a faint sheen; the roots are pure scatter. The drift
       // field rides along, because an evenly-sheened rug is as much of a tell

@@ -452,6 +452,26 @@ export function makeWood({
             roughnessFactor *= texelRoughness.g;
           #endif
           roughnessFactor = clamp(roughnessFactor + wdJoint * 0.16, 0.04, 1.0);
+        `)
+        /* THE last surviving half of D22 — "the same curved grain arc still
+         * recurs across floor planks".
+         *
+         * The de-tile was only ever applied to the albedo and the roughness.
+         * The *normal map* kept sampling the raw, untranslated uv, so the
+         * cathedral arc's relief — which is what the eye actually reads on a
+         * floor lit at a 15–30° grazing angle, where the specular term swings
+         * far harder than the albedo — repeated on the plain 2.4 × 2.4 lattice,
+         * identically, board for board. Every previous pass retuned the albedo
+         * and then measured no change, for exactly that reason.
+         *
+         * Same shifted uv, same honest derivatives, no extra fetch beyond the
+         * one this shader was already doing. */
+        .replace('#include <normal_fragment_maps>', /* glsl */`
+          #ifdef USE_NORMALMAP_TANGENTSPACE
+            vec3 mapN = textureGrad( normalMap, wdUv, wdDx, wdDy ).xyz * 2.0 - 1.0;
+            mapN.xy *= normalScale;
+            normal = normalize( tbn * mapN );
+          #endif
         `);
     };
     mat.customProgramCacheKey = () => 'wood-detile';

@@ -223,14 +223,7 @@ export class UI {
     }
 
     this._layoutLabels();
-    if (this._promptTarget && this.els.prompt?.classList.contains('is-on')) {
-      /* The target can walk out of frame after the prompt went up. Give it a
-         beat (a camera move passes through a lot of framings) and then take
-         the bubble down rather than leave an arrow aimed off the edge. */
-      if (this._targetOnScreen(this._promptTarget)) this._offTarget = 0;
-      else if ((this._offTarget = (this._offTarget || 0) + dt) > 0.5) { this.hidePrompt(); return; }
-      this._layoutPrompt();
-    }
+    if (this._promptWanted) this._syncPromptVisibility();
     this._stepFlights(dt);
 
     this._needAcc += dt;
@@ -626,27 +619,66 @@ export class UI {
        only appears when a real target has been handed in. */
     /* An activity can also publish what its current step is about by setting
        `promptTarget` on itself; that saves every call site passing it. */
-    let t = target || this.app.activity?.promptTarget || null;
-
-    /* …and a target is only a target if the child can actually see it. A
-       prompt that names an object which is behind the camera, off the edge of
-       the frame or hidden this step is worse than no prompt at all: a
-       pre-literate player is told to tap something that is not on screen. In
-       that case the arrow would be a lie *and* the words would be, so the
-       whole bubble is withheld rather than pointed at nothing. */
-    if (t && !this._targetOnScreen(t)) {
-      if (target || this.app.activity?.promptTarget) { this.hidePrompt(); return; }
-      t = null;
-    }
+    const t = target || this.app.activity?.promptTarget || null;
 
     this._promptTarget = t;
     this._promptArrow = arrow === undefined ? !!t : !!arrow;
-    this._layoutPrompt(true);
+    /* A targeted prompt is *gated* rather than shown outright: see
+       `_syncPromptVisibility`. A prompt with no target names no object, so it
+       is always safe to show. */
+    this._promptWanted = true;
+    /* Visibility first, then layout: the arrow is aimed from its own measured
+       centre, and while the bubble is still off-screen that centre is 130%
+       of a bubble-height away from where it will settle. */
+    this._syncPromptVisibility(true);
 
-    el.classList.add('is-on');
     this._promptTimer?.();
     this._promptTimer = seconds > 0 ? this.after(seconds, () => this.hidePrompt()) : null;
     this._sfx('pop');
+  }
+
+  /**
+   * Show the first hint in `steps` whose target is actually on screen.
+   *
+   * Activities know the *order* their steps should be offered in; only the HUD
+   * knows what the camera can currently see. Handing over the whole ordered
+   * list lets the two agree: the routine still leads with "brush your teeth",
+   * but if the toothbrush is behind the camera the child is asked to do the
+   * next thing they can actually reach instead of the right thing invisibly.
+   *
+   * `steps` is `[{ text, icon, target }]`, most-wanted first. A step with no
+   * target names no object and therefore always qualifies — put those last.
+   * Returns the step that was shown, or null when none qualified.
+   */
+  promptChoices(steps = [], opts = {}) {
+    for (const s of steps) {
+      if (!s || !s.text) continue;
+      if (s.target && !this._targetOnScreen(s.target)) continue;
+      this.prompt(s.text, { ...opts, icon: s.icon, target: s.target || null });
+      return s;
+    }
+    this.hidePrompt();
+    return null;
+  }
+
+  /**
+   * A prompt that names a target is only shown while that target is on screen.
+   *
+   * This is the whole of the fix for "the prompt tells a four-year-old to tap
+   * something that is not in the picture". It is re-evaluated every frame
+   * rather than once at `prompt()` time for two reasons: the camera is
+   * usually still dollying when an activity's first prompt fires (and the
+   * screenshot harness sets the framing *after* the state), and things move —
+   * so a prompt that was honest a second ago has to go, and one that was
+   * premature has to be allowed back.
+   */
+  _syncPromptVisibility(immediate = false) {
+    const el = this.els.prompt;
+    if (!el) return;
+    const ok = !this._promptWanted ? false
+      : (!this._promptTarget || this._targetOnScreen(this._promptTarget));
+    el.classList.toggle('is-on', ok);
+    if (ok) this._layoutPrompt(immediate);
   }
 
   /**
@@ -659,8 +691,13 @@ export class UI {
    */
   _targetOnScreen(src) {
     if (!src) return false;
-    for (let n = src; n && n.isObject3D; n = n.parent) {
-      if (n.visible === false) return false;
+    /* An invisible *hit proxy* still stands for something the child can see —
+       "pat the baby's back" is aimed at a transparent sphere riding a very
+       visible back. Activities mark those with `userData.promptAnchor`. */
+    if (!src.userData?.promptAnchor) {
+      for (let n = src; n && n.isObject3D; n = n.parent) {
+        if (n.visible === false) return false;
+      }
     }
     const canvas = this.app.renderer?.domElement;
     const w = canvas?.clientWidth || innerWidth;
@@ -686,7 +723,7 @@ export class UI {
   promptTarget(objectOrVec) {
     this._promptTarget = objectOrVec || null;
     this._promptArrow = !!objectOrVec;
-    this._layoutPrompt(true);
+    this._syncPromptVisibility(true);
   }
 
   /**
@@ -744,7 +781,7 @@ export class UI {
     this._promptTimer = null;
     this._promptTarget = null;
     this._promptArrow = false;
-    this._offTarget = 0;
+    this._promptWanted = false;
     this.els.prompt?.classList.remove('is-on');
   }
 

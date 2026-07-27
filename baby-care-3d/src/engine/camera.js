@@ -98,11 +98,19 @@ const BUILTIN = {
     fov: 36, focusRange: 0.16, dof: 1.10, handheld: 0.70, roll: 0.7
   },
 
-  // Highchair. Near eye-level with the baby so feeding feels face-to-face.
+  // Highchair. Face-to-face across the tray.
+  //
+  // Composed on the *face*, not on the body root. A seated baby's root sits on
+  // the seat, ~0.40 m below the eyeline and below the tray — so a framing that
+  // aims 0.30 m above the root aims straight into the underside of the tray,
+  // which is exactly what `10`/`11`/`12` used to render. The offsets below
+  // assume the subject the rig is given is a head-height pivot (feed.js hands
+  // over one); with the plain body root they still clear the tray, but the
+  // composition is looser.
   table: {
     space: 'subject',
-    pos: [0.40, 0.62, 0.86], target: [-0.03, 0.30, 0.02],
-    fov: 34, focusRange: 0.16, dof: 1.00, handheld: 0.75, roll: 0.7
+    pos: [0.28, 0.55, 0.84], target: [-0.02, 0.30, 0.02],
+    fov: 36, focusRange: 0.17, dof: 1.05, handheld: 0.70, roll: 0.6
   },
 
   // Floor play — camera on the rug, looking very slightly *up* at the baby.
@@ -111,6 +119,19 @@ const BUILTIN = {
     space: 'subject',
     pos: [0.86, 0.28, 1.06], target: [-0.04, 0.34, 0.00],
     fov: 42, focusRange: 0.24, dof: 0.90, handheld: 1.00, roll: 1.0
+  },
+
+  // A toy that lives in the air rather than on the floor — the balloon.
+  //
+  // `wide` cannot serve this brief: from 4 m a 22 cm balloon is 90 px tall and
+  // its string is a 2 px line, so neither the translucency nor the anchoring
+  // can be judged. This stands a metre and a bit away, aimed at the *string's*
+  // midpoint rather than the balloon, so the whole run from knot to floor is
+  // in frame with the baby off to one side for scale.
+  toy: {
+    space: 'subject',
+    pos: [0.05, 0.44, 1.24], target: [-0.30, 0.26, 0.20],
+    fov: 28, focusRange: 0.22, dof: 1.05, handheld: 0.90, roll: 0.9
   },
 
   // Tidying / playmat: near top-down, reads the floor plane clearly.

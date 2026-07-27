@@ -30,6 +30,7 @@ const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _e = new THREE.Euler();
+const _WHITE = new THREE.Color(0xffffff);
 
 /* ------------------------------------------------------------ sky shader -- */
 
@@ -79,11 +80,23 @@ const SKY_FRAG = /* glsl */`
       col += uStarTint * s * uStars * 1.4;
     }
 
-    // sun / moon
+    /* Sun / moon.
+     *
+     * The disc and its halo used to be tinted entirely by uSun, which for a
+     * golden sky is a saturated amber. A saturated colour cannot reach display
+     * white however hard you drive it — the blue channel runs out first — so
+     * the brightest thing in the whole 28-frame set topped out at luminance
+     * 0.91 with the red channel already pinned. Physically the core of a solar
+     * disc and the forward-scattering halo around it are the two places in the
+     * sky that ARE white: that is what the scattering is doing. Mixing the core
+     * toward white is both correct and the only way the frame gets a true
+     * highlight out of the window. */
     float d = length((vUv - uSunPos) * vec2(1.0, 0.62));
     float disc = smoothstep(uSunSize, uSunSize * 0.55, d);
     float glow = pow(max(0.0, 1.0 - d / max(0.001, uSunGlow)), 3.0);
-    col += uSun * (disc * 1.5 + glow * 0.55);
+    vec3 core = mix(uSun, vec3(1.0), 0.62);
+    col = mix(col, mix(col, vec3(dot(col, vec3(0.36))), 0.55), glow * 0.5);
+    col += core * (disc * 3.2 + glow * 0.80);
 
     // ground haze lifts the horizon and hides the treeline's feet
     col = mix(col, uHorizon * 1.06, uHaze * pow(max(0.0, 1.0 - h * 2.2), 2.0));
@@ -317,19 +330,19 @@ const SKY = {
     // "overcast" no matter what the room is doing.
     top: 0x3f86d4, mid: 0x84bcec, hor: 0xd7e7f2, sun: 0xfff6e2,
     sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.30,
-    gain: 4.10, ground: 0x8aa76e, aerial: 0.44,
+    gain: 6.80, ground: 0x8aa76e, aerial: 0.44,
     shaft: 0xfff2dc, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
   },
   golden: {
     top: 0x4f86cc, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
-    sunPos: [0.28, 0.40], sunSize: 0.052, glow: 0.58, stars: 0, haze: 0.44,
-    gain: 4.40, ground: 0x9a9a5c, aerial: 0.54,
+    sunPos: [0.435, 0.455], sunSize: 0.030, glow: 0.40, stars: 0, haze: 0.44,
+    gain: 7.00, ground: 0x9a9a5c, aerial: 0.54,
     shaft: 0xffd7a0, shaftI: 1.55, cloud: 0xffe6cc, cloudA: 0.92
   },
   evening: {
     top: 0x33417a, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
     sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.62,
-    gain: 2.35, ground: 0x67765a, aerial: 0.48,
+    gain: 3.40, ground: 0x67765a, aerial: 0.48,
     shaft: 0xffc79c, shaftI: 0.72, cloud: 0xd8bfc4, cloudA: 0.85
   },
   night: {
@@ -1146,6 +1159,9 @@ export class WindowUnit {
     const overcast = w === 'rain' ? 0.85 : w === 'snow' ? 0.55 : 0;
     const grey = new THREE.Color(w === 'snow' ? 0xe2e6ef : 0x93999f);
     const C = hex => new THREE.Color(hex);
+    // An overcast sky is *dimmer* than a clear one but the cloud deck is
+    // still far brighter than the room, so the gain drops rather than dies.
+    const gain = (s.gain ?? 1) * (1 - overcast * 0.34);
     this.tgt = {
       top: C(s.top).lerp(grey, overcast * 0.78),
       mid: C(s.mid).lerp(grey, overcast * 0.82),
@@ -1156,7 +1172,16 @@ export class WindowUnit {
       glow: s.glow * (1 - overcast * 0.85),
       stars: s.stars * (1 - overcast),
       haze: Math.min(1, s.haze + overcast * 0.25),
-      cloudColor: C(s.cloud).lerp(C(0x8d939c), overcast * 0.62),
+      /* The cloud sheets are plain unlit planes drawn over the sky, and they
+       * were the one part of the exterior that never got the exposure the sky
+       * got — so as soon as `gain` went up they became the *darkest* thing in
+       * the opening, which is backwards: a sunlit cloud is the brightest
+       * surface in any daytime frame. Multiplying them through the same gain
+       * fixes the read and, not incidentally, is where the frame's genuine
+       * near-white now comes from. `Color` components above 1 are a linear
+       * multiplier on a MeshBasicMaterial, which is exactly what is wanted. */
+      cloudColor: C(s.cloud).lerp(C(0x8d939c), overcast * 0.62)
+        .multiplyScalar(gain * 1.06),
       cloudOpacity: Math.min(1, 0.35 + overcast * 0.6 + (w === 'clear' ? 0.25 : 0.4)),
       shaftColor: C(s.shaft).lerp(C(0xc4d0e2), overcast * 0.85),
       // "Overcast light is diffuse: the beam does not vanish, it goes soft" was
@@ -1167,9 +1192,7 @@ export class WindowUnit {
       // beam at all; what is left is the barely-there brightening of the air
       // near the glass.
       shaftI: s.shaftI * (w === 'rain' ? 0.055 : w === 'snow' ? 0.30 : 1),
-      // An overcast sky is *dimmer* than a clear one but the cloud deck is
-      // still far brighter than the room, so the gain drops rather than dies.
-      gain: (s.gain ?? 1) * (1 - overcast * 0.34)
+      gain
     };
     this._applyAerial({
       hor: this.tgt.hor.getHex(),
@@ -1231,8 +1254,21 @@ export class WindowUnit {
     }
     this.shaftU.uColor.value.copy(T.shaftColor);
     this.poolU.uColor.value.copy(T.shaftColor);
-    this.moteU.uColor.value.copy(T.shaftColor).lerp(new THREE.Color(0xffffff), 0.35);
+    this._moteColor(T);
     this._writeShaftIntensity(T.shaftI);
+  }
+
+  /**
+   * Dust motes are the one thing in a sunbeam that genuinely *is* a specular —
+   * a 30 µm particle catching a direct hit off the sun is a point source, and
+   * at 2.6× the beam's own colour their cores are the only pixels in a room
+   * shot that reach the top of the curve honestly. Also the reason `61`'s
+   * manifest entry asks for motes and the critique found none: at the beam's
+   * colour they were dimmer than the wall behind them.
+   */
+  _moteColor(T) {
+    this.moteU.uColor.value.copy(T.shaftColor)
+      .lerp(_WHITE, 0.42).multiplyScalar(2.6);
   }
 
   _writeShaftIntensity(i) {
@@ -1290,6 +1326,7 @@ export class WindowUnit {
     this._writeShaftIntensity(this._shaftI);
     this.shaftU.uColor.value.lerp(T.shaftColor, k);
     this.poolU.uColor.value.lerp(T.shaftColor, k);
+    this._moteColor(T);
 
     for (const c of this.clouds) {
       c.material.map.offset.x = (c.material.map.offset.x + dt * c.userData.speed) % 1;

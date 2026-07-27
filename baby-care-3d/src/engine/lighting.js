@@ -147,9 +147,9 @@ export const MOODS = {
       // band around 55% with no clean white anywhere. Up 1/5 stop, with the
       // contrast raised to keep the extra light out of the shadows and the
       // vignette pulled back off the corners the furniture actually occupies.
-      saturation: 1.13, contrast: 1.10, warmth: 0.02, vignette: 0.20, exposure: 1.15,
+      saturation: 1.11, contrast: 1.10, warmth: 0.015, vignette: 0.20, exposure: 1.17,
       shadowTint: [0.895, 0.955, 1.14], highTint: [1.035, 1.0, 0.955], split: 1.0,
-      black: 0.095
+      black: 0.085
     },
     fog: { color: 0xf1ecf6, density: 0.005 }
   },
@@ -188,7 +188,7 @@ export const MOODS = {
     // Sun up, everything else down: 1.98 m of elevation over 7.2 m of run is
     // 15.4°, so a 0.45 m stool throws 1.6 m of shadow, and at the ratio below
     // that shadow is now a value you can actually see.
-    keyColor: 0xff9c4e, keyIntensity: 5.30, keyPos: [-6.9, 2.10, 2.85],
+    keyColor: 0xffab68, keyIntensity: 5.05, keyPos: [-6.9, 2.10, 2.85],
     // Fill and hemi are pulled *down* hard. Late afternoon is a high-contrast
     // hour; carrying `day`'s ambient into it is exactly what made the two moods
     // indistinguishable, because ambient is the half of the image that does not
@@ -212,13 +212,13 @@ export const MOODS = {
      * shadow side, which at 4 pm in a west-facing room is a whole hemisphere
      * of blue and is the only thing in the frame that can put a second hue on
      * the screen. */
-    fillColor: 0xa8c4ef, fillIntensity: 0.44, fillPos: [4.4, 2.4, 3.2],
+    fillColor: 0x9dbcf0, fillIntensity: 0.56, fillPos: [4.4, 2.4, 3.2],
     // 1.85 of warm rim from behind was the largest single ambient term in the
     // mood and it was *warm*, so it filled the shadow side with the same hue as
     // the key. A rim exists to draw a line round the subject; at 0.78 it still
     // does that and it stops competing with the sun.
     rimColor: 0xffbe80, rimIntensity: 0.78, rimPos: [0.4, 2.6, -5.2],
-    hemiSky: 0xb4cdf5, hemiGround: 0xf0b48c, hemiIntensity: 0.155,
+    hemiSky: 0xa8c4f5, hemiGround: 0xe8b498, hemiIntensity: 0.185,
     envIntensity: 0.245, shadowSpan: 6.2,
     grade: {
       // Split pulled back hard. At 1.15 with a shadow tint of [0.82, .915, 1.22]
@@ -233,12 +233,12 @@ export const MOODS = {
       // above neutral, the highlight tint is halved, and the shadow tint is
       // pushed *further* blue rather than the whole frame being pushed warm —
       // same overall warmth, twice the chromatic range.
-      saturation: 1.09, contrast: 1.16, warmth: 0.030, vignette: 0.28, exposure: 1.06,
-      shadowTint: [0.845, 0.935, 1.20], highTint: [1.045, 1.0, 0.925], split: 1.05,
+      saturation: 1.06, contrast: 1.14, warmth: 0.014, vignette: 0.24, exposure: 1.19,
+      shadowTint: [0.845, 0.935, 1.21], highTint: [1.025, 1.0, 0.955], split: 1.05,
       // The deepest black point of the four daylight-ish moods: golden hour is
       // the one time of day whose whole identity is a long dark shadow next to
       // a hot rim of sun.
-      black: 0.115
+      black: 0.084
     },
     // 0.009 over the 6 m of the room is a 5% amber veil on the far wall, which
     // is most of what read as "slightly hazy". Thinner, and less orange, so it
@@ -261,7 +261,7 @@ export const MOODS = {
     envIntensity: 0.235, shadowSpan: 5.2,
     grade: {
       saturation: 1.10, contrast: 1.09, warmth: 0.05, vignette: 0.38, exposure: 1.00,
-      shadowTint: [0.83, 0.92, 1.21], highTint: [1.055, 1.0, 0.925], split: 1.15,
+      shadowTint: [0.83, 0.92, 1.21], highTint: [1.03, 1.0, 0.95], split: 1.15,
       black: 0.105
     },
     fog: { color: 0xdcd6ee, density: 0.016 }
@@ -286,9 +286,9 @@ export const MOODS = {
       // 8.9%. The whole difference is the practical (see `practicalTrim`), but
       // the grade was also carrying a +6% exposure into a mood that wants to be
       // under, not over.
-      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.50, exposure: 0.99,
-      shadowTint: [0.80, 0.90, 1.26], highTint: [1.08, 1.0, 0.90], split: 1.2,
-      black: 0.105
+      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.50, exposure: 1.03,
+      shadowTint: [0.80, 0.90, 1.26], highTint: [1.025, 1.0, 0.955], split: 1.2,
+      black: 0.092
     },
     fog: { color: 0x3b3f66, density: 0.030 }
   }
@@ -329,30 +329,37 @@ export const MOODS = {
 export const WEATHER = {
   clear: null,
   rain: {
-    key: 0.17, keyTint: 0x9fb4d2, keyMix: 0.88,
-    fill: 1.45, fillTint: 0xb4c8e4, fillMix: 0.62,
-    rim: 0.42, rimTint: 0xbccadd, rimMix: 0.80,
-    hemi: 1.55, hemiSky: 0xa8bacf, hemiGround: 0x8e8f97, hemiMix: 0.72,
-    env: 1.02, envDesat: 0.62, envGrey: 0x8f959e,
+    // First pass at these numbers produced a frame that read overcast and was
+    // also a stop and a half under: median display 0.254 against the clear
+    // frame's 0.408, mean RGB (71,64,69). That is the §4 #45 mistake made in
+    // the other direction — a rainy afternoon indoors is *flatter* than a sunny
+    // one, and very slightly darker, not gloomy. The key stays collapsed (that
+    // is the structural half of the change and it is what removes the sun patch
+    // and the hard shadow) and everything diffuse comes up to pay for it.
+    key: 0.24, keyTint: 0x9fb4d2, keyMix: 0.88,
+    fill: 1.95, fillTint: 0xb4c8e4, fillMix: 0.62,
+    rim: 0.55, rimTint: 0xbccadd, rimMix: 0.80,
+    hemi: 2.15, hemiSky: 0xa8bacf, hemiGround: 0x9a9ca6, hemiMix: 0.72,
+    env: 1.45, envDesat: 0.62, envGrey: 0x969ca5,
     shadowScale: 2.1,
-    fogTint: 0x9aa2ad, fogMix: 0.55, fogDensity: 2.4,
+    fogTint: 0x9aa2ad, fogMix: 0.55, fogDensity: 2.0,
     grade: {
-      saturation: 0.76, contrast: 0.90, warmth: -0.075, exposure: 0.90,
-      vignette: 0.06, black: -0.035, split: 0.55,
+      saturation: 0.84, contrast: 0.92, warmth: -0.065, exposure: 1.19,
+      vignette: 0.0, black: -0.042, split: 0.55,
       shadowTint: [0.965, 0.995, 1.045], highTint: [0.955, 0.985, 1.055]
     }
   },
   snow: {
-    key: 0.42, keyTint: 0xdce8f6, keyMix: 0.70,
-    fill: 1.35, fillTint: 0xd2e0f2, fillMix: 0.55,
-    rim: 0.70, rimTint: 0xdae6f8, rimMix: 0.65,
-    hemi: 1.45, hemiSky: 0xd6e4f4, hemiGround: 0xc8ccd4, hemiMix: 0.60,
-    env: 1.10, envDesat: 0.45, envGrey: 0xd8dde4,
+    key: 0.46, keyTint: 0xdce8f6, keyMix: 0.70,
+    fill: 1.75, fillTint: 0xd2e0f2, fillMix: 0.55,
+    rim: 0.80, rimTint: 0xdae6f8, rimMix: 0.65,
+    hemi: 1.85, hemiSky: 0xd6e4f4, hemiGround: 0xc8ccd4, hemiMix: 0.60,
+    env: 1.30, envDesat: 0.45, envGrey: 0xd8dde4,
     shadowScale: 1.7,
-    fogTint: 0xd2d8e2, fogMix: 0.50, fogDensity: 1.7,
+    fogTint: 0xd2d8e2, fogMix: 0.50, fogDensity: 1.6,
     grade: {
-      saturation: 0.86, contrast: 0.95, warmth: -0.05, exposure: 0.97,
-      vignette: 0.03, black: -0.02, split: 0.75,
+      saturation: 0.90, contrast: 0.96, warmth: -0.045, exposure: 1.08,
+      vignette: 0.0, black: -0.028, split: 0.75,
       shadowTint: [0.965, 0.99, 1.06], highTint: [0.985, 1.0, 1.03]
     }
   }
@@ -446,7 +453,7 @@ export class LightingRig {
    */
   _installPracticalTrim(light) {
     let raw = light.intensity;
-    this._practicalTrim = 0.46;
+    this._practicalTrim = 0.26;
     Object.defineProperty(light, 'intensity', {
       configurable: true,
       get: () => raw * this._practicalTrim,
@@ -552,7 +559,8 @@ export class LightingRig {
     this._blend = 1;
     this._write(m, 1, m);
     this.scene.environment = this._env(name);
-    this.scene.environmentIntensity = m.envIntensity;
+    // `_write` already folded the weather into this; don't stamp over it.
+    this.scene.environmentIntensity = m.envIntensity * (this._wx?.env ?? 1);
     this._moodName = name;
   }
 

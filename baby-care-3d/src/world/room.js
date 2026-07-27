@@ -399,9 +399,16 @@ export class Room {
     this.mobile = this._place(P.buildMobile(M), -2.02, 0.78, -2.56, 0.35, { pos: 0.006, yaw: 0.05, lean: 0 });
 
     /* --- changing dresser ------------------------------------------------ */
-    this.dresser = this._place(P.buildDresser(M), 0.15, 0, -2.512, 0, { pos: 0.008, yaw: 0.022 });
-    S.pair(0.15, -2.52, 0.56, 0.30, { opacity: 0.62, softness: 0.9, core: 0.55 });
-    S.band(0.15, -2.30, 0.55, 0.045, { opacity: 0.5, softness: 1.6 });   // toe line
+    /* Nothing heavy ever goes back flush. A chest of drawers is walked back
+     * into a corner one end at a time and it stops when it stops: one corner
+     * touching the skirting, the other 40 mm off it. At 0.022 rad the yaw
+     * jitter was 1.2° — under the threshold at which a straight vertical edge
+     * visibly disagrees with the wall behind it, which is why the critique
+     * still read this as "dead square to the wall" (D30). 4.0° reads, and the
+     * gap it opens at the far end is what sells it. */
+    this.dresser = this._place(P.buildDresser(M), 0.15, 0.0, -2.494, 0.069, { pos: 0.008, yaw: 0 });
+    S.pair(0.15, -2.50, 0.56, 0.30, { opacity: 0.62, softness: 0.9, core: 0.55, rot: 0.069 });
+    S.band(0.15, -2.28, 0.55, 0.045, { opacity: 0.5, softness: 1.6, rot: 0.069 });   // toe line
 
     this.nightlight = this._place(P.buildNightlight(M), 0.56, 0.905, -2.40, 0.4, { pos: 0.01, yaw: 0.3, lean: 0 });
     S.add(0.56, -2.40, 0.055, 0.055, { opacity: 0.5, softness: 2.2, y: 0.885 });
@@ -415,7 +422,10 @@ export class Room {
     // a spirit level would have caught and nobody did
     this.shelf = this._place(P.buildShelf(M), 0.10, 1.24, -2.66, 0, { pos: 0, yaw: 0, lean: 0 });
     this.shelf.position.x += 0.012;
-    this.shelf.rotation.z = -0.0092;
+    // 0.53° is a rounding error, not a mistake anyone made. A shelf hung on
+    // two hooks by eye is out by 1.5–2°, and that is the amount at which the
+    // books stop looking like they were placed by a grid (D30).
+    this.shelf.rotation.z = -0.0295;
     this.lamp = this.shelf.userData.lamp;
     // shelf-top contact: the props on it are grounded too
     for (const [x, z, r, o] of [[-0.16, -2.66, 0.15, 0.42], [0.40, -2.66, 0.10, 0.40], [-0.20, -2.66, 0.11, 0.38]]) {
@@ -519,7 +529,7 @@ export class Room {
 
     this.clock = P.buildClock(M, { r: 0.125 });
     this.clock.position.set(1.026, 1.658, wallZ + 0.01);
-    this.clock.rotation.z = 0.024;      // knocked when the battery was changed
+    this.clock.rotation.z = 0.062;      // knocked when the battery was changed
     this.group.add(this.clock);
 
     // bunting slung across the back-left corner

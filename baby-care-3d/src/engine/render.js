@@ -87,6 +87,24 @@ const GradeShader = {
      * without the posterised step a subtract-and-clamp produces on a smooth
      * wall gradient. Per mood in lighting.js `MOODS[*].grade.black`. */
     uBlack:       { value: 0.0 },
+    /* Per-channel highlight shoulder.
+     *
+     * The luminance histogram cannot see the defect this fixes. Measured on
+     * `51-sleep-asleep`, **23.8% of the frame had the red channel pinned at
+     * 255** while green and blue sat around 0.9 and 0.7 — so the baby's face
+     * was a flat vermilion plateau with every trace of form gone, and yet the
+     * frame reported 0.00% of pixels above luminance 0.95. Warm light on warm
+     * skin flat-tops one channel long before the pixel is anywhere near white,
+     * and a hard clamp at 1.0 is what turns a lit cheek into a paper cut-out.
+     *
+     * `1 - (1-k)·exp(-(c-k)/(1-k))` is a soft shoulder that is C1-continuous at
+     * the knee, strictly monotonic above it, and asymptotic to exactly 1.0 — so
+     * a channel *never* flat-tops, the luminance gradient across a highlight
+     * survives, and the colour desaturates toward white as it brightens, which
+     * is what a film highlight actually does. It is also what lets the frame
+     * carry a genuine near-white without a featureless region (§4 #46).
+     */
+    uShoulder:    { value: 0.86 },
     // Split toning — the single most useful lever for D38. A warm key against
     // a neutral shadow gives an image luminance range but no *chromatic* range,
     // and that is what makes a render read as "correctly exposed" rather than
@@ -113,7 +131,7 @@ const GradeShader = {
     uniform sampler2D tDepth;
     uniform float uTime, uExposure, uVignette, uGrain, uAberration;
     uniform float uDofStrength, uFocus, uFocusRange, uNear, uFar;
-    uniform float uSaturation, uContrast, uWarmth, uSplit, uBlack;
+    uniform float uSaturation, uContrast, uWarmth, uSplit, uBlack, uShoulder;
     uniform vec2  uResolution;
     uniform vec3  uLift, uGain, uShadowTint, uHighTint;
 
@@ -262,7 +280,7 @@ const GradeShader = {
       // room shot, i.e. one hue, no chromatic range at all (§4 #137). 0.38 is
       // still below the local-colour threshold on a lit cream wall (which now
       // sits 0.45–0.62) but reaches the whole shadow side of the room.
-      float shadowW = 1.0 - smoothstep(0.006, 0.38, sl);
+      float shadowW = 1.0 - smoothstep(0.006, 0.44, sl);
       float highW = smoothstep(0.45, 0.98, sl);
       col *= mix(vec3(1.0), uShadowTint, shadowW * uSplit);
       col *= mix(vec3(1.0), uHighTint, highW * uSplit);
@@ -274,6 +292,16 @@ const GradeShader = {
       float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(luma), col, uSaturation);
       col = (col - 0.5) * uContrast + 0.5;
+
+      // highlight shoulder --------------------------------------------------
+      // Last shaping step before the frame is written, so nothing downstream
+      // (contrast, the split tone's high band, the warmth tilt) can push a
+      // channel back onto the ceiling. See uShoulder above.
+      {
+        vec3 kk = vec3(uShoulder);
+        vec3 over = max(col - kk, vec3(0.0));
+        col = min(col, kk) + (1.0 - kk) * (1.0 - exp(-over / max(vec3(1e-3), 1.0 - kk)));
+      }
 
       // vignette ------------------------------------------------------------
       // Gentle cos^4-style falloff. The old smoothstep crushed the corners so
@@ -605,7 +633,7 @@ export class RenderPipeline {
   /** Nudge the grade toward a mood (day / evening / night / bath). */
   setGrade({
     lift, gain, saturation, contrast, warmth, vignette, exposure,
-    shadowTint, highTint, split, black
+    shadowTint, highTint, split, black, shoulder
   }) {
     const u = this.grade.uniforms;
     if (lift) u.uLift.value.fromArray(lift);
@@ -619,6 +647,7 @@ export class RenderPipeline {
     if (highTint) u.uHighTint.value.fromArray(highTint);
     if (split !== undefined) u.uSplit.value = split;
     if (black !== undefined) u.uBlack.value = black;
+    if (shoulder !== undefined) u.uShoulder.value = shoulder;
   }
 
   resize() {

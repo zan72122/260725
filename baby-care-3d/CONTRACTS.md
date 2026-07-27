@@ -48,7 +48,13 @@ export class CameraRig {
 }
 ```
 Built-in presets: `wide`, `closeup`, `face`, `crib`, `crib-face`, `tub`,
-`table`, `floor`, `overhead`, `title`.
+`table`, `toy`, `floor`, `overhead`, `title`.
+
+`table` and `toy` are both composed on the *thing the shot is about* rather
+than on the body root: `table` assumes the subject it is given sits at head
+height (feed.js hands the rig a pivot riding the head, because a seated baby's
+root is below the tray), and `toy` aims at a hand prop with the baby off to
+one side for scale.
 
 **Presets are offsets, not world positions.** A preset with `space: 'subject'`
 (every character framing) stores `pos`/`target` as offsets in the subject's
@@ -180,7 +186,8 @@ export class UI {
   setActivity(name)
   onPointer(p)
   toast(text, { icon, seconds })
-  prompt(text, { icon })              // the gentle "what to do next" hint
+  prompt(text, { icon, target })      // the gentle "what to do next" hint
+  promptChoices(steps)                // [{text,icon,target}] → first visible one
   hidePrompt()
   meter(name, value)                  // 'food','clean','happy','energy'
   star(n)
@@ -189,6 +196,17 @@ export class UI {
   setHud(visible)
 }
 ```
+
+**A prompt may only name something on screen.** `target` (an Object3D or a
+Vector3) is both what the pointer arrow aims at and the condition for showing
+the bubble at all: while the target is off-frame, behind the camera or hidden,
+the prompt stays down, and it comes back by itself when the target does. A
+prompt with *no* target names no object and is always shown — so a step that
+has nothing to point at must be worded so it does not ask the child to find
+anything. `promptChoices` takes an activity's whole ordered to-do list and
+shows the first step whose prop is actually visible. An invisible hit proxy
+that stands for a visible surface (a "pat the back" target) opts back in with
+`userData.promptAnchor = true`.
 
 ## `src/game/state.js`
 

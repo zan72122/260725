@@ -43,7 +43,9 @@ const PAL = {
   heart: [0xff6f9c, 0xff93b4, 0xff4f80],
   zzz: [0xcfe0ff, 0xe6efff, 0xb9d2ff],
   dust: [0xfff3e0, 0xffe9cc, 0xfffdf8],
-  star: [0xffe066, 0xfff3b0, 0xffd43b]
+  // Warm white through amber. Three near-identical yellows gave the whole
+  // population one colour, which is §4 #88 on its own.
+  star: [0xffe066, 0xfff3b0, 0xffd43b, 0xfffaf0, 0xffc7a1, 0xffeccf]
 };
 
 /* ------------------------------------------------------------- kind defs -- */
@@ -136,11 +138,24 @@ const KINDS = {
     fadeIn: 0.16, fadeOut: 0.40, alpha: 0.78, palette: PAL.dust, soft: 0.16
   },
   star: {
+    // Was a five-pointed glyph quad at alpha 1 and soft 0.10: opaque, uniform,
+    // hard-edged, and scattered across the frame as clip-art stickers. The
+    // silhouette was never the problem — a star *shape* is fine — the problem
+    // was that it had a hard boundary and no interior, which is what makes a
+    // sprite read as pasted-on 2-D art rather than light in the room.
+    //
+    // What is here now is a glint: a bright core with a soft falloff, star
+    // points that dissolve into the core rather than terminating at an edge,
+    // and a population that varies by 5:1 in size so there is a hierarchy of
+    // a few heroes among many small ones. Turbulence and a wide drag range
+    // stop them travelling in parallel lines, and the depth fade band is wide
+    // enough that one crossing the floor dissolves instead of slicing it.
     mode: 'billboard', shape: 'STAR5', blending: 'additive', lit: false,
-    capacity: 120, life: [0.7, 1.4], size: [0.030, 0.062],
-    speed: [0.35, 1.1], spread: Math.PI * 0.8, dir: [0, 1, 0],
-    gravity: -0.9, drag: 1.9, spin: [-5, 5], grow: 0.7, pop: false,
-    fadeIn: 0.08, fadeOut: 0.55, alpha: 1, palette: PAL.star, soft: 0.10
+    capacity: 160, life: [0.55, 1.7], size: [0.009, 0.046],
+    speed: [0.25, 1.35], spread: Math.PI * 0.9, dir: [0, 1, 0],
+    gravity: -1.4, drag: 2.4, curl: 0.55, spin: [-3.5, 3.5], grow: 0.45,
+    pop: false, twinkle: 9,
+    fadeIn: 0.20, fadeOut: 0.72, alpha: 0.55, palette: PAL.star, soft: 0.14
   }
 };
 
@@ -245,11 +260,17 @@ const PARTICLE_FRAG = /* glsl */`
       float rays = (pow(max(0.0, 1.0 - abs(q.x)), 16.0)
                   + pow(max(0.0, 1.0 - abs(q.y)), 16.0)) * exp(-d * 1.8);
       a = clamp(core + rays * 0.85, 0.0, 1.0);
-    #elif SHAPE == 3          // STAR5 — chunky five-pointed star
+    #elif SHAPE == 3          // STAR5 — soft five-point glint
+      // A star silhouette with no boundary. rad is where the points reach,
+      // but nothing is drawn *at* rad — the body is a falloff from a bright
+      // core that reaches zero exactly there, so there is no edge to catch the
+      // eye and the sprite reads as light rather than as a cut-out sticker.
       float ang = atan(q.y, q.x);
       float k = 0.5 + 0.5 * cos(ang * 5.0 + vSeed * PI2);
-      float rad = mix(0.36, 1.0, k * k);
-      a = 1.0 - smoothstep(rad * 0.55, rad, d);
+      float rad = mix(0.30, 1.0, pow(k, 1.6));
+      float body = pow(clamp(1.0 - d / max(rad, 1e-3), 0.0, 1.0), 1.7);
+      float core = exp(-d * d * 26.0);
+      a = clamp(body * 0.85 + core * 0.6, 0.0, 1.0);
     #elif SHAPE == 4          // HEART — implicit (x²+y²−1)³ − x²y³ ≤ 0
       vec2 h = (uv - vec2(0.5, 0.44)) * vec2(2.7, -2.7);
       float f = pow(h.x * h.x + h.y * h.y - 1.0, 3.0) - h.x * h.x * h.y * h.y * h.y;

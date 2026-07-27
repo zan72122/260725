@@ -252,31 +252,40 @@ export class SleepActivity {
     const rig = ctx.cameraRig;
     if (!rig?.overridePreset) return;
     rig.setSubject?.(this.shotPivot);
-    // The near rail is a solid bar 0.25 m *above* the sleeping face, so the
-    // eye height is not a taste call. Sighting past its far edge (z ≈ head
-    // +0.26, top y = 0.68) needs the camera above y = 1.20·a + 0.74, where `a`
-    // is how far outside that edge it stands. Every framing below clears that
-    // line by ~0.09 m, which lands the rail across the very bottom of the
-    // frame — the baby is genuinely seen *over* it rather than through it.
-    // Getting this wrong is exactly what made `51-sleep-asleep` a black
-    // rectangle, and then a close-up of a cot rail.
+    // Two rails matter and they fail differently.
+    //
+    // The *near* rail (the one you lean over) is a solid bar 0.27 m above the
+    // sleeping face. Whether it lands inside the frame is a race between two
+    // angles: how steeply the camera sights down past it, and how steeply it
+    // sights down at the face. Standing further back loses that race — the
+    // rail rises *up* the frame — so the eye has to come in and up until the
+    // rail's angle beats the bottom of the frustum. `crib-face` now wins it
+    // outright and the rail is gone; `crib` cannot (it has to hold the whole
+    // quilt) so there the rail is deliberately parked as a soft band across
+    // the bottom quarter, well clear of the face.
+    //
+    // The *side* rails run away from the eye and project as diagonals — which
+    // is what actually crossed the baby's arm in `51`. The cure is azimuth:
+    // any lateral offset skews them across the body, so every framing here
+    // now sights square to the near rail (local Z ≈ 0) and lets the target,
+    // not the eye, carry the off-centre composition.
     const faceShot = {
       space: 'subject',
-      pos: [-0.541, 0.716, 0.100], target: [0.00, 0.045, -0.056],
-      fov: 32, focusRange: 0.12, dof: 1.30, handheld: 0.45, roll: 0.4
+      pos: [-0.430, 0.700, 0.000], target: [-0.015, 0.025, 0.010],
+      fov: 26, focusRange: 0.10, dof: 1.35, handheld: 0.45, roll: 0.35
     };
     rig.overridePreset('crib-face', faceShot);
     // so a goTo('face') from anywhere in this scene lands on the cot portrait
     rig.overridePreset('face', faceShot);
     rig.overridePreset('crib', {
       space: 'subject',
-      pos: [-0.812, 1.074, 0.150], target: [0.00, 0.020, -0.040],
-      fov: 34, focusRange: 0.20, dof: 1.15, handheld: 0.50, roll: 0.5
+      pos: [-0.640, 1.000, 0.020], target: [0.000, -0.010, 0.070],
+      fov: 33, focusRange: 0.18, dof: 1.15, handheld: 0.50, roll: 0.45
     });
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [-0.660, 0.874, 0.122], target: [0.00, 0.030, -0.050],
-      fov: 34, focusRange: 0.16, dof: 1.20, handheld: 0.55, roll: 0.5
+      pos: [-0.520, 0.860, 0.010], target: [0.000, 0.010, 0.020],
+      fov: 32, focusRange: 0.14, dof: 1.20, handheld: 0.55, roll: 0.45
     });
   }
 
@@ -1013,9 +1022,11 @@ export class SleepActivity {
     } catch (e) { this.lullaby = null; }
     snd(ctx, 'baby.yawn', { gain: 0.5 });
 
-    const first = this._hintStep();
-    this.promptTarget = first.at || null;
-    ctx.ui?.prompt?.(first.text, { icon: first.icon });
+    // The whole ordered routine goes to the HUD rather than just its first
+    // step: the HUD drops any step whose prop is not on screen. That is what
+    // stops `50-sleep-crib` shipping "let's brush teeth" with no brush in the
+    // picture, and it keeps working when the camera moves.
+    this._sayHint();
     ctx.ui?.meter?.('energy', clamp(this.sleepiness, 0, 1));
   }
 
@@ -1879,16 +1890,31 @@ export class SleepActivity {
    * of the routine unconditionally and nothing ever checked it could be
    * obeyed.
    */
-  _hintStep() {
+  _hintSteps() {
     const t = this.todo;
-    if (!t.teeth) return { text: 'はみがき しようね', icon: 'brush', at: this.brush?.group, look: this.brushHome };
-    if (!t.pajama) return { text: 'パジャマに きがえよう', icon: 'pajama', at: this.pajamaProp, look: this.pajamaProp?.position };
-    if (!t.curtains) return { text: 'カーテンを しめよう', icon: 'curtain', at: this.windowPos, look: this.windowPos };
-    if (this.lampOn) return { text: 'でんきを けそう', icon: 'lamp', at: this.lampGroup, look: this.lampGroup?.position };
-    if (!this.teddyGiven) return { text: 'くまさんを どうぞ', icon: 'teddy', at: this.teddy?.group, look: this.teddyHome };
-    if (this.bookPagesRead < this.book.spreads) return { text: 'えほんを よもうか', icon: 'book', at: this.book?.group, look: this.bookHome };
-    // Nothing left to fetch — so name nothing, and the arrow stays down.
-    return { text: 'とんとん…ゆっくりね', icon: 'pat', at: null, look: null };
+    const out = [];
+    const add = (text, icon, target, look) => out.push({ text, icon, target, look });
+    if (!t.teeth) add('はみがき しようね', 'brush', this.brush?.group, this.brushHome);
+    if (!t.pajama) add('パジャマに きがえよう', 'pajama', this.pajamaProp, this.pajamaProp?.position);
+    if (!t.curtains) add('カーテンを しめよう', 'curtain', this.windowPos, this.windowPos);
+    if (this.lampOn) add('でんきを けそう', 'lamp', this.lampGroup, this.lampGroup?.position);
+    if (!this.teddyGiven) add('くまさんを どうぞ', 'teddy', this.teddy?.group, this.teddyHome);
+    if (this.bookPagesRead < this.book.spreads) add('えほんを よもうか', 'book', this.book?.group, this.bookHome);
+    // Names no object, so it is always honest — and therefore always last.
+    add('とんとん…ゆっくりね', 'pat', null, null);
+    return out;
+  }
+
+  /** The step the HUD actually settled on, or null. */
+  _sayHint() {
+    // Cleared first: UI#prompt falls back to `activity.promptTarget` when a
+    // call site passes none, and a stale one would re-aim the arrow at the
+    // *previous* step's prop.
+    this.promptTarget = null;
+    const steps = this._hintSteps();
+    const pick = this.ctx.ui?.promptChoices?.(steps) || null;
+    this.promptTarget = pick?.target || null;
+    return pick;
   }
 
   _hintUpdate(dt) {
@@ -1898,10 +1924,8 @@ export class SleepActivity {
     this._hintTimer = 10;
 
     const ctx = this.ctx;
-    const hint = this._hintStep();
-    this.promptTarget = hint.at || null;
-    ctx.ui?.prompt?.(hint.text, { icon: hint.icon });
-    if (hint.look) {
+    const hint = this._sayHint();
+    if (hint?.look) {
       ctx.baby?.lookAt?.(hint.look.clone ? hint.look.clone() : hint.look);
       ctx.baby?.gesture?.('point');
     }

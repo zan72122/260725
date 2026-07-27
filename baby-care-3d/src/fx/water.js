@@ -692,11 +692,19 @@ export class WaterlineRing {
                         + 0.04 * sin( a * 11.0 - uTime * 1.3 );
           r /= w;
           // r runs 0.18 (the hole the limb occupies) out to 1.0
-          float wet  = smoothstep( 0.62, 0.30, r );             // damp shadow band
-          float lip  = smoothstep( 0.13, 0.0, abs( r - 0.58 ) );// the meniscus itself
+          //
+          // Weighting matters more than shape here. A meniscus is mostly a
+          // *dark* band of wetted, light-absorbing surface with only a hairline
+          // of bright rim on its outer edge. Driving the rim at 0.75 alpha over
+          // a 0.13-wide band drew a fat white loop that read as a chalk doodle
+          // floating on the water rather than as water climbing a body, so the
+          // lip is now a third of the weight over two-thirds of the width and
+          // the damp band carries the read.
+          float wet  = smoothstep( 0.70, 0.26, r );             // damp shadow band
+          float lip  = smoothstep( 0.085, 0.0, abs( r - 0.56 ) );// the meniscus itself
           float foam = smoothstep( 1.00, 0.60, r ) * smoothstep( 0.55, 0.74, r );
-          vec3 col = uWet * wet * 0.9 + uRim * lip * 0.9 + vec3( 1.0 ) * foam * uFoam;
-          float alpha = ( wet * 0.42 + lip * 0.75 + foam * uFoam * 0.85 ) * uOpacity;
+          vec3 col = uWet * wet * 0.9 + uRim * lip * 0.55 + vec3( 1.0 ) * foam * uFoam;
+          float alpha = ( wet * 0.55 + lip * 0.32 + foam * uFoam * 0.55 ) * uOpacity;
           if ( alpha < 0.004 ) discard;
           gl_FragColor = vec4( col, alpha );
         }`

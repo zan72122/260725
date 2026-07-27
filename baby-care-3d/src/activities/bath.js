@@ -53,10 +53,17 @@ const WATER_MIN = 0.042;
 const WATER_MAX = 0.208;
 
 const TEMP_OK_MIN = 0.36, TEMP_OK_MAX = 0.72;
+// Seat depth of the thermochromic pane inside the bezel window, in patch-local
+// metres. The bezel face finishes at +0.0078, so this puts the reading 4 mm
+// down in a recess — which is the difference between a moulded part and a chip
+// stuck on the tub.
+const PANE_Z = 0.0013;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _box = new THREE.Box3();
+const _quat = new THREE.Quaternion();
 const _ndc = new THREE.Vector2();
 const DIRT_ZONES = ['face', 'hands', 'feet', 'body', 'hair'];
 
@@ -95,6 +102,31 @@ function roundedBox(w, h, d, r, seg = 5) {
   }
   geo.computeVertexNormals();
   return geo;
+}
+
+/** Rounded-rectangle outline, centred on the origin, as a THREE.Shape path. */
+function roundedRectPath(path, w, h, r) {
+  const x = w / 2, y = h / 2;
+  r = Math.min(r, x - 1e-5, y - 1e-5);
+  path.moveTo(-x + r, -y);
+  path.lineTo(x - r, -y); path.quadraticCurveTo(x, -y, x, -y + r);
+  path.lineTo(x, y - r); path.quadraticCurveTo(x, y, x - r, y);
+  path.lineTo(-x + r, y); path.quadraticCurveTo(-x, y, -x, y - r);
+  path.lineTo(-x, -y + r); path.quadraticCurveTo(-x, -y, -x + r, -y);
+  return path;
+}
+
+/**
+ * A rounded rectangle with a rounded rectangular hole in it, ready to extrude.
+ * Used for the temperature bezel: a frame you can see *over*, so the reading
+ * behind it sits in a real recess rather than on the enamel as a sticker.
+ */
+function roundedRingShape(w, h, r, hw, hh, hr) {
+  const shape = roundedRectPath(new THREE.Shape(), w, h, r);
+  // ExtrudeGeometry normalises hole winding itself (ShapeUtils.isClockWise),
+  // so the hole can be authored in the same direction as the outline.
+  shape.holes.push(roundedRectPath(new THREE.Path(), hw, hh, hr));
+  return shape;
 }
 
 /**
@@ -181,10 +213,19 @@ class Droplets {
     this.cap = cap;
     this.list = [];
     this.rand = rng(3313);
-    this.geometry = new THREE.SphereGeometry(1, 10, 8);
-    this.material = MAT.makeGlass({ thickness: 0.006, roughness: 0.03, tint: 0xd6efff });
-    this.material.opacity = 0.85;
-    this.material.transmission = (ctx?.tier ?? 2) >= 1 ? 0.92 : 0.0;
+    this.geometry = new THREE.SphereGeometry(1, 12, 9);
+    // A bead of water on skin is a *lens*, not a marble. At transmission 0.92
+    // on a 9 mm sphere almost nothing survives except the Fresnel rim, so every
+    // droplet rendered as a hollow outlined ring — the critic read them as lens
+    // dirt, and they are the same artefact in every wet frame. Half the
+    // transmission and a real thickness lets the bead carry the skin tone
+    // behind it, which is what makes it read as water lying *on* something.
+    this.material = MAT.makeGlass({ thickness: 0.0018, roughness: 0.05, tint: 0xdff2ff });
+    this.material.opacity = 0.9;
+    this.material.transmission = (ctx?.tier ?? 2) >= 1 ? 0.55 : 0.0;
+    this.material.ior = 1.33;
+    this.material.clearcoat = 1;
+    this.material.clearcoatRoughness = 0.04;
     this.mesh = new THREE.InstancedMesh(this.geometry, this.material, cap);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
@@ -290,7 +331,10 @@ class Droplets {
       this._p.copy(d.local);
       d.anchor.localToWorld(this._p);
       const stretch = 1 + d.vel * 5.0;
-      this._s.set(d.r, d.r * stretch, d.r);
+      // Surface tension flattens a clinging bead against the skin. Full spheres
+      // sat proud of the body like glass marbles glued on (§4 #96); a 0.55
+      // squash on the depth axis is the difference between a bead and a ball.
+      this._s.set(d.r, d.r * stretch, d.r * 0.55);
       this._m.compose(this._p, this._q, this._s);
       this.mesh.setMatrixAt(n++, this._m);
       if (n >= this.cap) break;
@@ -651,48 +695,61 @@ export class BathActivity {
     this.bowl.add(g);
     this.tempPatch = g;
 
-    // bezel — same family as the mint rim band, slightly proud, fully bevelled
-    const bezelGeo = roundedBox(0.098, 0.034, 0.014, 0.013, 5);
-    this._disposables.push(bezelGeo);
-    const bezel = new THREE.Mesh(bezelGeo, this._materials(
+    // Bezel — a *frame* with a hole in it, not a slab.
+    //
+    // The previous build stacked three solid rounded boxes at increasing z, so
+    // the reading finished 4.5 mm proud of the enamel with the darker collar
+    // hidden behind it. Rendered, that is two coloured lozenges laid on the
+    // tub: a sticker. A moulded part has a rim you can see *over*, and the
+    // window is down inside it. Extruding a rounded rectangle with a rounded
+    // rectangular hole gives exactly that in one mesh, and the extrude bevel
+    // puts a micro-highlight on every edge of it (§4 #1) for free.
+    const frameGeo = new THREE.ExtrudeGeometry(
+      roundedRingShape(0.100, 0.036, 0.013, 0.070, 0.018, 0.007), {
+        depth: 0.012, bevelEnabled: true, bevelThickness: 0.0018,
+        bevelSize: 0.0018, bevelSegments: 2, curveSegments: 8
+      });
+    frameGeo.translate(0, 0, -0.006);
+    this._disposables.push(frameGeo);
+    const bezel = new THREE.Mesh(frameGeo, this._materials(
       MAT.makePlastic({ color: 0x9fe0d6, seed: 73, matte: 0.34, clearcoat: 0.9 })));
     bezel.castShadow = true;
     bezel.receiveShadow = true;
     g.add(bezel);
 
-    // Surround: a darker collar that sits half a millimetre behind the bezel
-    // face. Every one of these three parts has to finish at a *different*
-    // depth — coplanar front faces z-fought and the window rendered as a
-    // black slot with the reading invisible inside it.
-    const wellGeo = roundedBox(0.078, 0.021, 0.007, 0.005, 4);
+    // Recess floor, 5 mm behind the bezel face. Dark, because the whole point
+    // of a recess is that it is in shadow — that is what tells the eye the
+    // window is sunk into the shell rather than resting on it.
+    const wellGeo = roundedBox(0.084, 0.028, 0.008, 0.006, 4);
     this._disposables.push(wellGeo);
     const well = new THREE.Mesh(wellGeo, this._materials(
-      MAT.makePlastic({ color: 0x6d7880, seed: 91, matte: 0.62 })));
-    well.position.z = 0.0035;
+      MAT.makePlastic({ color: 0x39424a, seed: 91, matte: 0.72 })));
+    well.position.z = -0.0035;
     well.receiveShadow = true;
     g.add(well);
 
-    // the thermochromic pane itself — lit plastic, one colour at a time
-    const paneGeo = roundedBox(0.066, 0.015, 0.007, 0.0034, 3);
+    // the thermochromic pane itself — lit plastic, one colour at a time, and
+    // seated 4 mm *below* the bezel face so it never reads as an applied chip
+    const paneGeo = roundedBox(0.064, 0.014, 0.005, 0.0028, 3);
     this._disposables.push(paneGeo);
     this.tempPaneMat = this._materials(MAT.makePlastic({
-      color: 0x9ff0b8, seed: 74, matte: 0.12, clearcoat: 1
+      color: 0x9ff0b8, seed: 74, matte: 0.30, clearcoat: 1
     }));
     const pane = new THREE.Mesh(paneGeo, this.tempPaneMat);
-    // 1 mm proud of the bezel: a little domed lens, the way a real bath
-    // thermometer reads, and impossible to lose in its own shadow.
-    pane.position.z = 0.0050;
+    pane.position.z = PANE_Z;
     pane.castShadow = false;
+    pane.receiveShadow = true;
     g.add(pane);
     this.tempPane = pane;
 
     // three embossed dots: cold · just-right · hot. Marks, not a spectrum.
-    const dotGeo = new THREE.SphereGeometry(0.0028, 10, 8);
+    // They sit on the *bezel's* lower bar, where a moulded scale belongs.
+    const dotGeo = new THREE.SphereGeometry(0.0026, 10, 8);
     dotGeo.scale(1, 1, 0.55);
     const dots = mergeParts([          // mergeParts consumes its sources
-      { geo: dotGeo, pos: [-0.026, -0.0125, 0.006] },
-      { geo: dotGeo, pos: [0.000, -0.0125, 0.006] },
-      { geo: dotGeo, pos: [0.026, -0.0125, 0.006] }
+      { geo: dotGeo, pos: [-0.026, -0.0132, 0.0068] },
+      { geo: dotGeo, pos: [0.000, -0.0132, 0.0068] },
+      { geo: dotGeo, pos: [0.026, -0.0132, 0.0068] }
     ]);
     this._disposables.push(dots);
     g.add(new THREE.Mesh(dots, this._materials(
@@ -1310,7 +1367,17 @@ export class BathActivity {
     // Hero: whole tub, mixer above the rim. A fully lathered horn measures
     // ~0.93 rather than the 0.85 the foam spec implies, so the frame top sits
     // at 1.02 — a tenth of a metre of air, which survives a taller horn.
-    add('tub', [0.392, 1.110, 1.275], [0.00, 0.60, 0.06], 34, 0.24);
+    //
+    // Pushed out to x = 0.60 and back to z = 1.44 from the original
+    // [0.392, 1.110, 1.275]. Before the fill phase the baby is standing on the
+    // mat at tub-local z = +0.50 — between the camera and the tub — and the old
+    // eye point put the crown of its head hard against the bottom edge behind
+    // the tile row (`20-bath-fill`: the only visible part of the character was
+    // the back of a bald skull). Swinging round to the tub's near-right corner
+    // moves that same figure into the left third of the frame, whole and in
+    // profile, and gives the shot the subject the critic said it had none of,
+    // while the tub keeps the centre. Costs about 12% of subject size.
+    add('tub', [0.600, 1.080, 1.440], [0.02, 0.58, 0.10], 34, 0.24);
 
     // Water shot (24-bath-caustics, 25-bath-horn). ~22° above the surface: low
     // enough to see through it to the tub floor, high enough that the sight
@@ -1525,54 +1592,93 @@ export class BathActivity {
   }
 
   /**
-   * Find the head, in metres, from the rendered geometry.
+   * Head radius, in metres, taken from the rig rather than from geometry.
    *
-   * Two numbers come out of this and both matter. The radius decides how big
-   * the cap of lather is; the *offset* decides where it sits. `headWorldPos()`
-   * is not the centre of the skull — measured against the actual head mesh it
-   * sits about 0.08 m high — so anchoring the foam to it hung the whole horn
-   * in the air above the crown with a clear gap under it. Anchoring to the
-   * measured centre of the head box puts it on the head instead.
+   * The skeleton gives this away exactly: the `head` bone sits at the base of
+   * the skull and the `head` socket sits just above the crown, so half the
+   * distance between them *is* the head radius, it costs two world positions,
+   * and it is correct in every pose. Every measurement approach tried before
+   * this one went through `Box3.setFromObject`, which for a skinned mesh
+   * returns the **bind-pose** box — pose-independent by construction, 35% over
+   * on this character, and the reason the lather cap was both too wide and
+   * floating. The mesh scan survives only as a fallback for a rig that names
+   * nothing.
    */
   _measureHead() {
     const b = this.ctx.baby;
-    this._headRadius = 0.082;
-    if (!this._headOffset) this._headOffset = new THREE.Vector3();
-    else this._headOffset.set(0, 0, 0);
+    this._headRadius = 0.074;
+    this._headMesh = null;
     try {
+      b?.group?.updateMatrixWorld?.(true);
+      const bone = b?.bone?.('head');
+      const crown = b?.headWorldPos?.();
+      if (bone && crown) {
+        bone.getWorldPosition(_v);
+        const d = _v.distanceTo(crown);
+        // 0.46 rather than 0.5: the socket is authored 12 mm clear of the
+        // crown, so the raw span slightly overstates the skull.
+        if (d > 0.05 && d < 0.35) { this._headRadius = d * 0.46; return; }
+      }
       const g = b?.group;
-      g?.updateMatrixWorld?.(true);      // the box is only as fresh as the rig
-      const h = b?.headWorldPos?.();
       if (g) {
-        let best = 0, bestBox = null;
+        let best = 0, bestMesh = null;
         const box = new THREE.Box3(), size = new THREE.Vector3();
         g.traverse(o => {
           if (!o.isMesh || !/head|skull|cranium/i.test(o.name || '')) return;
           box.setFromObject(o);
           box.getSize(size);
           const r = Math.max(size.x, size.y, size.z) * 0.5;
-          if (r > best && r < 0.2) { best = r; bestBox = box.clone(); }
+          if (r > best && r < 0.2) { best = r; bestMesh = o; }
         });
-        if (best > 0.03 && bestBox) {
-          this._headRadius = best * 0.92;
-          if (h) {
-            bestBox.getCenter(_v2);
-            this._headOffset.copy(_v2).sub(h);
-            // Never let a mis-measure throw the lather across the room.
-            if (this._headOffset.length() > 0.25) this._headOffset.set(0, 0, 0);
-          }
-          return;
-        }
-      }
-      const c = b?.focusPoint?.();
-      if (h && c) {
-        const d = h.distanceTo(c);
-        // Head centre to chest centre on an infant is roughly 1.6 head radii.
-        if (d > 0.04 && d < 0.4) {
-          this._headRadius = THREE.MathUtils.clamp(d * 0.62, 0.050, 0.14);
+        if (best > 0.03 && bestMesh) {
+          this._headRadius = best * 0.72;
+          this._headMesh = bestMesh;
         }
       }
     } catch (e) { /**/ }
+  }
+
+  /**
+   * Centre of the skull, in world space, and the head's world rotation.
+   *
+   * `headWorldPos()` is the rig's *crown* socket — `rig.js:285` authors it at
+   * `A.crown + 12 mm`, which on this character is 86 mm above the middle of the
+   * skull. Anchoring a cap of lather there put the whole thing above the head,
+   * and the previous attempt to correct it cached a one-shot offset measured
+   * from a bind-pose bounding box, which went stale the moment the pose blended
+   * from `stand` to `bathe`: in `21-bath-foam` the harness patches state on the
+   * opening frame, so the offset was captured standing and applied seated, and
+   * the lather ended up as a cloud hanging over the tub with nothing under it.
+   *
+   * Interpolating between the head bone and the crown socket has no cached
+   * state to go stale and no bind pose to be wrong about. It also hands back
+   * the bone's orientation, so the lather now tilts when the head tilts.
+   */
+  _headCentre(outQuat = null) {
+    const b = this.ctx.baby;
+    const crown = this._babyPoint('head');
+    try {
+      const bone = b?.bone?.('head');
+      if (bone) {
+        bone.getWorldPosition(_v);
+        const d = _v.distanceTo(crown);
+        if (d > 0.05 && d < 0.35) {
+          if (outQuat) bone.getWorldQuaternion(outQuat);
+          return _v.lerp(crown, 0.46).clone();
+        }
+      }
+      const m = this._headMesh;
+      if (m && m.parent) {
+        _box.setFromObject(m);
+        if (!_box.isEmpty()) {
+          _box.getCenter(_v2);
+          const lim = this._headRadius * 1.2;
+          if (_v2.distanceTo(crown) > lim) return crown.add(_v2.sub(crown).setLength(lim));
+          return _v2.clone();
+        }
+      }
+    } catch (e) { /**/ }
+    return crown;
   }
 
   _babyPoint(kind) {
@@ -2025,13 +2131,13 @@ export class BathActivity {
     this._lastScrub = now;
 
     if (this.shampooUsed && dHead < headR * 2.6) {
-      this.foam.add('head', worldPoint, 0.020, 0.032);
+      this.foam.add('head', worldPoint, 0.020, 0.020);
       // a second, offset dab so one pass over the crown actually covers it
       _v.copy(worldPoint).add(_v2.set(
         (this.rand() - 0.5) * headR * 0.9,
         (this.rand() - 0.2) * headR * 0.5,
         (this.rand() - 0.5) * headR * 0.9));
-      this.foam.add('head', _v, 0.014, 0.030);
+      this.foam.add('head', _v, 0.014, 0.019);
       ctx.fx?.burst?.('bubble', worldPoint, 2);
       this.dirt.hair = Math.max(0, this.dirt.hair - 0.14);
       ctx.baby?.setDirt?.('hair', this.dirt.hair);
@@ -2069,7 +2175,7 @@ export class BathActivity {
     const region = zone === 'hands'
       ? (worldPoint.distanceTo(this._babyPoint('handL')) < worldPoint.distanceTo(this._babyPoint('handR')) ? 'handL' : 'handR')
       : 'body';
-    this.foam.add(region, worldPoint, 0.014, 0.026);
+    this.foam.add(region, worldPoint, 0.014, 0.017);
     ctx.baby?.setFoam?.('body', Math.min(1, this.foam.density('body') * 3));
 
     this._checkWashDone();
@@ -2555,30 +2661,24 @@ export class BathActivity {
     // A 0.6 mm breathe on the "just right" reading: enough to catch the eye at
     // closeup, invisible as motion in a still.
     const good = t >= TEMP_OK_MIN && t <= TEMP_OK_MAX;
-    pane.position.z = 0.0050 + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
+    pane.position.z = PANE_Z + (good ? Math.sin(this.time * 5) * 0.0003 : 0);
   }
 
   _syncAnchors() {
     const b = this.ctx.baby;
     const q = b?.group?.quaternion;
-    const set = (id, pos) => {
+    const set = (id, pos, quat) => {
       const a = this.anchors.get(id);
       if (!a || !pos) return;
       a.position.copy(pos);
-      if (q) a.quaternion.copy(q);
+      if (quat) a.quaternion.copy(quat);
+      else if (q) a.quaternion.copy(q);
       a.updateMatrixWorld();
     };
-    // Shifted onto the measured centre of the skull — see _measureHead().
-    set('head', this._babyPoint('head').add(this._headOffset || _v.set(0, 0, 0)));
-    this._dbgT = (this._dbgT || 0) + 1;
-    if (this._dbgT % 60 === 1) { try { const _a=this.anchors.get('head');
-      console.warn('[SYNCDBG]', this._dbgT, 'hp=', this._babyPoint('head').toArray().map(n=>n.toFixed(3)).join(','),
-        'off=', this._headOffset?.toArray().map(n=>n.toFixed(3)).join(','),
-        'anch=', _a.position.toArray().map(n=>n.toFixed(3)).join(','),
-        'nHead=', this.foam.blobs.filter(b=>b.region==='head').length,
-        'blob0w=', (()=>{const b=this.foam.blobs.find(b=>b.region==='head'); if(!b) return 'none';
-          const w=b.local.clone(); _a.updateMatrixWorld(); _a.localToWorld(w); return w.toArray().map(n=>n.toFixed(3)).join(',');})(),
-        'rootY=', this.root.position.y.toFixed(3)); } catch(e){} }
+    // The head anchor takes the head *bone's* rotation, so lather rides a
+    // tilted head instead of staying stubbornly level with the floor.
+    const hq = _quat;
+    set('head', this._headCentre(hq), hq);
     set('body', this._babyPoint('body'));
     set('handL', this._babyPoint('handL'));
     set('handR', this._babyPoint('handR'));
@@ -2691,12 +2791,6 @@ export class BathActivity {
       this.foam.setHeadRadius(this._estimateHeadRadius());
       this._syncAnchors();
       this.foam.setAmount(v);
-      try { const _a=this.anchors.get('head'); const _hp=this._babyPoint('head');
-        console.warn('[FOAMDBG] hr=', this.foam.headRadius.toFixed(4),
-          'off=', this._headOffset?.toArray().map(n=>n.toFixed(3)).join(','),
-          'headWorld=', _hp.toArray().map(n=>n.toFixed(3)).join(','),
-          'anchor=', _a.position.toArray().map(n=>n.toFixed(3)).join(','),
-          'horn=', this.foam.horn.toFixed(2)); } catch(e){}
       this.foam.update(0.016, ctx);
       ctx.baby?.setFoam?.('hair', Math.min(1, v));
       ctx.baby?.setFoam?.('body', Math.min(1, v * 0.6));

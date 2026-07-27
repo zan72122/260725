@@ -80,6 +80,12 @@ const AAN_REACH = 0.19;      // "あーん" mouth-open radius
  */
 const FEED_YAW = -0.89;
 
+/** Shared +Y, for aiming a prop's own axis at a target. */
+const _UP = new THREE.Vector3(0, 1, 0);
+
+/** Distance from the bottle group's origin to the tip of the teat. */
+const BOTTLE_TEAT = 0.192;
+
 export class FeedActivity {
   constructor(ctx) {
     this.ctx = ctx;
@@ -250,21 +256,21 @@ export class FeedActivity {
     // moment, not the same shot with a different apple in it.
     rig.overridePreset('table-side', {
       space: 'subject',
-      pos: [-0.430, 0.055, 0.560], target: [0.010, -0.075, 0.010],
-      fov: 40, focusRange: 0.13, dof: 1.25, handheld: 0.85, roll: 0.9
+      pos: [-0.395, 0.175, 0.735], target: [0.015, -0.085, 0.020],
+      fov: 37, focusRange: 0.14, dof: 1.20, handheld: 0.85, roll: 0.9
     });
     // The wide "golden hour in the nursery" framing still has to contain its
     // subject: high and back, but pointed at the highchair.
     rig.overridePreset('table-wide', {
       space: 'subject',
-      pos: [0.900, 0.760, 1.560], target: [0.020, -0.320, 0.030],
-      fov: 40, focusRange: 0.42, dof: 0.75, handheld: 1.00, roll: 1.0
+      pos: [0.760, 0.600, 1.400], target: [0.020, -0.230, 0.030],
+      fov: 38, focusRange: 0.40, dof: 0.75, handheld: 1.00, roll: 1.0
     });
     // Mess/detail framing — closer still, so food on the face reads.
     rig.overridePreset('closeup', {
       space: 'subject',
-      pos: [0.205, 0.105, 0.575], target: [-0.010, -0.060, 0.010],
-      fov: 33, focusRange: 0.11, dof: 1.30, handheld: 0.60, roll: 0.5
+      pos: [0.220, 0.130, 0.680], target: [-0.010, -0.055, 0.010],
+      fov: 34, focusRange: 0.12, dof: 1.30, handheld: 0.60, roll: 0.5
     });
     rig.overridePreset('face', {
       space: 'subject',
@@ -553,6 +559,9 @@ export class FeedActivity {
   _buildPatTarget() {
     const t = S.hitProxy(0.085, 'back');
     t.userData.pickId = 'back';
+    // Invisible geometry, but it rides a very visible back — so the HUD is
+    // allowed to aim a prompt arrow at it. See UI#_targetOnScreen.
+    t.userData.promptAnchor = true;
     t.visible = false;
     this.root.add(t);
     this.patTarget = t;
@@ -980,9 +989,13 @@ export class FeedActivity {
 
     this.peelCount = 0;
     this.bananaBites = 0;
-    g.userData.rest = L * 0.5 + 0.006;
+    // Lying on its side, not standing on its stem. Built along +Y, so it needs
+    // a quarter turn to rest on the tray — without it the banana balanced
+    // vertically on a 4 mm tip in the middle of the tray, which is the
+    // "levitating banana" every feed frame has carried since pass one.
+    g.rotation.set(0, 0.62, Math.PI * 0.5);
+    g.userData.rest = 0.017;
     g.userData.hit = 0.055;
-    g.rotation.z = 0.15;
     return g;
   }
 
@@ -1323,7 +1336,12 @@ export class FeedActivity {
       r.mesh.parent?.remove(r.mesh);
     }
     this.riceGrains.length = 0;
+    // `detach` unhooks it from the head bone but leaves it parented wherever
+    // the rig dropped it — and by then it is no longer under `this.root`, so
+    // `trash.flush()` never sees it. That is the whole of the "feed left 2
+    // scene nodes behind" warning (N13): the nori flake and its hit proxy.
     try { ctx.baby?.detach?.(this.noriFlake); } catch (e) { /* ignore */ }
+    this.noriFlake?.parent?.remove(this.noriFlake);
     this.clock.clear();
     this.trash.flush();
     this.foods = {};
@@ -1812,6 +1830,34 @@ export class FeedActivity {
     this.suckLoop = S.loop(ctx, 'suck', { gain: 0.5 });
   }
 
+  /**
+   * Park the bottle with its *teat* at the mouth.
+   *
+   * The teat is the top of the lathe, 0.192 m from the group origin. Placing
+   * that origin near the mouth — which is what this did for two review passes
+   * — therefore hangs the teat a hand's width *above* the lips and stands the
+   * whole 20 cm body across the face, occluding an eye from every angle. Aim
+   * the bottle's own axis at the mouth instead and the body hangs back under
+   * the chin, where a baby actually holds it and where it cannot cover
+   * anything that matters.
+   *
+   * `k` (0..1 drained) tips it gradually, the way a real bottle is raised as
+   * it empties. `_setMilk` keeps the surface world-horizontal through it.
+   */
+  _seatBottle(k, snap = true, dt = 0) {
+    const obj = this.foods.bottle;
+    if (!obj) return;
+    this._mouthLocal(this._tmp);
+    // Leaning forward as well as down: hung straight below the chin the body
+    // ends up inside the chest, and the shot's whole brief is the glass and
+    // the milk level. 0.10 m of forward offset puts it clear of the shirt.
+    const dir = this._vFall.set(0.34, 0.78 - 0.10 * k, -0.52 + 0.10 * k).normalize();
+    obj.quaternion.setFromUnitVectors(_UP, dir);
+    this._tmp2.copy(this._tmp).addScaledVector(dir, -BOTTLE_TEAT);
+    if (snap) obj.position.copy(this._tmp2);
+    else obj.position.lerp(this._tmp2, Math.min(1, dt * 10));
+  }
+
   _updateSuck(dt) {
     const ctx = this.ctx;
     const it = this.item;
@@ -1825,9 +1871,7 @@ export class FeedActivity {
     this._mouthLocal(this._tmp);
     const obj = it.obj;
     if (it.id === 'bottle') {
-      obj.position.lerp(this._tmp2.copy(this._tmp).add(
-        new THREE.Vector3(0.012, -0.098, 0.052)), Math.min(1, dt * 10));
-      obj.rotation.set(-0.30 - 0.18 * k, 0, 0.16);
+      this._seatBottle(k, false, dt);
       this._setMilk(1 - k);
       this._pumpBubbles(dt, k);
     } else {
@@ -2173,8 +2217,14 @@ export class FeedActivity {
     if (!this._entered) return;
 
     const step = this._adviseStep();
+    // Handed over explicitly rather than left for the HUD to read off
+    // `activity.promptTarget`: app.setActivity only publishes `app.activity`
+    // *after* enter() returns, so the first prompt of the scene would
+    // otherwise be the one prompt in the game with no target.
     this.promptTarget = step.target || null;
-    S.say(ctx, step.text, step.icon);
+    try {
+      ctx.ui?.prompt?.(step.text, { icon: step.icon, target: step.target || null });
+    } catch (e) { /* the HUD is optional */ }
 
     if (step.ring) {
       this.hintRing.visible = true;
@@ -2383,7 +2433,14 @@ export class FeedActivity {
     this.bubbles.visible = false;
     for (const b of this.bubbleState) { b.s = 0; b.y = -1; }
     this._syncBubbles();
-    this.bib.visible = !this.bibOn;
+    // Staging *is* mid-meal, whatever the progress value: the bib went on
+    // before the first mouthful. Leaving it hanging on the tray rim put a
+    // 30 cm pink collar across the near side of every three-quarter framing,
+    // and left the guidance stuck on "put the bib on" over a baby two bites
+    // into an apple.
+    this.bibOn = true;
+    this.bib.visible = false;
+    try { ctx.baby?.setOutfit?.({ bib: 'star' }); } catch (e) { /* ignore */ }
     this.item = this._newItem(id);
     this.item.frozen = true;          // hold the pose through the harness warm
     this.request = id;
@@ -2393,10 +2450,7 @@ export class FeedActivity {
     const food = FOODS[id];
 
     if (id === 'bottle') {
-      this.bibOn = true; this.bib.visible = false;
-      try { ctx.baby?.setOutfit?.({ bib: 'star' }); } catch (e) { /* ignore */ }
-      obj.position.copy(this._tmp).add(new THREE.Vector3(0.012, -0.098, 0.052));
-      obj.rotation.set(-0.30 - 0.18 * k, 0, 0.16);
+      this._seatBottle(k, true);
       this.item.state = 'sucking';
       this.item.t = k * food.seconds;
       this.item.total = food.seconds;

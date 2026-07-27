@@ -829,9 +829,16 @@ export function buildDresser(M) {
 
   /* --- changing mat on top -------------------------------------------- */
   const mat = new THREE.Group();
-  // the mat is dropped on, not fitted: 2.4° off square and 15 mm off centre
-  mat.position.set(0.006, H + 0.02, 0.014);
-  mat.rotation.y = 0.042;
+  /* The mat is dropped on, not fitted. 2.4° reads as square from three metres
+   * — the critique still filed it as "dead square to the wall" (D30) — because
+   * what the eye compares is the mat's front edge against the 800 mm straight
+   * line of the carcass top directly beneath it, and 2.4° over 800 mm is a
+   * 33 mm run-out that the mat's own 26 mm corner radius swallows. 7.5° is a
+   * 105 mm run-out: unmistakable, and still obviously a mat on a chest rather
+   * than a mat thrown at one. It also slides off centre, because a mat that is
+   * rotated but perfectly centred reads as deliberate. */
+  mat.position.set(0.031, H + 0.02, 0.026);
+  mat.rotation.y = 0.131;
   const pad = rbox(0.80, 0.055, 0.46, [0, 0, 0], [0, 0, 0], 0.0262, 1.6);
   mat.add(mesh(pad, M.quilt, 'changingMat'));
   const bolster = [];
@@ -1201,7 +1208,7 @@ export const RUG_PILE = 0.026;
  * in the texture, and `mesh.userData.height(x, z)` hands the surface back so
  * callers can ground things on it. See the D24 note on the binding below.
  */
-export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
+export function buildRug(M, { radius = 1.16, rings = 52, segs = 128 } = {}) {
   const pos = [], col = [], uv = [], idx = [];
   const base = new THREE.Color(0xdf9dae);
   const band = new THREE.Color(0xfdf4e7);
@@ -1209,6 +1216,12 @@ export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
   const bind = new THREE.Color(0x8f5568);          // the woven binding tape
   const under = new THREE.Color(0x5c3441);         // hessian backing, in shade
   const c = new THREE.Color();
+
+  const _bindEdge = edge.clone().lerp(bind, 0.35);
+  const sstep = (e0, e1, x) => {
+    const t = Math.max(0, Math.min(1, (x - e0) / Math.max(1e-6, e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
 
   const liftAngle = 2.35;
   const PILE = RUG_PILE;
@@ -1244,7 +1257,7 @@ export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
     while (d < -Math.PI) d += Math.PI * 2;
     let y = PILE - rr * rr * 0.004;
     y -= traffic(x, z) * 0.0078;
-    y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.055 * Math.exp(-(d * d) / 0.20);
+    y += Math.pow(Math.max(0, (rr - 0.80) / 0.20), 2) * 0.038 * Math.exp(-(d * d) / 0.22);
     y += Math.sin(a * 3 + rr * 6) * 0.0016 + Math.sin(a * 11 - rr * 17) * 0.0008;
     y += Math.exp(-((rr - 0.55) ** 2) / 0.012) * Math.exp(-((a - 4.1) ** 2) / 0.35) * 0.010;
     return y;
@@ -1277,13 +1290,26 @@ export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
       const wob = Math.sin(a * 5 + 1.1) * 0.055
                 + Math.sin(a * 9 - 0.4) * 0.026
                 + Math.sin(a * 3 - 0.6) * 0.032;
-      if (rr > 0.955) c.copy(edge).lerp(bind, 0.35);
-      else if (pd > 0.885 + wob) c.copy(edge);
-      else if (pd > 0.795 + wob && pd < 0.845 + wob) c.copy(band);   // pin stripe
-      else if (pd > 0.545 + wob && pd < 0.720 + wob) c.copy(band);
-      // the medallion is scalloped, not round — a hooked rug's centre motif
-      else if (pd < 0.300 + wob * 0.5 + Math.sin(a * 8 + 2.0) * 0.035) c.copy(band);
-      else c.copy(base);
+      /* Every band edge is a smoothstep, not a comparison.
+       *
+       * A hard `if (pd > k)` on a vertex colour quantises the boundary to the
+       * radial grid, so what should be a wandering curve arrives as a visible
+       * staircase — one step per ring row, ~22 mm, which is a dozen screen
+       * pixels wherever the rug comes near the camera. The blend is one row
+       * two or three rows wide, which anti-aliases the boundary into the
+       * interpolation the rasteriser is doing anyway — and a hooked rug's
+       * colour boundaries are genuinely soft, because the tufts on either
+       * side of one interlock. */
+      const bw = 2.6 / rings;
+      const inside = (lo, hi) => sstep(lo - bw, lo + bw, pd) * (1 - sstep(hi - bw, hi + bw, pd));
+      const med = 0.300 + wob * 0.5 + Math.sin(a * 8 + 2.0) * 0.035;
+      const cream = Math.max(
+        1 - sstep(med - bw, med + bw, pd),                 // scalloped medallion
+        Math.max(inside(0.545 + wob, 0.720 + wob),         // broad ring
+          inside(0.795 + wob, 0.845 + wob)));              // pin stripe
+      c.copy(base).lerp(band, cream);
+      c.lerp(edge, sstep(0.885 + wob - bw, 0.885 + wob + bw, pd));
+      c.lerp(_bindEdge, sstep(0.945, 0.965, rr));
       // wear: the trodden line and the very outer edge are faded and greyed.
       // Kept deliberately narrow — a wash over the whole rug just kills the
       // pattern, which is the opposite of the point.
@@ -1331,7 +1357,7 @@ export function buildRug(M, { radius = 1.16, rings = 64, segs = 96 } = {}) {
       let d = a - liftAngle;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      const lift = 0.055 * Math.exp(-(d * d) / 0.20);
+      const lift = 0.038 * Math.exp(-(d * d) / 0.22);
       // the tape is stitched on by hand, so its width breathes round the circle
       const y = (PILE - 0.004) * row.ys * (1 + Math.sin(a * 4 + 1.9) * 0.06)
               + lift * (0.6 + 0.4 * row.ys)
@@ -1692,9 +1718,11 @@ export function buildPictures(M, list) {
      * streak and the set reads as one light source seen in three sheets. */
     const pane = new THREE.PlaneGeometry(p.w * 0.995, p.h * 0.995);
     const guv = pane.attributes.uv;
-    const gx = 0.5 + p.x * 0.9, gy = 0.5 - p.y * 0.9;
+    const gs = 0.62;                          // window into the reflection map
+    const lim = (n) => Math.max(gs / 2, Math.min(1 - gs / 2, n));
+    const gx = lim(0.5 + p.x * 0.75), gy = lim(0.5 - p.y * 0.75);
     for (let i = 0; i < guv.count; i++) {
-      guv.setXY(i, gx + (guv.getX(i) - 0.5) * 1.35, gy + (guv.getY(i) - 0.5) * 1.35);
+      guv.setXY(i, gx + (guv.getX(i) - 0.5) * gs, gy + (guv.getY(i) - 0.5) * gs);
     }
     panes.push(seat(xf(pane, [p.x, p.y, 0.0092], [0, 0, t]), p.place));
   }
@@ -1735,27 +1763,52 @@ let _glazingMat = null;
 /** Shared additive "sheet of glass" pane — an angled window reflection. */
 export function glazingMaterial() {
   if (_glazingMat) return _glazingMat;
+  /* Why there was "no glazing highlight on any of the three framed pictures"
+   * despite this existing (defect D27).
+   *
+   * Not the opacity — it was the *shape*. The map was a flat ambient wash from
+   * 0.30 down to 0.05 across the whole pane with two soft 32%-wide bands on
+   * top. Additively blended at 0.20 that is a broad, low-gradient veil over the
+   * artwork: the eye reads a uniform lift as "the print is faded", not as "that
+   * is a sheet of glass". A glazing highlight is legible for exactly one
+   * reason, which is that it has an *edge* — a hard-shouldered band of sky
+   * running across the picture at an angle that agrees with the window and
+   * disagrees with the picture's own frame.
+   *
+   * So: the ambient veil comes down to a fraction of what it was (it is there
+   * to say "sealed surface", nothing more), the reflected window becomes two
+   * bright bands with a shoulder ~15% of their width instead of a full
+   * cosine ramp, they carry the window's cool tint against the warm wall, and
+   * the whole thing is drawn at 0.42 rather than 0.20. */
   const tex = TEX.painted('glazing', 256, (g, S) => {
     g.fillStyle = '#000';
     g.fillRect(0, 0, S, S);
-    // two soft parallel bands raking down-right, plus a wide ambient sheen
+    // a whisper of ambient sheen — enough to say the surface is sealed
     const wide = g.createLinearGradient(0, 0, S, S);
-    wide.addColorStop(0, 'rgba(255,255,255,0.30)');
-    wide.addColorStop(0.55, 'rgba(255,255,255,0.05)');
-    wide.addColorStop(1, 'rgba(255,255,255,0.14)');
+    wide.addColorStop(0, 'rgba(226,240,255,0.16)');
+    wide.addColorStop(0.55, 'rgba(255,250,242,0.02)');
+    wide.addColorStop(1, 'rgba(226,240,255,0.07)');
     g.fillStyle = wide;
     g.fillRect(0, 0, S, S);
     g.save();
     g.translate(S * 0.5, S * 0.5);
     g.rotate(-0.62);
-    for (const [ox, w, a] of [[-S * 0.22, S * 0.16, 0.68], [S * 0.06, S * 0.07, 0.42]]) {
+    // the reflected window: two panes of sky with shouldered edges
+    for (const [ox, w, a] of [[-S * 0.30, S * 0.115, 0.95], [-S * 0.02, S * 0.055, 0.62]]) {
       const gr = g.createLinearGradient(ox - w, 0, ox + w, 0);
-      gr.addColorStop(0, 'rgba(255,255,255,0)');
-      gr.addColorStop(0.5, `rgba(255,255,255,${a})`);
-      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      gr.addColorStop(0.00, 'rgba(210,232,255,0)');
+      gr.addColorStop(0.16, `rgba(226,241,255,${a * 0.88})`);
+      gr.addColorStop(0.50, `rgba(255,255,255,${a})`);
+      gr.addColorStop(0.84, `rgba(226,241,255,${a * 0.82})`);
+      gr.addColorStop(1.00, 'rgba(210,232,255,0)');
       g.fillStyle = gr;
       g.fillRect(ox - w, -S, w * 2, S * 2);
     }
+    // the glazing bar between the two panes of the window it is reflecting
+    g.globalCompositeOperation = 'destination-out';
+    g.fillStyle = 'rgba(0,0,0,0.85)';
+    g.fillRect(-S * 0.20, -S, S * 0.022, S * 2);
+    g.globalCompositeOperation = 'source-over';
     g.restore();
   });
   _glazingMat = new THREE.MeshBasicMaterial({
@@ -1763,7 +1816,7 @@ export function glazingMaterial() {
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    opacity: 0.20,
+    opacity: 0.36,
     side: THREE.FrontSide
   });
   return _glazingMat;
