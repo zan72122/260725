@@ -27,19 +27,60 @@ const P = PROPORTIONS;
 /* ------------------------------------------------------------ landmarks --- */
 
 export const FACE = {
-  eye: [0.0300, 0.5320, 0.0532],   // eyeball centre (baby's left)
-  eyeR: 0.0176,
-  lidR: 0.0193,
-  brow: [0.0298, 0.5528, 0.0648],
-  browHalf: 0.0196,
+  // The eyes are the proportion decision, not a detail. They are now 18 %
+  // bigger, 3.5 mm further apart and on the head's vertical midline, which is
+  // where an infant's are; combined with a much shallower orbit (anatomy.js)
+  // that is most of the difference between "baby" and "little old man".
+  eye: [0.0335, 0.5355, 0.0450],   // eyeball centre (baby's left)
+  eyeR: 0.0208,
+  lidR: 0.0226,
+  brow: [0.0330, 0.5548, 0.0618],
+  browHalf: 0.0198,
   // the lip line, now that the lips are real volumes rather than a groove
-  mouth: [0, 0.4858, 0.0740],
-  mouthHalf: 0.0240,
+  mouth: [0, 0.4906, 0.0744],
+  mouthHalf: 0.0200,
   jawPivot: [0, 0.5150, -0.0080],
-  cheek: [0.0430, 0.5080, 0.0570],
-  nose: [0, 0.5052, 0.0822],
-  chin: [0, 0.4665, 0.0672]
+  cheek: [0.0400, 0.5120, 0.0600],
+  nose: [0, 0.5078, 0.0812],
+  chin: [0, 0.4760, 0.0600]
 };
+
+/**
+ * Morph-target landmarks, on the *skin*, not on the underlying volumes.
+ *
+ * Every expression below is written against these rather than against
+ * hand-typed coordinates. When the proportions move — and in an art-direction
+ * pass they move a lot — nineteen expressions used to have to be re-typed one
+ * gaussian centre at a time, and any one that got missed left a morph pushing
+ * on empty skin two centimetres from the feature it was named after.
+ */
+const L = {
+  eyeX: 0.0335, eyeY: 0.5355, eyeZ: 0.0585,   // surface in front of the ball
+  lidUpY: 0.5510, lidLoY: 0.5185,             // upper / lower lid crease
+  canthusX: 0.0555,                           // outer corner
+  browX: 0.0300, browY: 0.5540, browZ: 0.0620,
+  gladY: 0.5480, gladZ: 0.0640,               // glabella, between the brows
+  foreY: 0.5700, foreZ: 0.0570,               // mid-forehead
+  cheekX: 0.0400, cheekY: 0.5090, cheekZ: 0.0620,
+  cornerX: 0.0182, cornerY: 0.4904, cornerZ: 0.0654,   // mouth corner
+  lipY: 0.4906, lipZ: 0.0748,                 // lip centre
+  upperLipY: 0.4952, lowerLipY: 0.4862,
+  chinY: 0.4790, chinZ: 0.0630,
+  noseY: 0.5150, noseZ: 0.0700,               // bridge
+  alaX: 0.0104, alaY: 0.5046, alaZ: 0.0664
+};
+
+/**
+ * "Below the eye" mask, 0 at the pupil and 1 a couple of centimetres under it.
+ *
+ * Every morph that lifts the cheek — the squint of a smile, a big grin, the
+ * bunched cheeks of a bawl — pushes skin *upward* toward the eye, and now that
+ * the eyeball is 18 % bigger and the orbit far shallower than it was, an
+ * ungated 9 mm lift simply closes the eye: `happy` and `giggle` rendered with
+ * the eyeballs completely buried under a fold of cheek. The cheek may reach the
+ * lower lid margin; it may not climb past it.
+ */
+const belowEye = y => sstep(0.5395, 0.5195, y);
 
 const g1 = (d, r) => Math.exp(-(d * d) / (r * r));
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -75,140 +116,143 @@ function blinkRandom(seed) {
  */
 const MORPHS = [
   ['browRaise', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax - 0.028, y - 0.5455, z - 0.0645), 0.030)
-      + 0.5 * g1(Math.hypot(ax - 0.020, y - 0.5680, z - 0.0630), 0.034);
+    const w = g1(Math.hypot(ax - L.browX, y - L.browY, z - L.browZ), 0.032)
+      + 0.5 * g1(Math.hypot(ax - 0.020, y - (L.browY + 0.021), z - (L.browZ - 0.004)), 0.034);
     o[1] += 0.0112 * w; o[2] += 0.0022 * w;
-    // the forehead creases when a baby raises its brows — three soft ridges
-    const fold = Math.sin((y - 0.5560) * 520) * g1(Math.hypot(ax * 0.7, y - 0.5640, z - 0.0640), 0.026);
-    o[2] += 0.0011 * fold;
+    // A hint of forehead crease, and no more than a hint. An infant's forehead
+    // does move, but it has no fixed lines in it, and three carved ridges over
+    // the brow is a middle-aged forehead however young the rest of the face is.
+    const fold = Math.sin((y - L.foreY) * 460) * g1(Math.hypot(ax * 0.7, y - L.foreY, z - L.gladZ), 0.024);
+    o[2] += 0.0005 * fold;
   }],
   ['browFurrow', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax - 0.014, y - 0.5440, z - 0.0655), 0.024);
+    const w = g1(Math.hypot(ax - 0.014, y - L.browY, z - L.browZ), 0.024);
     o[1] -= 0.0086 * w; o[0] -= 0.0060 * w * s; o[2] += 0.0044 * w;
     // the little vertical ridge between the brows
-    o[2] += 0.0038 * g1(Math.hypot(ax, y - 0.5480, z - 0.0680), 0.011);
+    o[2] += 0.0038 * g1(Math.hypot(ax, y - L.gladY, z - L.gladZ), 0.011);
   }],
   ['browSad', (ax, x, y, z, s, o) => {
-    const inner = g1(Math.hypot(ax - 0.012, y - 0.5445, z - 0.0660), 0.021);
-    const outer = g1(Math.hypot(ax - 0.046, y - 0.5430, z - 0.0560), 0.024);
+    const inner = g1(Math.hypot(ax - 0.012, y - L.browY, z - (L.browZ + 0.002)), 0.021);
+    const outer = g1(Math.hypot(ax - 0.048, y - (L.browY - 0.002), z - (L.browZ - 0.010)), 0.024);
     o[1] += 0.0102 * inner - 0.0064 * outer;
     o[2] += 0.0030 * inner;
     // the oblique fold that appears above the inner brow — the single most
     // legible cue for distress on any face
-    o[2] += 0.0022 * g1(Math.hypot(ax - 0.016, y - 0.5580, z - 0.0630), 0.017);
+    o[2] += 0.0022 * g1(Math.hypot(ax - 0.016, y - (L.browY + 0.014), z - L.browZ), 0.017);
   }],
   ['eyeWide', (ax, x, y, z, s, o) => {
-    const up = g1(Math.hypot(ax - 0.030, y - 0.5470, z - 0.0600), 0.020);
-    const dn = g1(Math.hypot(ax - 0.030, y - 0.5165, z - 0.0600), 0.019);
+    const up = g1(Math.hypot(ax - L.eyeX, y - L.lidUpY, z - L.eyeZ), 0.021);
+    const dn = g1(Math.hypot(ax - L.eyeX, y - L.lidLoY, z - L.eyeZ), 0.020);
     o[1] += 0.0062 * up - 0.0042 * dn;
   }],
   ['eyeSquint', (ax, x, y, z, s, o) => {
-    const dn = g1(Math.hypot(ax - 0.032, y - 0.5170, z - 0.0600), 0.022);
-    const up = g1(Math.hypot(ax - 0.030, y - 0.5480, z - 0.0600), 0.019);
-    o[1] += 0.0086 * dn - 0.0036 * up; o[2] += 0.0030 * dn;
-    // crow's-foot bunching at the outer canthus
-    o[2] -= 0.0016 * g1(Math.hypot(ax - 0.052, y - 0.5300, z - 0.0430), 0.018);
+    // The squint of a smile is made entirely by the *cheek* rising into the
+    // lower lid. No crow's foot: a fan of creases at the outer canthus is an
+    // age marker and nothing else.
+    const dn = g1(Math.hypot(ax - (L.eyeX + 0.002), y - L.lidLoY, z - L.eyeZ), 0.020) * belowEye(y);
+    const up = g1(Math.hypot(ax - L.eyeX, y - L.lidUpY, z - L.eyeZ), 0.019);
+    o[1] += 0.0078 * dn - 0.0032 * up; o[2] += 0.0030 * dn;
   }],
   ['smileSmall', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0245, y - 0.4868, z - 0.0640), 0.017);
-    const ch = g1(Math.hypot(ax - 0.040, y - 0.5000, z - 0.0600), 0.026);
-    o[1] += 0.0062 * c + 0.0030 * ch; o[0] += 0.0026 * c * s; o[2] -= 0.0010 * c;
+    const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - L.cornerZ), 0.015);
+    const ch = g1(Math.hypot(ax - L.cheekX, y - L.cheekY, z - L.cheekZ), 0.026) * belowEye(y);
+    o[1] += 0.0058 * c + 0.0032 * ch; o[0] += 0.0024 * c * s; o[2] += 0.0012 * ch;
   }],
   ['smileBig', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0255, y - 0.4878, z - 0.0630), 0.020);
-    const ch = g1(Math.hypot(ax - 0.042, y - 0.5040, z - 0.0590), 0.028);
-    const lip = g1(Math.hypot(ax, y - 0.4930, z - 0.0740), 0.020);
-    o[1] += 0.0128 * c + 0.0104 * ch + 0.0036 * lip;
-    o[0] += 0.0082 * c * s + 0.0032 * ch * s;
-    o[2] += 0.0046 * ch - 0.0016 * c;
-    // nasolabial fold: the crease that separates the cheek apple
-    const nl = g1(Math.abs(Math.hypot(ax - 0.030, y - 0.4970) - 0.010), 0.0055)
-      * g1(z - 0.0670, 0.020);
-    o[2] -= 0.0042 * nl;
+    const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - (L.cornerZ - 0.001)), 0.019);
+    const ch = g1(Math.hypot(ax - (L.cheekX + 0.002), y - (L.cheekY + 0.003), z - (L.cheekZ - 0.003)), 0.028) * belowEye(y);
+    const lip = g1(Math.hypot(ax, y - L.upperLipY, z - L.lipZ), 0.020);
+    o[1] += 0.0126 * c + 0.0106 * ch + 0.0036 * lip;
+    o[0] += 0.0080 * c * s + 0.0034 * ch * s;
+    o[2] += 0.0052 * ch - 0.0012 * c;
+    // No nasolabial fold. It used to be carved in here at 4.2 mm, and it is
+    // the loudest "old man" signal a face can carry — infants do not have the
+    // muscle attachment that makes one. The cheek apple is now separated from
+    // the muzzle by nothing but its own convexity.
   }],
   ['jawOpen', (ax, x, y, z, s, o) => {
     // rotate the lower face about the jaw hinge, then scoop the lip region
     // backward so the mouth bag has somewhere to sit
-    const w = sstep(0.5180, 0.4700, y) * sstep(-0.030, 0.020, z);
+    const w = sstep(0.5220, 0.4740, y) * sstep(-0.030, 0.020, z);
     const py = y - FACE.jawPivot[1], pz = z - FACE.jawPivot[2];
     const a = 0.40 * w;
     o[1] += (py * Math.cos(a) - pz * Math.sin(a)) - py;
     o[2] += (py * Math.sin(a) + pz * Math.cos(a)) - pz;
-    const m = g1(Math.hypot(ax * 0.72, y - 0.4880, (z - 0.0740) * 0.9), 0.023);
+    const m = g1(Math.hypot(ax * 0.72, y - L.lipY, (z - L.lipZ) * 0.9), 0.022);
     o[2] -= 0.0165 * m;
   }],
   ['mouthPout', (ax, x, y, z, s, o) => {
-    const m = g1(Math.hypot(ax * 0.9, y - 0.4855, z - 0.0740), 0.020);
-    const c = g1(Math.hypot(ax - 0.0240, y - 0.4865, z - 0.0645), 0.016);
+    const m = g1(Math.hypot(ax * 0.9, y - L.lipY, z - L.lipZ), 0.019);
+    const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - L.cornerZ), 0.015);
     o[2] += 0.0092 * m; o[0] -= 0.0058 * c * s; o[1] -= 0.0030 * m;
-    o[1] += 0.0038 * g1(Math.hypot(ax, y - 0.4715, z - 0.0660), 0.017);   // chin up
+    o[1] += 0.0038 * g1(Math.hypot(ax, y - L.chinY, z - L.chinZ), 0.017);   // chin up
   }],
   ['mouthFrown', (ax, x, y, z, s, o) => {
-    const c = g1(Math.hypot(ax - 0.0238, y - 0.4870, z - 0.0640), 0.017);
+    const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - L.cornerZ), 0.016);
     o[1] -= 0.0112 * c; o[0] += 0.0022 * c * s; o[2] -= 0.0020 * c;
-    o[1] += 0.0034 * g1(Math.hypot(ax, y - 0.4790, z - 0.0700), 0.014);
-    o[2] += 0.0032 * g1(Math.hypot(ax, y - 0.4710, z - 0.0660), 0.016);
+    o[1] += 0.0034 * g1(Math.hypot(ax, y - L.lowerLipY, z - (L.lipZ - 0.004)), 0.014);
+    o[2] += 0.0032 * g1(Math.hypot(ax, y - L.chinY, z - L.chinZ), 0.016);
   }],
   ['mouthCry', (ax, x, y, z, s, o) => {
     // the wide unhappy rectangle: corners out and down, upper lip up
-    const c = g1(Math.hypot(ax - 0.0275, y - 0.4880, z - 0.0620), 0.021);
-    const upper = g1(Math.hypot(ax * 0.8, y - 0.4930, z - 0.0745), 0.019);
+    const c = g1(Math.hypot(ax - (L.cornerX + 0.003), y - L.cornerY, z - (L.cornerZ - 0.003)), 0.020);
+    const upper = g1(Math.hypot(ax * 0.8, y - L.upperLipY, z - L.lipZ), 0.018);
     o[0] += 0.0130 * c * s; o[1] -= 0.0086 * c; o[2] -= 0.0034 * c;
     o[1] += 0.0068 * upper; o[2] -= 0.0034 * upper;
-    o[1] += 0.0072 * g1(Math.hypot(ax - 0.036, y - 0.5030, z - 0.0600), 0.024); // cheeks bunch
+    o[1] += 0.0076 * g1(Math.hypot(ax - L.cheekX, y - L.cheekY, z - L.cheekZ), 0.025) * belowEye(y); // cheeks bunch
     // the tongue-shaped hollow under the lower lip of a full bawl
-    o[2] -= 0.0030 * g1(Math.hypot(ax * 0.8, y - 0.4740, z - 0.0680), 0.016);
+    o[2] -= 0.0030 * g1(Math.hypot(ax * 0.8, y - (L.chinY - 0.001), z - (L.chinZ + 0.004)), 0.016);
   }],
   ['cheekPuff', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax - 0.0455, y - 0.5010, z - 0.0480), 0.030);
+    const w = g1(Math.hypot(ax - (L.cheekX + 0.005), y - (L.cheekY - 0.004), z - (L.cheekZ - 0.014)), 0.031);
     o[0] += 0.0118 * w * s; o[2] += 0.0050 * w; o[1] -= 0.0012 * w;
   }],
   ['cheekSuck', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax - 0.0430, y - 0.5000, z - 0.0520), 0.024);
+    const w = g1(Math.hypot(ax - (L.cheekX + 0.002), y - (L.cheekY - 0.006), z - (L.cheekZ - 0.010)), 0.024);
     o[0] -= 0.0086 * w * s; o[2] -= 0.0028 * w;
   }],
   ['noseWrinkle', (ax, x, y, z, s, o) => {
-    // three short transverse ridges across the nose bridge, the ala pulled up
-    const w = g1(Math.hypot(ax, y - 0.5150, z - 0.0770), 0.018);
+    // two short transverse ridges across the nose bridge, the ala pulled up
+    const w = g1(Math.hypot(ax, y - L.noseY, z - (L.noseZ + 0.004)), 0.016);
     o[1] += 0.0058 * w; o[2] += 0.0030 * w;
-    o[2] += 0.0016 * Math.sin((y - 0.5100) * 700) * w;
-    const side = g1(Math.hypot(ax - 0.014, y - 0.5060, z - 0.0700), 0.012);
+    o[2] += 0.0013 * Math.sin((y - L.noseY) * 700) * w;
+    const side = g1(Math.hypot(ax - L.alaX, y - L.alaY, z - L.alaZ), 0.012);
     o[1] += 0.0050 * side; o[0] += 0.0016 * side * s;
   }],
   ['lipsPurse', (ax, x, y, z, s, o) => {
-    const m = g1(Math.hypot(ax, y - 0.4860, z - 0.0740), 0.019);
+    const m = g1(Math.hypot(ax, y - L.lipY, z - L.lipZ), 0.018);
     o[2] += 0.0072 * m; o[0] -= 0.0050 * m * s * clamp01(ax / 0.02);
   }],
   ['sleepSoft', (ax, x, y, z, s, o) => {
-    const w = sstep(0.5200, 0.4700, y);
+    const w = sstep(0.5230, 0.4740, y);
     o[1] -= 0.0034 * w;
-    o[1] -= 0.0032 * g1(Math.hypot(ax - 0.030, y - 0.5460, z - 0.0630), 0.028);
-    o[1] += 0.0030 * g1(Math.hypot(ax - 0.042, y - 0.5020, z - 0.0590), 0.028);
-    o[2] += 0.0026 * g1(Math.hypot(ax, y - 0.4860, z - 0.0735), 0.018);
+    o[1] -= 0.0032 * g1(Math.hypot(ax - L.eyeX, y - L.browY, z - L.browZ), 0.028);
+    o[1] += 0.0030 * g1(Math.hypot(ax - L.cheekX, y - L.cheekY, z - L.cheekZ), 0.028) * belowEye(y);
+    o[2] += 0.0026 * g1(Math.hypot(ax, y - L.lipY, z - L.lipZ), 0.018);
   }],
   ['sulk', (ax, x, y, z, s, o) => {
     // deliberately asymmetric: one corner down, one flat
     const left = x > 0 ? 1 : 0.15;
-    const c = g1(Math.hypot(ax - 0.0238, y - 0.4870, z - 0.0640), 0.017) * left;
+    const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - L.cornerZ), 0.016) * left;
     o[1] -= 0.0098 * c;
-    o[2] += 0.0074 * g1(Math.hypot(ax, y - 0.4805, z - 0.0730), 0.017);   // lower lip out
-    o[1] -= 0.0040 * g1(Math.hypot(ax - 0.020, y - 0.5440, z - 0.0655), 0.024);
+    o[2] += 0.0074 * g1(Math.hypot(ax, y - L.lowerLipY, z - (L.lipZ - 0.002)), 0.017); // lower lip out
+    o[1] -= 0.0040 * g1(Math.hypot(ax - 0.020, y - L.browY, z - L.browZ), 0.024);
   }],
   ['chinRaise', (ax, x, y, z, s, o) => {
-    const w = g1(Math.hypot(ax, y - 0.4720, z - 0.0640), 0.020);
+    const w = g1(Math.hypot(ax, y - L.chinY, z - L.chinZ), 0.020);
     o[1] += 0.0064 * w; o[2] += 0.0026 * w;
     // the walnut-chin dimpling that comes with a wobbling lip
     o[2] -= 0.0014 * Math.sin(ax * 620) * w;
   }],
   ['yawnWide', (ax, x, y, z, s, o) => {
-    const w = sstep(0.5180, 0.4650, y) * sstep(-0.030, 0.020, z);
+    const w = sstep(0.5220, 0.4690, y) * sstep(-0.030, 0.020, z);
     const py = y - FACE.jawPivot[1], pz = z - FACE.jawPivot[2];
     const a = 0.70 * w;
     o[1] += (py * Math.cos(a) - pz * Math.sin(a)) - py;
     o[2] += (py * Math.sin(a) + pz * Math.cos(a)) - pz;
-    const m = g1(Math.hypot(ax * 0.68, y - 0.4830, (z - 0.0740) * 0.85), 0.026);
+    const m = g1(Math.hypot(ax * 0.68, y - (L.lipY - 0.005), (z - L.lipZ) * 0.85), 0.026);
     o[2] -= 0.0205 * m;
-    o[0] -= 0.0040 * g1(Math.hypot(ax - 0.045, y - 0.5000, z - 0.0540), 0.026) * s;
+    o[0] -= 0.0040 * g1(Math.hypot(ax - (L.cheekX + 0.006), y - L.cheekY, z - (L.cheekZ - 0.008)), 0.026) * s;
   }]
 ];
 
@@ -226,7 +270,7 @@ export function buildFaceMorphs(headGeometry) {
     const d = new Float32Array(nv * 3);
     for (let v = 0; v < nv; v++) {
       const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
-      if (y < 0.455 || z < -0.020) continue;          // nothing behind the ears moves
+      if (y < 0.4520 || z < -0.020) continue;         // nothing behind the ears moves
       out[0] = out[1] = out[2] = 0;
       fn(Math.abs(x), x, y, z, x >= 0 ? 1 : -1, out);
       d[v * 3] = out[0]; d[v * 3 + 1] = out[1]; d[v * 3 + 2] = out[2];
@@ -261,7 +305,7 @@ export function buildFaceMorphs(headGeometry) {
  * of the opening and the eyes read as two beady dark dots with no sclera
  * anywhere. Size the iris to the aperture, not to the ball.
  */
-function eyeballGeometry(R, segs, rings, irisDeg = 23.5) {
+function eyeballGeometry(R, segs, rings, irisDeg = 33) {
   const g = new THREE.BufferGeometry();
   const pos = [], nor = [], uv = [], idx = [];
   const thetaRef = (0.5 / 0.34) * irisDeg * DEG;      // θ at the texture's edge
@@ -323,26 +367,48 @@ function lidGeometry(R, halfAngle, segs, rings) {
   return g;
 }
 
-/** Thin lash strip that sits on the lid margin. */
+/**
+ * The lash band on the lid margin.
+ *
+ * This used to be two rings 4° apart, which at portrait distance is a hairline
+ * and effectively invisible. That mattered more than it sounds: the lids share
+ * the *skin* material, so with no lash line there is nothing at all separating
+ * the eyeball from the face — the eye stops being an eye set into a lid and
+ * becomes a white lozenge with a dot on it, painted on the front of the head.
+ * A dark margin is what gives an eye its socket for free.
+ *
+ * So it is now a three-row band ~9° deep, and it tapers to nothing at the inner
+ * canthus (`ph` near ±π/2 on this cap), because real lashes do — a uniform ring
+ * reads as eyeliner.
+ */
 function lashGeometry(R, halfAngle, segs) {
   const g = new THREE.BufferGeometry();
-  const pos = [], nor = [], uv = [], idx = [];
-  for (let k = 0; k < 2; k++) {
-    const th = halfAngle + k * 0.075;
-    const rr = R * (1 - 0.16) * (1 - k * 0.06);
+  const pos = [], nor = [], uv = [], col = [], idx = [];
+  const rows = 3;
+  for (let k = 0; k < rows; k++) {
+    const t = k / (rows - 1);
     for (let i = 0; i <= segs; i++) {
       const ph = (i / segs) * Math.PI * 2;
+      // 0 at the inner corner, 1 at the outer — the cap's ±x axis is the
+      // canthal axis, so cos(ph) is exactly the inner/outer coordinate
+      const outer = 0.5 - 0.5 * Math.cos(ph);
+      const th = halfAngle + t * (0.055 + 0.105 * outer);
+      const rr = R * (1 - 0.16) * (1 - t * 0.055);
       const st = Math.sin(th), ct = Math.cos(th);
       const nx = st * Math.cos(ph), ny = ct, nz = st * Math.sin(ph);
       pos.push(nx * rr, ny * rr, nz * rr);
       nor.push(nx, ny, nz);
-      uv.push(i / segs, k);
+      uv.push(i / segs, t);
+      col.push(1, 1, 1, (1 - t * 0.55) * (0.34 + 0.66 * outer));
     }
   }
-  for (let i = 0; i < segs; i++) {
-    const a = i, b = i + segs + 1;
-    idx.push(a, a + 1, b, a + 1, b + 1, b);
+  for (let k = 0; k < rows - 1; k++) {
+    for (let i = 0; i < segs; i++) {
+      const a = k * (segs + 1) + i, b = a + segs + 1;
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
+    }
   }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
@@ -424,7 +490,15 @@ const C0 = () => ({
  * the lids and the cheeks, not just the mouth.
  */
 export const MOODS = {
-  neutral:   { smileSmall: 0.30, browRaise: 0.06, lidLower: 0.04, blush: 0.18 },
+  /* `neutral` is the hardest one and it was the wrong shape. A third of a
+   * smile on a closed mouth is not a neutral face — it is a *smirk*, and a
+   * smirk is knowing, which is the one thing an infant cannot be. Worse, the
+   * mouth was clamped shut: a resting baby's mouth hangs very slightly open
+   * with the lips barely parted, because the jaw muscles are not yet doing
+   * anything. So: no smile, brows up a touch (an infant's default is mild
+   * interest, not composure), lids fully open, and just enough jaw to part the
+   * lips without opening the mouth bag behind them. */
+  neutral:   { jawOpen: 0.11, browRaise: 0.13, blush: 0.22, smileSmall: 0.05 },
   happy:     { smileBig: 0.86, smileSmall: 0.55, eyeSquint: 0.58, browRaise: 0.44, blush: 0.64, jawOpen: 0.16, cheekPuff: 0.14 },
   giggle:    { smileBig: 1.0, smileSmall: 0.4, eyeSquint: 0.95, browRaise: 0.55, jawOpen: 0.44, blush: 0.88, noseWrinkle: 0.45, cheekPuff: 0.26, headTilt: -0.20 },
   sad:       { browSad: 1.0, mouthFrown: 0.94, lidLower: 0.54, chinRaise: 0.48, headTilt: -0.40, blush: 0.34, tears: 0.22, browLift: 0.18 },
@@ -508,6 +582,11 @@ export class Face {
     const lashGeo = lashGeometry(FACE.lidR, LID_HALF, lidSegs);
 
     this.lashMat = MAT.makeLash({ color: 0x4b3428 });
+    // the band carries its own alpha ramp so it fades out at the inner canthus
+    this.lashMat.vertexColors = true;
+    this.lashMat.transparent = true;
+    this.lashMat.depthWrite = false;
+    this.lashMat.needsUpdate = true;
     // Infant brows are a warm haze, not a drawn line. Vertex alpha carries the
     // root fade; the material only has to agree to look at it.
     this.browMat = MAT.makeLash({ color: 0xc79a72, opacity: 1 });
@@ -540,7 +619,7 @@ export class Face {
       // reads as a stamped-on decal.
       const clRig = new THREE.Object3D();
       pivot.add(clRig);
-      const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.0058, 0.0058), MAT.makeCatchlight());
+      const cl = new THREE.Mesh(new THREE.PlaneGeometry(0.0068, 0.0068), MAT.makeCatchlight());
       cl.position.set(0, 0, FACE.eyeR * 1.06);
       cl.renderOrder = 5;
       clRig.add(cl);
@@ -702,7 +781,7 @@ export class Face {
       const m = new THREE.Mesh(geo, mat);
       // Low and lateral: on the apple of the cheek, not up against the eye
       // socket where the surface falls away and the cap rim buries itself.
-      let p = new THREE.Vector3(FACE.cheek[0] * 1.10 * s, FACE.cheek[1] - 0.0090, FACE.cheek[2] - 0.0075);
+      let p = new THREE.Vector3(FACE.cheek[0] * 1.06 * s, FACE.cheek[1] - 0.0075, FACE.cheek[2] - 0.0080);
       if (this.field) {
         // land exactly on the skin, then face along its normal
         for (let i = 0; i < 6; i++) {
@@ -739,11 +818,11 @@ export class Face {
     }
     // the path a tear rolls down: inner canthus → cheek → jaw
     this.tearPath = s => [
-      new THREE.Vector3(0.0180 * s, 0.5230, 0.0680),
-      new THREE.Vector3(0.0250 * s, 0.5100, 0.0690),
-      new THREE.Vector3(0.0330 * s, 0.4955, 0.0655),
-      new THREE.Vector3(0.0385 * s, 0.4800, 0.0560),
-      new THREE.Vector3(0.0400 * s, 0.4672, 0.0450)
+      new THREE.Vector3(0.0200 * s, 0.5250, 0.0690),
+      new THREE.Vector3(0.0280 * s, 0.5125, 0.0710),
+      new THREE.Vector3(0.0360 * s, 0.4990, 0.0680),
+      new THREE.Vector3(0.0410 * s, 0.4855, 0.0590),
+      new THREE.Vector3(0.0420 * s, 0.4740, 0.0470)
     ];
   }
 
@@ -1026,8 +1105,12 @@ export class Face {
       // as two hollow sockets with a bare eyeball in them instead of two shut
       // lids. And the lower lid has to be allowed to complete its travel; a
       // 0.62 coefficient means it never gets there however hard the mood asks.
-      const upEdge = THREE.MathUtils.lerp(54 - wide * 10 + squint * 9, 107, close);
-      const loEdge = THREE.MathUtils.lerp(126 + wide * 6, 96,
+      // Aperture widened from 72° to 82°. On an infant the palpebral fissure is
+      // large relative to the eyeball and the iris nearly fills it top to
+      // bottom; a narrow slit over a big ball is what makes a stylised eye read
+      // as "hooded", i.e. adult.
+      const upEdge = THREE.MathUtils.lerp(49 - wide * 10 + squint * 9, 107, close);
+      const loEdge = THREE.MathUtils.lerp(131 + wide * 6, 96,
         clamp01(Math.max(close, close * 0.62 + squint * 0.95)));
       e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
       e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;

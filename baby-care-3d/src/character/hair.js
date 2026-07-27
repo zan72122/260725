@@ -20,9 +20,9 @@ import * as MAT from '../engine/materials.js';
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
 /** Skull ellipsoid the hair grows on (matches anatomy's cranium, inflated). */
-const SKULL = { c: V(0, 0.5455, -0.0025), r: V(0.0730, 0.0785, 0.0720) };
+const SKULL = { c: V(0, 0.5430, -0.0035), r: V(0.0785, 0.0797, 0.0775) };
 /** Hair whorl: off-centre on purpose. Perfect symmetry reads as a wig. */
-const WHORL = V(0.0180, 0.6120, -0.0260);
+const WHORL = V(0.0180, 0.6105, -0.0260);
 
 function onSkull(dir, inflate = 0) {
   const d = dir.clone().normalize();

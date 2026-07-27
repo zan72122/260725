@@ -34,18 +34,22 @@ import * as THREE from 'three';
  */
 export const PROPORTIONS = {
   height: 0.622,
-  headTop: 0.6225,
-  chin: 0.4605,
-  eyeY: 0.5325,
-  eyeX: 0.0295,
-  eyeZ: 0.0505,
-  eyeR: 0.0192,          // eyeball radius — oversized on purpose, it is cute
-  mouthY: 0.4855,
+  headTop: 0.6212,
+  chin: 0.4620,
+  // The eye line sits at the vertical *midpoint of the whole head*, cranium
+  // included. That single number is most of what separates an infant skull
+  // from an adult one, and getting it wrong is what makes a stylised baby
+  // read as a dwarf: an adult's eye line is ~55–60 % of the way down.
+  eyeY: 0.5355,
+  eyeX: 0.0335,          // wide-set — the other half of the infant read
+  eyeZ: 0.0450,
+  eyeR: 0.0225,          // eyeball radius — oversized on purpose, it is cute
+  mouthY: 0.4903,
   mouthZ: 0.0655,
-  noseY: 0.5075,
-  noseZ: 0.0685,
-  earY: 0.5285,
-  earX: 0.0735,
+  noseY: 0.5078,
+  noseZ: 0.0700,
+  earY: 0.5290,
+  earX: 0.0760,
   shoulderY: 0.404,
   hipY: 0.262,
   chestY: 0.372,
@@ -72,7 +76,7 @@ export function anchors() {
     neck:      [0, 0.4320, 0.0020],
     head:      [0, 0.4700, 0.0020],
     headEnd:   [0, 0.5455, 0.0000],
-    crown:     [0, 0.6180, 0.0000],
+    crown:     [0, 0.6165, 0.0000],
     eye:       [P.eyeX, P.eyeY, P.eyeZ],
     ear:       [P.earX, P.earY, -0.0040],
     mouth:     [0, P.mouthY, P.mouthZ],
@@ -127,15 +131,40 @@ export function bodySpec() {
     ell('torso', PRIO.torso, m([0.0400, 0.2580, -0.0400], s), [0.0450, 0.0420, 0.0450]); // buttock
   }
 
-  /* -- head: big cranium, small jaw, fat cheeks, button nose, soft ears ---- */
-  ell('head', PRIO.head, [0, 0.5470, -0.0025], [0.0700, 0.0755, 0.0690]);      // cranium
-  ell('head', PRIO.head, [0, 0.5010, 0.0090], [0.0575, 0.0455, 0.0530]);       // jaw mass
-  ell('head', PRIO.head, [0, 0.4945, 0.0400], [0.0295, 0.0235, 0.0235]);       // muzzle
-  ell('head', PRIO.head, [0, 0.4735, 0.0290], [0.0250, 0.0195, 0.0235]);       // chin mass
-  cone('head', PRIO.head, [-0.0310, 0.5430, 0.0440], [0.0310, 0.5430, 0.0440], 0.0155, 0.0155); // brow ridge
-  cone('head', PRIO.head, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
+  /* -- head ----------------------------------------------------------------
+   * The infant skull, as a character artist would block it in:
+   *
+   *   • one near-spherical cranium that is the widest thing in the silhouette,
+   *   • a rounded forehead that bulges *forward* over the eyes,
+   *   • **no brow ridge at all** — the ridge is an adult male trait and a low
+   *     angular one over the eyes is the single fastest way to turn a baby into
+   *     a gremlin, because it throws the sockets into shadow,
+   *   • a jaw narrower than the cranium, with the cheek apples high (up under
+   *     the eyes) rather than low beside the mouth, which is a jowl,
+   *   • a chin that recedes into a soft submental fullness instead of jutting.
+   *
+   * The overall rule: every volume here is convex and every pair of them
+   * overlaps enough that the union leaves no valley between them. An infant
+   * face has no concavity anywhere except the eye sockets and the mouth line.
+   */
+  // Two stacked masses rather than one tall egg. A single ellipsoid tall enough
+  // to reach the crown is necessarily *narrow* at the crown, so the silhouette
+  // came to a point at the top and its widest place was down at the cheeks —
+  // an upside-down egg, which is a face shape, not a skull shape. On an infant
+  // the widest point of the whole character is the parietal eminence, high on
+  // the skull and behind the ears, and everything below it tapers.
+  ell('head', PRIO.head, [0, 0.5545, -0.0085], [0.0770, 0.0672, 0.0755]);      // upper cranium
+  ell('head', PRIO.head, [0, 0.5235, -0.0110], [0.0688, 0.0520, 0.0700]);      // lower skull / temples
+  ell('head', PRIO.head, [0, 0.5010, 0.0020], [0.0512, 0.0455, 0.0525]);       // jaw mass
+  ell('head', PRIO.head, [0, 0.4990, 0.0330], [0.0410, 0.0300, 0.0310]);       // full lower face
+  ell('head', PRIO.head, [0, 0.4790, 0.0225], [0.0272, 0.0200, 0.0250]);       // chin mass
+  // the soft under-chin pad. Structurally this is also what makes the
+  // jaw→neck junction star-shaped again, which is what the head patch needs
+  // in order not to shatter into a faceted collar there (see buildAnatomy).
+  ell('head', PRIO.head, [0, 0.4655, 0.0070], [0.0300, 0.0185, 0.0270], 110);
+  cone('head', PRIO.head, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0375, 0.0355);            // neck
   for (const s of [1, -1]) {
-    ell('head', PRIO.head, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
+    ell('head', PRIO.head, m([0.0366, 0.5115, 0.0305], s), [0.0288, 0.0292, 0.0300]); // cheek apple
   }
 
   /* -- ears ----------------------------------------------------------------
@@ -153,14 +182,14 @@ export function bodySpec() {
    * a fin.                                                                  */
   for (const s of [1, -1]) {
     const EAR = 320, RIM = 460;
-    ell('head', PRIO.head, m([0.0678, 0.5290, -0.0055], s), [0.0055, 0.0225, 0.0170], EAR); // pinna plate
+    ell('head', PRIO.head, m([0.0736, 0.5290, -0.0055], s), [0.0055, 0.0225, 0.0170], EAR); // pinna plate
     // helix — up the front edge, over the top, down the back
-    cone('head', PRIO.head, m([0.0690, 0.5175, 0.0060], s), m([0.0705, 0.5390, -0.0010], s), 0.0030, 0.0036, RIM);
-    cone('head', PRIO.head, m([0.0705, 0.5390, -0.0010], s), m([0.0672, 0.5265, -0.0195], s), 0.0036, 0.0028, RIM);
+    cone('head', PRIO.head, m([0.0748, 0.5175, 0.0060], s), m([0.0763, 0.5390, -0.0010], s), 0.0030, 0.0036, RIM);
+    cone('head', PRIO.head, m([0.0763, 0.5390, -0.0010], s), m([0.0730, 0.5265, -0.0195], s), 0.0036, 0.0028, RIM);
     // antihelix — the inner Y-ridge; without it the concha is a flat dish
-    cone('head', PRIO.head, m([0.0655, 0.5210, -0.0015], s), m([0.0668, 0.5330, -0.0060], s), 0.0024, 0.0026, RIM);
+    cone('head', PRIO.head, m([0.0713, 0.5210, -0.0015], s), m([0.0726, 0.5330, -0.0060], s), 0.0024, 0.0026, RIM);
     // lobe
-    ell('head', PRIO.head, m([0.0655, 0.5140, -0.0025], s), [0.0052, 0.0072, 0.0078], 420);
+    ell('head', PRIO.head, m([0.0713, 0.5140, -0.0025], s), [0.0052, 0.0072, 0.0078], 420);
   }
 
   /* -- the face proper -----------------------------------------------------
@@ -174,13 +203,21 @@ export function bodySpec() {
    * philtrum, a small centred mouth, a chin that recedes rather than juts, and
    * no cheek/nose crease of any kind. Adult landmarks on a baby head is what
    * turns a face into a goblin.                                             */
-  cone('head', PRIO.head, [0, 0.5320, 0.0580], [0, 0.5110, 0.0650], 0.0058, 0.0086, 210); // nasal bridge
-  ell('head', PRIO.head, [0, 0.5062, 0.0702], [0.0112, 0.0100, 0.0108], 280);             // nose tip
-  ell('head', PRIO.head, [0, 0.4930, 0.0676], [0.0202, 0.0054, 0.0074], 480);             // upper lip
-  ell('head', PRIO.head, [0, 0.4846, 0.0672], [0.0184, 0.0068, 0.0086], 480);             // lower lip
-  ell('head', PRIO.head, [0, 0.4700, 0.0500], [0.0175, 0.0125, 0.0092], 120);             // soft chin
+  // Nasal bridge: short, low and *thin* at the root. An infant's nose has
+  // almost no bridge — the root between the eyes is flat, sometimes concave —
+  // and a long straight one is the difference between "button" and "beak".
+  cone('head', PRIO.head, [0, 0.5245, 0.0570], [0, 0.5128, 0.0648], 0.0042, 0.0080, 260);
+  ell('head', PRIO.head, [0, 0.5082, 0.0716], [0.0112, 0.0098, 0.0098], 300);             // nose tip, upturned
+  // Mouth: narrower and *fuller* than before. The old pair were 40 mm wide and
+  // 11 mm tall, which is an adult mouth; this is a small soft one, and the
+  // upper lip carries a tubercle rather than a pursed cupid's bow.
+  ell('head', PRIO.head, [0, 0.4948, 0.0700], [0.0182, 0.0064, 0.0086], 460);             // upper lip
+  ell('head', PRIO.head, [0, 0.4862, 0.0696], [0.0168, 0.0080, 0.0094], 460);             // lower lip
+  // Chin: a soft convex pad set well *back* from the lip line, so the profile
+  // runs lip → chin → throat as one continuous curve with no notch above it.
+  ell('head', PRIO.head, [0, 0.4772, 0.0432], [0.0218, 0.0142, 0.0128], 95);              // soft chin
   for (const s of [1, -1]) {
-    ell('head', PRIO.head, m([0.0102, 0.5022, 0.0648], s), [0.0062, 0.0052, 0.0068], 300); // ala
+    ell('head', PRIO.head, m([0.0104, 0.5046, 0.0664], s), [0.0060, 0.0048, 0.0062], 320); // ala
   }
 
   /* -- limbs --------------------------------------------------------------- */
@@ -197,16 +234,30 @@ export function bodySpec() {
 
     ell('hand' + side, PRIO.end, m([0.1640, 0.2830, 0.0460], s), [0.0215, 0.0235, 0.0155]); // palm
     ell('hand' + side, PRIO.end, m([0.1700, 0.2660, 0.0520], s), [0.0180, 0.0140, 0.0130]); // knuckle pad
-    // four little sausages. `d` fans them apart; each is a sharp round cone so
-    // the smooth union leaves the webbing between them instead of a mitten.
+    /* Four fingers.
+     *
+     * They were spaced 7.3 mm apart and 11.6 mm thick, so each one overlapped
+     * both its neighbours by more than half its diameter and the smooth union
+     * welded the set into a single paddle with four dents in the end: a mitten
+     * with stubs. Fingers only read as fingers if the *gap* between them is a
+     * real fraction of their width, so they are now 13.2 mm apart and 8.8 mm
+     * thick, leaving a 4.4 mm air gap down each cleft.
+     *
+     * Each finger is also two segments with a knuckle between them, angling
+     * down and then curling back toward the palm. A relaxed infant hand is
+     * never flat — the fingers are always half-closed — and the silhouette of
+     * that curl is most of what says "hand" at the size these are on screen.  */
     for (let f = 0; f < 4; f++) {
       const u = (f - 1.5) / 1.5;                     // -1 … +1, index → little
-      const bx = 0.1690 + u * 0.0110, by = 0.2665 - Math.abs(u) * 0.0016;
-      const tipLen = 0.0182 - Math.abs(u) * 0.0038;
-      cone('hand' + side, PRIO.end,
-        m([bx, by, 0.0520 + u * 0.0016], s),
-        m([bx + u * 0.0052, by - tipLen, 0.0560 + u * 0.0030], s),
-        0.0058 - Math.abs(u) * 0.0006, 0.0046 - Math.abs(u) * 0.0006, 500);
+      const bx = 0.1690 + u * 0.0132;
+      const by = 0.2668 - Math.abs(u) * 0.0020;
+      const bz = 0.0514 + u * 0.0014;
+      const seg = 0.0104 - Math.abs(u) * 0.0016;
+      const r0 = 0.0046 - Math.abs(u) * 0.0005;
+      const mx = bx + u * 0.0030, my = by - seg, mz = bz - 0.0016;
+      const tx = mx + u * 0.0026, ty = my - seg * 0.84, tz = mz - 0.0048;
+      cone('hand' + side, PRIO.end, m([bx, by, bz], s), m([mx, my, mz], s), r0, r0 * 0.91, 620);
+      cone('hand' + side, PRIO.end, m([mx, my, mz], s), m([tx, ty, tz], s), r0 * 0.91, r0 * 0.76, 620);
     }
     // thumb, set well apart and slightly opposed
     cone('hand' + side, PRIO.end, m([0.1530, 0.2800, 0.0470], s), m([0.1408, 0.2686, 0.0596], s),
@@ -488,20 +539,34 @@ export function buildDetail() {
     ring(shin[0], shin[1], 0.90, 0.0105, 0.0046, 0.055);
     ring(shin[0], shin[1], 0.74, 0.020, -0.0022, 0.058);
     // ear concha
-    dimple(m([0.0700, 0.5290, 0.0040], s), 0.0105, 0.0042, 0.0016);
-    // eye socket: a shallow anisotropic scoop so the eyeball sits *in* the face
-    blob(m([P.eyeX, P.eyeY - 0.0005, P.eyeZ + 0.008], s), [0.0290, 0.0210, 0.0335], 0.0140);
-    // the little pad under the eye that makes infants look sleepy-sweet
-    blob(m([P.eyeX, P.eyeY - 0.0180, P.eyeZ + 0.004], s), [0.0210, 0.0075, 0.0240], -0.0022);
+    dimple(m([0.0758, 0.5290, 0.0040], s), 0.0105, 0.0042, 0.0016);
+    /* Eye socket.
+     *
+     * This used to be a 14 mm-deep scoop 67 mm wide and 42 mm tall — bigger
+     * than the eye and reaching well above and below it. Under any key light
+     * that is a pit, and a pit around an eye reads as a *hollow*: sunken eyes
+     * plus eye bags, the two loudest ageing cues on a face. Infants have none
+     * of it; the orbit is packed with fat and the eyeball sits almost proud of
+     * the surface.
+     *
+     * So the scoop is now barely deeper than it needs to be for the lid shell
+     * to have somewhere to close into, and it is tight around the ball — it
+     * stops before it reaches the brow above or the cheek below.             */
+    blob(m([P.eyeX + 0.0010, P.eyeY - 0.0010, P.eyeZ + 0.0110], s), [0.0215, 0.0158, 0.0272], 0.0072);
+    // the full under-eye pad. Positive fullness, not a hollow: this is the
+    // padded lower lid every infant has and no adult keeps.
+    blob(m([P.eyeX - 0.0010, P.eyeY - 0.0190, P.eyeZ + 0.0085], s), [0.0235, 0.0105, 0.0250], -0.0040);
     // nostril — tucked under the tip, where an infant's actually are
-    dimple(m([0.0058, 0.5002, 0.0700], s), 0.0034, 0.0038);
-    // the faintest hint of a corner to the mouth. Anything deeper here reads
-    // as a smirk, and a smirking baby is a goblin.
-    dimple(m([0.0196, 0.4888, 0.0622], s), 0.0092, 0.0013);
+    dimple(m([0.0056, 0.5022, 0.0712], s), 0.0031, 0.0032);
+    // No mouth-corner dimple. It was 1.3 mm deep and it was enough: a crease at
+    // the corner of a closed mouth is read as a smirk, and a smirking baby is
+    // a goblin. The corner now comes from the lip volumes ending, nothing else.
   }
 
-  // neck crease (the "double chin" fold) with the roll below it
-  ring([0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.55, 0.0115, 0.0038, 0.055);
+  // neck crease (the "double chin" fold) with the roll below it. Shallow: it
+  // has to say "soft fold" and not "wattle", and it sits right under the chin
+  // where a deep one would read as jaw definition.
+  ring([0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.50, 0.0125, 0.0024, 0.055);
   // navel
   dimple([0, 0.3185, 0.0855], 0.0090, 0.0055, 0.0016);
   // gluteal cleft
@@ -511,16 +576,17 @@ export function buildDetail() {
     0.0130, 0.0020, 0.040);
   // philtrum — barely 4 mm on an infant, and shallow. A long one instantly
   // ages the face by twenty years.
-  curve([[0, 0.4982, 0.0762], [0, 0.4956, 0.0752]], 0.0032, 0.0020, 0.011);
-  // the lip line: a short, nearly level arc. The two lip volumes already leave
+  curve([[0, 0.5000, 0.0772], [0, 0.4978, 0.0766]], 0.0030, 0.0018, 0.010);
+  // The lip line: short, level and symmetric. The two lip volumes already leave
   // a valley here; this cuts the seam so it survives a matte SSS shader at
-  // portrait distance. No upward flick — a permanent smile is a smirk.
+  // portrait distance. Dead level at the corners — the old version lifted them
+  // 1.4 mm, and a mouth whose corners are permanently up is a smirk.
   const lip = [];
   for (let i = 0; i <= 14; i++) {
     const u = (i / 14) * 2 - 1;
-    lip.push([u * 0.0198, 0.4888 + u * u * 0.0014, 0.0722 - u * u * 0.0086]);
+    lip.push([u * 0.0174, 0.4904 + u * u * 0.0004, 0.0744 - u * u * 0.0094]);
   }
-  curve(lip, 0.0034, 0.0036, 0.022);
+  curve(lip, 0.0031, 0.0030, 0.019);
 
   /* -- evaluator ---------------------------------------------------------- */
   return function detail(x, y, z) {
@@ -600,8 +666,8 @@ export function zoneWeights(x, y, z, out) {
   const g = (dx, dy, dz, r) => Math.exp(-((dx * dx + dy * dy + dz * dz) / (r * r)));
   // face — mouth, cheeks, chin: where food ends up
   const face = Math.min(1,
-    g(x, y - 0.4980, z - 0.0480, 0.062) +
-    0.6 * g(x, y - 0.5320, z - 0.0300, 0.070));
+    g(x, y - 0.4990, z - 0.0560, 0.062) +
+    0.6 * g(x, y - 0.5350, z - 0.0420, 0.070));
   let hands = 0, feet = 0;
   for (const s of [1, -1]) {
     hands = Math.max(hands, g(x - 0.1660 * s, y - 0.2750, z - 0.0480, 0.052));
@@ -1089,7 +1155,7 @@ const LOD = [
  * the face occupies roughly 0.42–0.80 of it; `phi` 0.5 is dead ahead. Together
  * these give the face ~3.5× the vertex density of the back of the skull.
  */
-const HEAD_FOCUS = { theta: [0.62, 0.42], phi: [0.5, 0.46] };
+const HEAD_FOCUS = { theta: [0.60, 0.36], phi: [0.5, 0.46] };
 
 /**
  * Build the whole body.
@@ -1106,13 +1172,29 @@ export function buildAnatomy({ tier = 2, uvRepeat = 7 } = {}) {
   const detail = buildDetail();
   const common = { uvRepeat, detail };
 
+  /* The head is one star patch whose bottom third turns into a cylindrical
+   * loft down the neck (`tube`). The hand-over used to run from θ = 0.782 to
+   * 0.935 — 15 % of the patch, about thirteen rings — and across it the ray
+   * origin slid 63 mm down the neck axis while the ray direction swung from
+   * radial-about-the-skull to horizontal. Where the jaw undercuts, one ring
+   * would still catch the underside of the chin while the next slipped past it
+   * onto the neck, so adjacent rings landed 30–47 mm apart: a band of 56:1
+   * slivers at y ≈ 0.425–0.455 that rasterised as a hard faceted collar right
+   * under the chin.
+   *
+   * Two things fix it, and both were worth doing anyway. The submental pad
+   * added to the head spec fills the undercut, so the region is star-shaped
+   * about the head centre again and the rays no longer have anything to slip
+   * past. And the hand-over is now spread over 21 % of the patch instead of
+   * 15 %, with the collapse funnel starting later, so whatever residual motion
+   * is left is divided among half again as many rings. */
   const headPatch = buildPatch(field, {
     ...common, group: 'head', star: true,
-    center: [0, 0.5330, 0.0060],
+    center: [0, 0.5320, 0.0060],
     segs: lod.head[0], rings: lod.head[1], tMax: 0.20,
     focus: HEAD_FOCUS, sinkDepth: 0.010,
-    tube: { from: 0.782, to: 0.935, a: [0, 0.4700, 0.0035], b: [0, 0.4300, 0.0010] },
-    collapse: { from: 0.962, to: [0, 0.4180, 0.0010] }
+    tube: { from: 0.748, to: 0.958, a: [0, 0.4700, 0.0035], b: [0, 0.4300, 0.0010] },
+    collapse: { from: 0.974, to: [0, 0.4180, 0.0010] }
   });
 
   const bodyPatches = [
