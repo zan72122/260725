@@ -18,7 +18,13 @@ import * as THREE from 'three';
 import * as MAT from '../engine/materials.js';
 import { buildPatch, smoothstep as sstep, mirror as mir } from './anatomy.js';
 
-const band = (a, b, x) => sstep(a, a + 0.012, x) * (1 - sstep(b - 0.012, b, x));
+/**
+ * A soft slab between `a` and `b`. The ramp width matters: it is the distance
+ * over which the hem taper has to drop the shell from `inflate` to just under
+ * the skin, and the shells are lofted on a ~10–12 mm grid. Anything much under
+ * 20 mm and the drop lands inside a single quad, i.e. a vertical wall.
+ */
+const band = (a, b, x) => sstep(a, a + 0.020, x) * (1 - sstep(b - 0.020, b, x));
 
 /** Distance to a mirrored segment, used by the sleeve/leg masks. */
 function segDist(p, a, b) {
@@ -44,12 +50,18 @@ export const GARMENTS = {
       // the collar sits low and wide, well clear of the head shell's own rim —
       // an overlapping neckline leaves the two surfaces fighting and shows as
       // a ring of hard flaps under the chin
-      const bodyM = band(0.2430, 0.4390, y);
+      // …and it is a *torso* band, so it has to stop at the shoulder line. The
+      // sleeve patches are lofted round the arms and see this mask too: without
+      // the lateral limit the y-band alone declares the whole arm clothed down
+      // to the wrist, and the "sleeve" then ends wherever the arm patch runs
+      // out rather than where the garment does — an open, untapered rim of
+      // end-cap triangles folding over the hand.
+      const bodyM = band(0.2430, 0.4390, y) * (1 - sstep(0.0700, 0.0960, Math.abs(x)));
       // short sleeves: a capsule around the top of each upper arm
       let sl = 0;
       for (const s of [1, -1]) {
-        const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1080, 0.3640, 0.0160], s));
-        sl = Math.max(sl, 1 - sstep(0.030, 0.052, d));
+        const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1120, 0.3600, 0.0180], s));
+        sl = Math.max(sl, 1 - sstep(0.026, 0.050, d));
       }
       // neck hole
       const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4300) / 0.70) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.0455 ** 2)));
@@ -183,18 +195,28 @@ export class Outfit {
         capStart: spec.capStart, capEnd: spec.capEnd,
         tMax: spec.tMax, uvRepeat: this.uvRepeat,
         inflate: def.inflate,
-        // Taper the offset to zero at the hem, then keep going: the last
-        // millimetres of a garment have to end up *under* the skin, or the
-        // ragged triangle boundary left by the mask trim shows as a fringe of
-        // hard flat shards around every neckline and cuff.
-        detail: (x, y, z) => {
-          const mk = def.mask(x, y, z);
-          return -def.inflate * (1 - mk) - 0.0150 * (1 - sstep(0.30, 0.55, mk));
-        },
-        // an 8 mm-proud shell needs a correspondingly deep dominance sink, or
-        // the torso and sleeve shells interleave at the shoulder into a fan of
-        // hard pale shards
-        margin: 0.030, sinkDepth: 0.013,
+        // Taper the offset out across the mask ramp so the hem closes onto the
+        // body instead of ending as an open shell edge floating `inflate` above
+        // it. It must land *just* under the skin — 3 mm, not 30 — because the
+        // ramp is only one or two grid steps wide, so whatever depth we ask for
+        // here is also the height of the wall the mesh has to drop in a single
+        // step. Ask for 30 mm on a 12 mm grid and every hem becomes a ring of
+        // edge-on triangles diving through the body: the shard fringe.
+        detail: (x, y, z) => -(def.inflate + 0.0030) * (1 - def.mask(x, y, z)),
+        // …and the same argument applies to the sinks buildPatch applies on its
+        // own account, which are sized for a shell that lives *at* the skin.
+        // `floorLevel` caps every one of them: a garment vertex may hide under
+        // the skin, never dive through the body.
+        floorLevel: -0.0026,
+        // `sinkDepth` is only the *tie* sink — enough that two shells sharing a
+        // surface (the sleeve cap and the shirt shoulder) never z-fight, and no
+        // more. Burying is not its job: a shell that has left its own volume is
+        // buried by the far larger deficit sink, which `floorLevel` now stops
+        // at the skin instead of letting it dive through the body. Setting this
+        // deeper than `inflate` looks right and is not — it buries the whole
+        // sleeve, because the shoulder is exactly where the torso group wins
+        // the *anatomy* dominance and exactly where the sleeve has to be.
+        skim: true, margin: 0.120, sinkDepth: 0.0035,
         collapse: spec.collapse
       }));
     }
@@ -212,13 +234,49 @@ export class Outfit {
       pos.set(p.pos, vo * 3); nor.set(p.nor, vo * 3); uv.set(p.uv, vo * 2);
       if (p.parts) parts.set(p.parts, vo * nG);
       const n = p.pos.length / 3;
+
+      /* Trimming.
+       *
+       * The one rule that matters: *never cut an edge that is still above the
+       * skin.* Every triangle buildPatch produced is a legal piece of shell;
+       * the ones we do not want have already been driven under the skin by the
+       * mask taper and by buildPatch's dominance sink, and are therefore
+       * invisible. Deleting those is free. Deleting anything else leaves a raw
+       * open boundary at whatever height it happened to be — which is exactly
+       * the picket fence of hard flaps this whole file keeps growing comments
+       * about.
+       *
+       * So: drop what the mask has finished tapering, drop what is wholly
+       * buried, and keep everything else.                                     */
+      const mk = new Float32Array(n);
+      const ev = new Float32Array(n);
+      for (let v = 0; v < n; v++) {
+        const x = p.pos[v * 3], y = p.pos[v * 3 + 1], z = p.pos[v * 3 + 2];
+        mk[v] = def.mask(x, y, z);
+        ev[v] = this.field.eval(x, y, z);
+      }
+      const edge = (u, v) => Math.hypot(
+        p.pos[u * 3] - p.pos[v * 3], p.pos[u * 3 + 1] - p.pos[v * 3 + 1], p.pos[u * 3 + 2] - p.pos[v * 3 + 2]);
+      const cand = [], lens = [];
       for (let i = 0; i < p.idx.length; i += 3) {
-        const a = p.idx[i] + vo, b = p.idx[i + 1] + vo, c = p.idx[i + 2] + vo;
-        // averaged rather than "any vertex survives": a max test leaves a
-        // sawtooth of single triangles hanging past every hem
-        let sum = 0;
-        for (const v of [a, b, c]) sum += def.mask(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
-        if (sum / 3 > 0.02) idx.push(a, b, c);
+        const a = p.idx[i], b = p.idx[i + 1], c = p.idx[i + 2];
+        if ((mk[a] + mk[b] + mk[c]) / 3 <= 0.02) continue;
+        // wholly under the skin: it can only ever z-fight with the body
+        if (ev[a] < -0.0004 && ev[b] < -0.0004 && ev[c] < -0.0004) continue;
+        cand.push(a, b, c);
+        lens.push(Math.max(edge(a, b), edge(b, c), edge(c, a)));
+      }
+      // A last safety net, deliberately loose: a shell whose quads are 11 mm
+      // has no business carrying a 50 mm triangle, whatever produced it — that
+      // one chords across a concavity and surfaces through the far side. The
+      // limit is relative because garments are built at several LODs and a leg
+      // shell's quads are three times a torso shell's.
+      const sorted = Float64Array.from(lens).sort();
+      const med = sorted.length ? sorted[sorted.length >> 1] : 0.012;
+      const limit = Math.max(med * 3.0, 0.024);
+      for (let i = 0; i < lens.length; i++) {
+        if (lens[i] > limit) continue;
+        idx.push(cand[i * 3] + vo, cand[i * 3 + 1] + vo, cand[i * 3 + 2] + vo);
       }
       vo += n;
     }

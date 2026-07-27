@@ -657,7 +657,7 @@ export function buildPatch(field, opts) {
     group, segs, rings, star = false, center = [0, 0, 0],
     axis = null, capStart = 4, capEnd = 4,
     ref = [0, 0, 1], uvRepeat = 7, inflate = 0, collapse = null,
-    margin = 0.035, sinkDepth = 0.005, detail = null,
+    margin = 0.035, sinkDepth = 0.005, detail = null, floorLevel = null, skim = false,
     tMax = 0.42, uvOffsetV = 0, focus = null, tube = null
   } = opts;
 
@@ -774,7 +774,23 @@ export function buildPatch(field, opts) {
       // volume instead of skimming along theirs. This matters enormously once
       // the rig moves: a shell parked just under a neighbour's skin is invisible
       // in bind pose but flies out as a sheet the moment its bone rotates.
-      const mEff = margin * (1 - smoothstep(0.06, 0.42, rel0));
+      // …unless the shell is a *garment*. Skin patches tile the body one part
+      // each, so a retracted seam is covered by the neighbour that won it. A
+      // garment has only the patches its own groups name — a shirt has no leg
+      // patch — so retracting its torso shell along the hip and armpit seams
+      // does not hand those bands to anyone: it cuts two full-height slots out
+      // of the shirt. Garments skim instead, and the rig follows them there for
+      // free, because the per-vertex `parts` weights are sampled at the point
+      // the vertex actually lands on.
+      // A ray that reached `tMax` never found the surface at all — it set off
+      // down the length of the body instead of out through it (the sleeve
+      // patch's shoulder cap fires straight into the ribcage). Skimming such a
+      // ray would park the vertex 140 mm out in mid-air, so those retract all
+      // the way to their own volume and get buried there.
+      const uniFail = tUni >= tMax - 1e-9;
+      const mEff = skim
+        ? (uniFail ? 0 : margin)
+        : margin * (1 - smoothstep(0.06, 0.42, rel0));
       const lim = tOwn + mEff;
       // Because the smooth union is never inside a member volume, t <= tUni
       // always holds, so a clamped vertex can never pierce a neighbour.
@@ -800,13 +816,50 @@ export function buildPatch(field, opts) {
       // a concave fillet (the neck / armpit) and surface through the far side.
       // …but never push a vertex further in than it is deep, or a shell that
       // is already near the middle of a limb would exit through the far side.
-      const depth = Math.max(0, -field.eval(px, py, pz));
+      const cur = field.eval(px, py, pz);
+      // How far in the sink is allowed to go. Without a floor it is "not past
+      // the middle of the flesh you are standing on". With one, the floor is
+      // itself the guarantee, and the headroom is measured from the shell's own
+      // iso-level — a garment sits `inflate` *above* the skin, so `-cur` is
+      // zero there and the unfloored rule would cap every sink at 0.8 mm, which
+      // is precisely why a losing garment shell stayed on the surface and
+      // interleaved with its neighbour into a fan of shards.
+      const room = floorLevel != null
+        ? Math.max(0, cur - floorLevel)
+        : Math.max(0, -cur) * 0.7 + 0.0008;
       const sink = Math.min(
-        sinkDepth * smoothstep(0.34, 0.74, rel) + Math.min(0.030, deficit * 1.6),
-        depth * 0.7 + 0.0008);
+        sinkDepth * smoothstep(0.34, 0.74, rel) + Math.min(0.030, deficit * 1.6), room);
       const det = detail ? detail(px, py, pz) : 0;
       const push = det - sink;
       px += gnrm[0] * push; py += gnrm[1] * push; pz += gnrm[2] * push;
+
+      /* -- floor ------------------------------------------------------------
+       * Every displacement above (the dominance sink, the deficit sink, the
+       * caller's `detail`) is a *distance along the normal*, and none of them
+       * knows how deep the flesh underneath actually is. On the skin that is
+       * harmless: the shell sits at iso-0, so a vertex driven 30 mm inward is
+       * buried by whichever neighbouring patch won the surface, and the long
+       * thin triangle that reaches it is buried with it.
+       *
+       * A garment shell sits at iso-`inflate` — *outside* the skin — so the
+       * same triangle now starts 15 mm proud of the body and dives to 40 mm
+       * inside it, and everything it crosses on the way out of the skin is
+       * visible: a hard flat sliver at every hem. `floorLevel` says "this
+       * shell may hide under the skin, but no deeper than that", which turns
+       * every one of those dives into a short hem wall.                     */
+      if (floorLevel != null) {
+        let f = field.eval(px, py, pz);
+        for (let it = 0; it < 3 && f < floorLevel - 1e-5; it++) {
+          field.grad(px, py, pz, tmp);
+          const s = floorLevel - f;
+          px += tmp[0] * s; py += tmp[1] * s; pz += tmp[2] * s;
+          f = field.eval(px, py, pz);
+        }
+        // the stored normal is the field gradient, so refresh it where the
+        // vertex moved — a stale one is exactly how a hem ends up lit as if
+        // it faced away from the key.
+        field.grad(px, py, pz, gnrm);
+      }
 
       if (collapse) {
         // Bottom of a star patch: rather than let the shell tear its way out
