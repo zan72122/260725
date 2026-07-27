@@ -104,6 +104,25 @@ function roundedBox(w, h, d, r, seg = 5) {
   return geo;
 }
 
+/**
+ * Push a lathe's vertices in and out radially by a low-frequency wobble, so a
+ * woven or hand-made object is not a perfect solid of revolution. Preserves
+ * the lathe's UVs and vertical profile; only the radius moves.
+ */
+function wobbleLathe(geo, amp, lobes) {
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const r = Math.hypot(x, z);
+    if (r < 1e-5) continue;
+    const a = Math.atan2(z, x);
+    const k = 1 + (amp / r) * (Math.sin(a * lobes) + 0.6 * Math.sin(a * (lobes * 2 + 1) + y * 9));
+    p.setXYZ(i, x * k, y, z * k);
+  }
+  p.needsUpdate = true;
+  return geo;
+}
+
 /** Rounded-rectangle outline, centred on the origin, as a THREE.Shape path. */
 function roundedRectPath(path, w, h, r) {
   const x = w / 2, y = h / 2;
@@ -983,19 +1002,50 @@ export class BathActivity {
       new THREE.Vector2(0.118, 0.014), new THREE.Vector2(0.132, 0.140),
       new THREE.Vector2(0.140, 0.220), new THREE.Vector2(0.144, 0.238)
     ];
-    const geo = new THREE.LatheGeometry(pts, 30);
+    // 30 lathe segments on a 0.29 m-diameter bin puts a 30 mm flat on the
+    // silhouette, which at the `closeup` framing in 23-bath-wet is countable —
+    // §4 #5, and the reason D26 came back partial. A woven basket is also not
+    // a perfect cylinder of revolution, so the segment count goes up *and* the
+    // profile picks up a slight per-segment wobble.
+    const seg = this.tier >= 2 ? 64 : 44;
+    const geo = new THREE.LatheGeometry(pts, seg);
+    wobbleLathe(geo, 0.0016, 5);
+    geo.computeVertexNormals();
     this._disposables.push(geo);
     const b = new THREE.Mesh(geo, weave);
     b.castShadow = b.receiveShadow = true;
     g.add(b);
-    const rimGeo = new THREE.TorusGeometry(0.144, 0.011, 10, 34);
+    const rimGeo = new THREE.TorusGeometry(0.144, 0.011, this.tier >= 2 ? 16 : 10,
+      this.tier >= 2 ? 72 : 48);
     rimGeo.rotateX(Math.PI / 2);
     this._disposables.push(rimGeo);
     const rim = new THREE.Mesh(rimGeo,
       this._materials(MAT.makeCloth({ color: 0xd3b986, weave: 'plain', threads: 30, repeat: 4, seed: 83 })));
     rim.position.y = 0.238;
     rim.castShadow = true;
+    rim.receiveShadow = true;
     g.add(rim);
+
+    // The inside of a bin is dark at the bottom and there is no light path in
+    // to make it otherwise. Without this the interior renders as bright as the
+    // outside and the basket reads as a solid disc (§4 #28).
+    const aoGeo = new THREE.CylinderGeometry(0.100, 0.084, 0.150, seg, 1, true);
+    this._disposables.push(aoGeo);
+    const ao = new THREE.Mesh(aoGeo, this._materials(new THREE.MeshBasicMaterial({
+      color: 0x2a2018, transparent: true, opacity: 0.55, side: THREE.BackSide,
+      depthWrite: false
+    })));
+    ao.position.y = 0.075;
+    ao.renderOrder = 1;
+    g.add(ao);
+    const floorGeo = new THREE.CircleGeometry(0.104, seg);
+    floorGeo.rotateX(-Math.PI / 2);
+    this._disposables.push(floorGeo);
+    const floor = new THREE.Mesh(floorGeo, this._materials(
+      MAT.makeCloth({ color: 0x7d6a4c, weave: 'plain', threads: 40, repeat: 3, seed: 84 })));
+    floor.position.y = 0.004;
+    floor.receiveShadow = true;
+    g.add(floor);
   }
 
   /**

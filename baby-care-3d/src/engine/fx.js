@@ -116,7 +116,8 @@ const KINDS = {
     capacity: 90, life: [1.1, 1.9], size: [0.030, 0.055],
     speed: [0.12, 0.30], spread: 0.5, dir: [0, 1, 0],
     gravity: 0, rise: 0.10, drag: 0.9, wobble: 0.045, wobbleFreq: 3.1,
-    spin: [-1.2, 1.2], grow: 1.35, pulse: 7,
+    // Same reasoning as `zzz`: an upside-down heart is not a heart.
+    roll: [-0.34, 0.34], spin: [-0.30, 0.30], grow: 1.35, pulse: 7,
     fadeIn: 0.14, fadeOut: 0.45, alpha: 0.95, palette: PAL.heart, soft: 0.08
   },
   zzz: {
@@ -124,7 +125,11 @@ const KINDS = {
     capacity: 40, life: [1.8, 2.8], size: [0.038, 0.062],
     speed: [0.05, 0.12], spread: 0.35, dir: [0.35, 1, 0],
     gravity: 0, rise: 0.05, drag: 0.7, wobble: 0.05, wobbleFreq: 1.5,
-    spin: [-0.4, 0.4], grow: 1.6, sprite: () => glyphTexture('Z'),
+    // A letter has an up. Roll is held inside a lazy 12° tilt and the spin is
+    // slow enough that it never leaves it within a 2.8 s life, so the glyph
+    // always reads as a Z from any camera.
+    roll: [-0.21, 0.21], spin: [-0.09, 0.09], grow: 1.6,
+    sprite: () => glyphTexture('Z'),
     fadeIn: 0.18, fadeOut: 0.5, alpha: 0.85, palette: PAL.zzz, soft: 0.10
   },
   dust: {
@@ -566,7 +571,16 @@ class Layer {
         this.aQuat[i4] = _q.x; this.aQuat[i4 + 1] = _q.y;
         this.aQuat[i4 + 2] = _q.z; this.aQuat[i4 + 3] = _q.w;
       } else {
-        this.aQuat[i4] = rng.range(0, Math.PI * 2);          // roll
+        // Billboard roll. Random over the full circle is right for a sparkle
+        // or a bubble and *wrong* for anything with a readable orientation: a
+        // `zzz` glyph spawned at 90° draws a capital N, which is exactly what
+        // ended up printed across the crib mattress in `52-sleep-lamp-off` and
+        // got filed as placeholder debug text. Kinds whose silhouette has an
+        // up declare a `roll` range and stay within it.
+        const rollRange = o.roll || d.roll;
+        this.aQuat[i4] = rollRange
+          ? rng.range(rollRange[0], rollRange[1])
+          : rng.range(0, Math.PI * 2);
         this.spin[i3] = rng.range(spinRange[0], spinRange[1]);
         this.aQuat[i4 + 1] = this.aQuat[i4 + 2] = 0;
         this.aQuat[i4 + 3] = 1;

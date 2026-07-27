@@ -97,14 +97,24 @@ const GradeShader = {
      * skin flat-tops one channel long before the pixel is anywhere near white,
      * and a hard clamp at 1.0 is what turns a lit cheek into a paper cut-out.
      *
-     * `1 - (1-k)·exp(-(c-k)/(1-k))` is a soft shoulder that is C1-continuous at
-     * the knee, strictly monotonic above it, and asymptotic to exactly 1.0 — so
-     * a channel *never* flat-tops, the luminance gradient across a highlight
-     * survives, and the colour desaturates toward white as it brightens, which
-     * is what a film highlight actually does. It is also what lets the frame
-     * carry a genuine near-white without a featureless region (§4 #46).
+     * The fix is a shoulder that maps [uShoulder, uWhite] onto [uShoulder, 1.0]
+     * with `s(2-s)` — monotonic, zero slope at the white point so there is no
+     * hard corner, and near-unity slope at the knee so midtones are untouched.
+     * A channel therefore desaturates smoothly toward white as it brightens
+     * (which is what a film highlight actually does) instead of flat-topping,
+     * and the luminance gradient across a highlight survives.
+     *
+     * `uWhite` is the *display* value that maps to 1.0. It has to be tuned
+     * against what the render actually produces, not chosen for tidiness. AgX
+     * is extremely compressive at the top — measured, the sky through the
+     * window lands at linear 4.3 even at a sky gain of 7.0, which AgX puts at
+     * display 0.936, and a naive asymptotic shoulder then pulled that *down* to
+     * 0.879. At a white point of 1.22 the same pixel lands at 0.964, i.e. the
+     * frame finally carries a genuine near-white — while the 0.09% of frame 51
+     * that exceeds 1.22 is the only region that clips at all (§4 #46).
      */
-    uShoulder:    { value: 0.86 },
+    uShoulder:    { value: 0.84 },
+    uWhite:       { value: 1.22 },
     // Split toning — the single most useful lever for D38. A warm key against
     // a neutral shadow gives an image luminance range but no *chromatic* range,
     // and that is what makes a render read as "correctly exposed" rather than
@@ -131,7 +141,7 @@ const GradeShader = {
     uniform sampler2D tDepth;
     uniform float uTime, uExposure, uVignette, uGrain, uAberration;
     uniform float uDofStrength, uFocus, uFocusRange, uNear, uFar;
-    uniform float uSaturation, uContrast, uWarmth, uSplit, uBlack, uShoulder;
+    uniform float uSaturation, uContrast, uWarmth, uSplit, uBlack, uShoulder, uWhite;
     uniform vec2  uResolution;
     uniform vec3  uLift, uGain, uShadowTint, uHighTint;
 
@@ -298,9 +308,10 @@ const GradeShader = {
       // (contrast, the split tone's high band, the warmth tilt) can push a
       // channel back onto the ceiling. See uShoulder above.
       {
-        vec3 kk = vec3(uShoulder);
-        vec3 over = max(col - kk, vec3(0.0));
-        col = min(col, kk) + (1.0 - kk) * (1.0 - exp(-over / max(vec3(1e-3), 1.0 - kk)));
+        float kk = uShoulder;
+        float span = max(1e-3, uWhite - kk);
+        vec3 sh = clamp((col - vec3(kk)) / span, 0.0, 1.0);
+        col = min(col, vec3(kk)) + (1.0 - kk) * (sh * (2.0 - sh));
       }
 
       // vignette ------------------------------------------------------------
@@ -633,7 +644,7 @@ export class RenderPipeline {
   /** Nudge the grade toward a mood (day / evening / night / bath). */
   setGrade({
     lift, gain, saturation, contrast, warmth, vignette, exposure,
-    shadowTint, highTint, split, black, shoulder
+    shadowTint, highTint, split, black, shoulder, white
   }) {
     const u = this.grade.uniforms;
     if (lift) u.uLift.value.fromArray(lift);
@@ -648,6 +659,7 @@ export class RenderPipeline {
     if (split !== undefined) u.uSplit.value = split;
     if (black !== undefined) u.uBlack.value = black;
     if (shoulder !== undefined) u.uShoulder.value = shoulder;
+    if (white !== undefined) u.uWhite.value = white;
   }
 
   resize() {

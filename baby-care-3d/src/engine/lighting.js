@@ -188,7 +188,7 @@ export const MOODS = {
     // Sun up, everything else down: 1.98 m of elevation over 7.2 m of run is
     // 15.4°, so a 0.45 m stool throws 1.6 m of shadow, and at the ratio below
     // that shadow is now a value you can actually see.
-    keyColor: 0xffab68, keyIntensity: 5.05, keyPos: [-6.9, 2.10, 2.85],
+    keyColor: 0xffb072, keyIntensity: 5.05, keyPos: [-6.9, 2.10, 2.85],
     // Fill and hemi are pulled *down* hard. Late afternoon is a high-contrast
     // hour; carrying `day`'s ambient into it is exactly what made the two moods
     // indistinguishable, because ambient is the half of the image that does not
@@ -212,7 +212,7 @@ export const MOODS = {
      * shadow side, which at 4 pm in a west-facing room is a whole hemisphere
      * of blue and is the only thing in the frame that can put a second hue on
      * the screen. */
-    fillColor: 0x9dbcf0, fillIntensity: 0.56, fillPos: [4.4, 2.4, 3.2],
+    fillColor: 0x99baf2, fillIntensity: 0.68, fillPos: [4.4, 2.4, 3.2],
     // 1.85 of warm rim from behind was the largest single ambient term in the
     // mood and it was *warm*, so it filled the shadow side with the same hue as
     // the key. A rim exists to draw a line round the subject; at 0.78 it still
@@ -233,12 +233,12 @@ export const MOODS = {
       // above neutral, the highlight tint is halved, and the shadow tint is
       // pushed *further* blue rather than the whole frame being pushed warm —
       // same overall warmth, twice the chromatic range.
-      saturation: 1.06, contrast: 1.14, warmth: 0.014, vignette: 0.24, exposure: 1.19,
+      saturation: 1.06, contrast: 1.14, warmth: 0.010, vignette: 0.24, exposure: 1.22,
       shadowTint: [0.845, 0.935, 1.21], highTint: [1.025, 1.0, 0.955], split: 1.05,
       // The deepest black point of the four daylight-ish moods: golden hour is
       // the one time of day whose whole identity is a long dark shadow next to
       // a hot rim of sun.
-      black: 0.084
+      black: 0.078
     },
     // 0.009 over the 6 m of the room is a 5% amber veil on the far wall, which
     // is most of what read as "slightly hazy". Thinner, and less orange, so it
