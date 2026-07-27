@@ -145,8 +145,7 @@ export const GARMENTS = {
         const d = segDist([x, y, z], mir([0.0420, 0.2640, 0.0040], s), mir([0.0470, 0.2060, 0.0020], s));
         // …and a *lower* bound, or the leg capsule's own end cap carries the
         // shorts down the shin to the ankle and straight through the socks
-        leg = Math.max(leg, (1 - sstep(0.042, 0.068, d))
-          * (1 - sstep(0.264, 0.294, y)) * sstep(0.1600, 0.1900, y));
+        leg = Math.max(leg, (1 - sstep(0.042, 0.068, d)) * sstep(0.1600, 0.1900, y));
       }
       return uni(uni(hip, seat), leg);
     },
@@ -177,8 +176,12 @@ export const GARMENTS = {
       let cuff = 0;
       for (const s of [1, -1]) {
         const d = segDist([x, y, z], mir([0.0380, 0.2560, 0.0040], s), mir([0.0430, 0.2140, 0.0020], s));
-        cuff = Math.max(cuff, (1 - sstep(0.046, 0.074, d))
-          * (1 - sstep(0.252, 0.284, y)) * sstep(0.1740, 0.2020, y));
+        // No upper bound: the waistband already covers everything above the
+        // hip, and a mask edge *inside* a covered region is not free — it makes
+        // the leg shell taper away right where the torso shell has retracted
+        // out of the hip socket, and the two of them together leave a hole in
+        // the side of the nappy with bare skin showing through it.
+        cuff = Math.max(cuff, (1 - sstep(0.046, 0.074, d)) * sstep(0.1740, 0.2020, y));
       }
       return uni(uni(waist, pad), cuff);
     },
@@ -404,11 +407,18 @@ export class Outfit {
         if (lens[i] > limit) continue;
         const a = cand[i * 3], b = cand[i * 3 + 1], c = cand[i * 3 + 2];
         if (lens[i] > med * 1.8) {
+          // Two ways an oversized triangle is illegitimate, and only two.
+          // Either its corners stand at very different heights above the skin —
+          // it is a *hem* triangle stretched across the taper, and it rasterises
+          // as a flap standing off the collar or the sleeve — or its centroid
+          // bulges away from the surface, which means it chords a concavity.
+          // An oversized triangle that is neither is an end-cap quad doing its
+          // job (the nappy's seat is made of them) and must be kept.
+          if (Math.max(ev[a], ev[b], ev[c]) - Math.min(ev[a], ev[b], ev[c]) > 0.005) continue;
           const cx = (p.pos[a * 3] + p.pos[b * 3] + p.pos[c * 3]) / 3;
           const cy = (p.pos[a * 3 + 1] + p.pos[b * 3 + 1] + p.pos[c * 3 + 1]) / 3;
           const cz = (p.pos[a * 3 + 2] + p.pos[b * 3 + 2] + p.pos[c * 3 + 2]) / 3;
-          const bulge = this.field.eval(cx, cy, cz) - (ev[a] + ev[b] + ev[c]) / 3;
-          if (bulge > 0.006) continue;
+          if (this.field.eval(cx, cy, cz) - (ev[a] + ev[b] + ev[c]) / 3 > 0.006) continue;
         }
         idx.push(a + vo, b + vo, c + vo);
       }
@@ -562,7 +572,7 @@ function mergeUsed(geo) {
 export const SHELL_PATCHES = {
   torso: {
     axis: [[0, 0.2520, -0.0020], [0, 0.3050, 0.0060], [0, 0.3620, 0.0060], [0, 0.4300, 0.0010]],
-    segs: 54, rings: 44, capStart: 6, capEnd: 3, tMax: 0.24
+    segs: 54, rings: 44, capStart: 14, capEnd: 3, tMax: 0.24
   },
   head: {
     star: true, center: [0, 0.5330, 0.0060], segs: 46, rings: 34, tMax: 0.22,

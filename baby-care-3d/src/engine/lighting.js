@@ -168,10 +168,10 @@ export const MOODS = {
     // amber, and the lamp face is all but switched off — nobody has a bedside
     // lamp on at midday, and at 0.18 it was putting a tungsten cast on the
     // shaded side of every prop in the brightest mood in the game.
-    envCeil: 0xf2f6ff, envCeilI: 0.255,
+    envCeil: 0xf2f6ff, envCeilI: 0.222,
     envFloor: 0xf2ded8, envFloorI: 0.105,
     envWindow: 0xdaeeff, envWindowI: 1.72,
-    envFill: 0xdfe8ff, envFillI: 0.455,
+    envFill: 0xdfe8ff, envFillI: 0.400,
     envLamp: 0xffd9a0, envLampI: 0.055,
 
     // Midday: the sun is high and close to neutral. 0xfff0d4 is 4500 K — an
@@ -206,7 +206,7 @@ export const MOODS = {
     // an orange frame. Measured: this is what moves `day` from R:G 1.52 to
     // roughly 1.1, and it does it without desaturating anything, because the
     // second hue is arriving as light rather than being removed in the grade.
-    fillColor: 0xafcdff, fillIntensity: 1.02, fillPos: [4.6, 3.4, 3.0],
+    fillColor: 0xafcdff, fillIntensity: 0.90, fillPos: [4.6, 3.4, 3.0],
     // The rim was 0xffe2c4 — a warm kicker, in the mood whose whole problem is
     // that everything in it is warm. Outdoors at noon the light wrapping the
     // back of a subject is sky, not sun.
@@ -245,9 +245,14 @@ export const MOODS = {
       // grade would have finished it off. The near-white this mood is supposed
       // to carry comes from `SKY.day.gain`, which is a property of one surface,
       // not from lifting the whole frame.
-      saturation: 1.06, contrast: 1.13, warmth: -0.040, vignette: 0.13, exposure: 1.12,
+      // Down again from 1.12. The cool rig delivered the hue (R:G 1.52 -> 1.17)
+      // and a genuine near-white (0.27% over 0.95, the first anywhere in the
+      // build) but it also took the median to 0.607 with only 1.33% of the
+      // frame under 0.15 — brighter than the mood needs and, more to the
+      // point, short of a real black. Level down, black point deeper.
+      saturation: 1.06, contrast: 1.14, warmth: -0.040, vignette: 0.13, exposure: 1.055,
       shadowTint: [0.905, 0.965, 1.155], highTint: [0.985, 1.0, 1.030], split: 0.95,
-      black: 0.108, white: 1.09
+      black: 0.138, white: 1.09
     },
     fog: { color: 0xe6eefb, density: 0.004 }
   },
@@ -384,20 +389,25 @@ export const MOODS = {
     envFill: 0xb2c2ee, envFillI: 0.26,
     envLamp: 0xffc182, envLampI: 1.02,
 
-    keyColor: 0xc7c0e8, keyIntensity: 1.72, keyPos: [-4.2, 3.4, 2.8],
-    fillColor: 0x93a8e4, fillIntensity: 0.52, fillPos: [4.0, 2.2, 2.6],
+    // Measured against golden it was still only 0.068 of R:G and 0.027 of
+    // median away — two moods, one hour. Everything daylit comes down another
+    // 15%: at dusk the sky is the *weakest* source in the room and the lamp is
+    // the strongest, and until that ordering is true the frame reads as a
+    // slightly dim afternoon.
+    keyColor: 0xc2bce8, keyIntensity: 1.42, keyPos: [-4.2, 3.4, 2.8],
+    fillColor: 0x8ba0e2, fillIntensity: 0.44, fillPos: [4.0, 2.2, 2.6],
     rimColor: 0xbccdff, rimIntensity: 0.66, rimPos: [1.6, 3.6, -4.6],
-    hemiSky: 0xa8bcf2, hemiGround: 0xd8ac98, hemiIntensity: 0.155,
-    envIntensity: 0.230, shadowSpan: 5.2, practicalTrim: 0.185,
+    hemiSky: 0xa8bcf2, hemiGround: 0xd0a494, hemiIntensity: 0.135,
+    envIntensity: 0.205, shadowSpan: 5.2, practicalTrim: 0.200,
     grade: {
       // `warmth` was +0.05, the largest warm tilt of any preset, sitting on top
       // of an already-amber key. It goes slightly negative: the *frame* is
       // cool and the lamp is what is warm in it, which is why the highlight
       // tint stays warm while everything else moves the other way.
-      gain: [0.998, 1.000, 1.018], lift: [0.003, 0.003, 0.010],
-      saturation: 1.07, contrast: 1.13, warmth: -0.012, vignette: 0.33, exposure: 1.05,
-      shadowTint: [0.815, 0.910, 1.235], highTint: [1.045, 1.0, 0.935], split: 1.18,
-      black: 0.086, white: 1.12
+      gain: [0.984, 1.000, 1.034], lift: [0.003, 0.003, 0.010],
+      saturation: 1.07, contrast: 1.13, warmth: -0.030, vignette: 0.33, exposure: 0.96,
+      shadowTint: [0.805, 0.905, 1.250], highTint: [1.050, 1.0, 0.930], split: 1.20,
+      black: 0.094, white: 1.12
     },
     fog: { color: 0xcfc9e8, density: 0.014 }
   },
@@ -543,15 +553,15 @@ export const WEATHER = {
      * third — a rain cloud is dimmer than blue sky plus a sun, not dimmer than
      * a lit interior wall. */
     key: 0.21, keyTint: 0xa6bacc, keyMix: 0.93,
-    fill: 1.80, fillTint: 0xb0c4e0, fillMix: 0.66,
+    fill: 1.55, fillTint: 0xb0c4e0, fillMix: 0.66,
     rim: 0.50, rimTint: 0xbac8dc, rimMix: 0.88,
-    hemi: 2.00, hemiSky: 0xa4b6cc, hemiGround: 0x96989f, hemiMix: 0.78,
-    env: 1.38, envDesat: 0.80, envGrey: 0x969ca5,
+    hemi: 1.70, hemiSky: 0xa4b6cc, hemiGround: 0x96989f, hemiMix: 0.78,
+    env: 1.24, envDesat: 0.80, envGrey: 0x969ca5,
     shadowScale: 2.1,
     fogTint: 0x9ea6b2, fogMix: 0.80, fogDensity: 1.15,
     grade: {
       gain: [0.982, 1.000, 1.030],
-      saturation: 0.78, contrast: 0.93, warmth: -0.085, exposure: 1.10,
+      saturation: 0.78, contrast: 0.96, warmth: -0.085, exposure: 1.10,
       vignette: 0.05, black: -0.008, split: 0.85,
       shadowTint: [0.940, 0.985, 1.080], highTint: [0.950, 0.985, 1.062]
     }

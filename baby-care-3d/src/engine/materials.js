@@ -1114,7 +1114,7 @@ export function makeBabySkin(opts = {}) {
   const mat = makeSkin(opts);
   const extra = {
     uDirt:      { value: new THREE.Vector4(0, 0, 0, 0) },
-    uDirtColor: { value: new THREE.Color(0x6b5843) },
+    uDirtColor: { value: new THREE.Color(0x4a4034) },
     uWet:       { value: 0 },
     uBlush:     { value: 0 },
     uGrimeScale:{ value: 9.0 }
@@ -1183,8 +1183,17 @@ export function makeBabySkin(opts = {}) {
          * change that carries no information because the hue never moved. Same
          * note as makeMuck() above — dirty is darker *and* greyer, or it reads
          * as shadow. */
-        vec3 bcGrime = uDirtColor * (0.55 + bcN * 0.55);
-        bcGrime = mix(bcGrime, vec3(dot(bcGrime, vec3(0.2126, 0.7152, 0.0722))), 0.40);
+        /* 0.40 was not enough desaturation to escape the skin's own hue. A
+         * forced-magenta test proved the whole chain — attribute, varying,
+         * uniform, mix — is live end to end, and that the face is visually
+         * identical at amount 0, 0.75 and 1.0 with the shipped brown. So the
+         * mix fraction was never the problem: 0x6b5843 is linear ~(0.148,
+         * 0.098, 0.056), which under an amber key lands within a few degrees
+         * of lit skin. Grime now pushes most of the way to neutral and drops
+         * value hard, so it separates on lightness rather than on hue — which
+         * is what survives being lit by a warm key. */
+        vec3 bcGrime = uDirtColor * (0.42 + bcN * 0.42);
+        bcGrime = mix(bcGrime, vec3(dot(bcGrime, vec3(0.2126, 0.7152, 0.0722))), 0.78);
         diffuseColor.rgb = mix(diffuseColor.rgb, bcGrime, bcDirt * 0.92);
         // wet skin is darker and a touch more saturated
         diffuseColor.rgb *= mix(1.0, 0.86, uWet);
