@@ -479,6 +479,50 @@ export function wood({
     // tone is the giveaway that it is a texture and not a floor.
     const plankTone = (v) => (planks ? hash2(Math.floor(v * rows) % rows, 7, seed + 3) - 0.5 : 0);
 
+    /* Relief across the boards — and the reason the floor had a *bright* dotted
+     * hairline down the middle of every plank joint at every distance.
+     *
+     * The joint used to be `+ seam(v) * 1.05` in the height field, i.e. a
+     * symmetric bump. Its two flanks tilt hard in opposite directions and its
+     * crest, by definition, comes back to dead flat — so what the shader saw
+     * was a one-to-two-texel horizontal facet, normal straight up, sandwiched
+     * between two steeply tilted ones, running the whole length of the room.
+     * Under a 4-intensity low key with clearcoat on top that facet returns a
+     * specular value 30/255 above its neighbours, and because it is about one
+     * pixel wide it alternates on and off with the pixel grid: a dotted bright
+     * line, which is what read as stitching / corduroy at every distance,
+     * including in the sharp foreground where no amount of filtering was ever
+     * going to be the explanation.
+     *
+     * A fitted floor has no bump at the joint. What it has is (a) each board
+     * very slightly crowned, and (b) adjacent boards sitting a fraction of a
+     * millimetre proud of one another. Both are modelled here, and crucially
+     * the board-to-board step has its *steepest* slope exactly at the joint —
+     * there is no flat facet anywhere near it, so there is nothing for the key
+     * to catch. The dark line of the joint itself stays where it belongs, in
+     * the albedo and the roughness.
+     */
+    const boardLift = (k) => hash2(((k % rows) + rows) % rows, 11, seed + 5) - 0.5;
+    const relief = (v) => {
+      if (!planks) return 0;
+      const f = v * rows;
+      const i = Math.floor(f), t = f - i;
+      const w = 0.11;                       // half the ramp, in board widths
+      let step;
+      if (t < w)          step = boardLift(i - 1) + (boardLift(i) - boardLift(i - 1)) * smooth(0.5 + t / (2 * w));
+      else if (t > 1 - w) step = boardLift(i) + (boardLift(i + 1) - boardLift(i)) * smooth((t - (1 - w)) / (2 * w));
+      else                step = boardLift(i);
+      // A board is crowned, not flat: one very shallow arc per board, so the
+      // key rakes across it and the floor has form at metre scale.
+      const crown = 0.5 - 0.5 * Math.cos(t * Math.PI * 2);
+      // …plus the eased edge every board is milled with. This one *is*
+      // symmetric, so it does have a flat point — but it is at the bottom of a
+      // dish, where the albedo is already at its darkest and the roughness at
+      // its highest, so it deepens the joint instead of putting a highlight in
+      // the middle of it.
+      return step * 1.55 + crown * 0.25 - seam(v) * 0.42;
+    };
+
     const map = generate(size, (u, v, out) => {
       let t = rings(u, v);
       // knots
@@ -499,7 +543,7 @@ export function wood({
     // sparkle, and the normal map is where grazing-angle aliasing hurts most
     // (the specular lobe swings the full width of the highlight per pixel).
     const normal = normalFromHeight(size, 1.15, (u, v) =>
-      rings(u, v) * 0.22 + seam(v) * 1.05
+      rings(u, v) * 0.22 + (planks ? relief(v) : seam(v) * 1.05)
       + (planks ? 0 : ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085));
 
     const rough = generate(size, (u, v, out) => {
@@ -713,7 +757,10 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
     });
     // 4.2 sparkled: at rug distance a tuft is 2–3 screen pixels and a normal
     // map that strong aliases into glitter. 3.4 still rakes properly.
-    const normal = normalFromHeight(size, 3.4, height);
+    // …and once the tufts were made twice as big, 3.4 became twice as loud —
+    // the per-tuft light/dark swing in the establishing shot was competing with
+    // the baby for attention. 2.8 keeps the rake and lets the pile sit down.
+    const normal = normalFromHeight(size, 2.8, height);
     const rough = generate(size, (u, v, out) => {
       // tuft tops catch a faint sheen; the roots are pure scatter. The drift
       // field rides along, because an evenly-sheened rug is as much of a tell

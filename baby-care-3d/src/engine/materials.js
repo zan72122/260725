@@ -403,14 +403,42 @@ export function makeWood({
              * cross-line, which is what the remaining regular banding across
              * the floor actually was. A butt joint in a fitted floor is a
              * hairline: 0.0025 of a board is ~3 mm. */
-            joint = 1.0 - smoothstep(0.0, 0.0025, min(fract(bx), 1.0 - fract(bx)));
+            /* Analytic lines have no mip chain, so this has to antialias
+             * itself or it turns into a dotted crawl at grazing angles. The
+             * half-width is the greater of the real 3 mm and half the change in
+             * `bx` across one pixel, which makes the joint fade out smoothly to
+             * a uniform slight darkening once it is finer than the display can
+             * carry, instead of flickering on and off. */
+            float bw = max(0.0025, fwidth(bx) * 0.5);
+            joint = (1.0 - smoothstep(0.0, bw, min(fract(bx), 1.0 - fract(bx))))
+                  * min(1.0, 0.0025 / bw);
             return vec2(uv.x + bh * 6.31 + rh * 2.19, uv.y);
           }
         `)
         .replace('#include <map_fragment>', /* glsl */`
+          /* THE bright dotted hairline down every plank joint (defect D22, the
+           * one that survived four passes of retuning the texture itself).
+           *
+           * `wdDetile` slides the sample window along u by a hash of the *plank
+           * row*, which is `floor(uv.y * uPlankRows)` — a step function. So on
+           * the one pixel row where a plank boundary crosses the quad, dFdy of
+           * the shifted uv is not "half a texel", it is six whole tile widths.
+           * The hardware reads that as "this pixel covers the entire texture"
+           * and hands back the 1×1 mip, i.e. the flat average of the map, which
+           * is ~30/255 brighter than the joint it lands in. Hence a bright line
+           * exactly at every plank boundary, at every distance including the
+           * sharp foreground; hence the 2-pixel dotting, because derivatives are
+           * evaluated per 2×2 quad and only the quads the boundary actually
+           * crosses are affected; and hence its total indifference to every
+           * change made to the normal map, the ring model and the seam profile.
+           *
+           * The de-tile is a pure translation, so the honest derivative is the
+           * one from the *un*shifted uv. textureGrad hands the hardware that
+           * instead, and the LOD is correct everywhere. */
           float wdJoint;
           vec2 wdUv = wdDetile(vMapUv, wdJoint);
-          diffuseColor *= texture2D( map, wdUv );
+          vec2 wdDx = dFdx(vMapUv), wdDy = dFdy(vMapUv);
+          diffuseColor *= textureGrad( map, wdUv, wdDx, wdDy );
           // The dark line of the butt joint itself. 0.55 was a 45% black line —
           // as strong as the plank seam, so the two read as equal partners in a
           // grid instead of "long boards, occasionally jointed". A butt joint
@@ -420,7 +448,7 @@ export function makeWood({
         .replace('#include <roughnessmap_fragment>', /* glsl */`
           float roughnessFactor = roughness;
           #ifdef USE_ROUGHNESSMAP
-            vec4 texelRoughness = texture2D( roughnessMap, wdUv );
+            vec4 texelRoughness = textureGrad( roughnessMap, wdUv, wdDx, wdDy );
             roughnessFactor *= texelRoughness.g;
           #endif
           roughnessFactor = clamp(roughnessFactor + wdJoint * 0.16, 0.04, 1.0);

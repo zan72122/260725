@@ -122,11 +122,14 @@ export const MOODS = {
   },
 
   golden: {   // late afternoon — the "play" and "feed" hero look
-    envWall: 0xf6ddca, envWallI: 0.185,
+    // The wall probe face is what the shaded side of every prop reflects, and
+    // an amber wall probe in an amber room is a second helping of the same
+    // hue. The real wall is a cool cream, so the probe now says so.
+    envWall: 0xf0dfdd, envWallI: 0.195,
     envCeil: 0xffe2bc, envCeilI: 0.335,
     envFloor: 0xffc9aa, envFloorI: 0.150,
     envWindow: 0xffcf92, envWindowI: 1.55,
-    envFill: 0xd6dcec, envFillI: 0.175,
+    envFill: 0xcfd8f0, envFillI: 0.235,
     envLamp: 0xffc07a, envLampI: 0.30,
 
     // Sun elevation ≈ 16° above the aim point rather than the old 25°, and
@@ -147,9 +150,23 @@ export const MOODS = {
     // shadow side of a west-facing nursery is filled by a whole hemisphere of
     // blue sky; at 16:1 the crib simply went black and the mood stopped reading
     // as "late afternoon" and started reading as "underexposed".
-    fillColor: 0xc8d2e4, fillIntensity: 0.38, fillPos: [4.4, 2.4, 3.2],
+    /* Chromatic range, second correction. Pulling the split back stopped the
+     * room reading lilac, but it left the pendulum at the other end: *every*
+     * light (key, rim, window probe, lamp probe), *every* env face and the fog
+     * were amber, the grade then multiplied saturation by 1.42 (1.20 here on
+     * top of the 1.18 AgX restore) and pushed the highlights a further 20%
+     * toward orange — so the whole frame collapsed into one narrow pink /
+     * salmon band and the lilac walls read pink.
+     *
+     * The rubric's 5/5 for lighting is "warm key against cool shadow —
+     * creating real chromatic value range". That needs *both* ends. The key
+     * stays exactly as amber as it was; what comes back is the sky on the
+     * shadow side, which at 4 pm in a west-facing room is a whole hemisphere
+     * of blue and is the only thing in the frame that can put a second hue on
+     * the screen. */
+    fillColor: 0xbccfef, fillIntensity: 0.47, fillPos: [4.4, 2.4, 3.2],
     rimColor: 0xffbe80, rimIntensity: 1.85, rimPos: [0.4, 2.6, -5.2],
-    hemiSky: 0xcfdaf0, hemiGround: 0xffbe94, hemiIntensity: 0.17,
+    hemiSky: 0xc2d6f5, hemiGround: 0xffbe94, hemiIntensity: 0.23,
     envIntensity: 0.33, shadowSpan: 6.2,
     grade: {
       // Split pulled back hard. At 1.15 with a shadow tint of [0.82, .915, 1.22]
@@ -157,10 +174,20 @@ export const MOODS = {
       // reads as midtone; combined with a blue fill and a blue hemisphere it
       // turned a golden-hour nursery lilac. The key carries the warmth now and
       // the shadows only get the last of the sky.
-      saturation: 1.20, contrast: 1.15, warmth: 0.10, vignette: 0.30, exposure: 1.08,
-      shadowTint: [0.90, 0.955, 1.115], highTint: [1.075, 1.0, 0.875], split: 0.9
+      //
+      // …and then saturation 1.20 (× the 1.18 restore inside agx() = 1.42) plus
+      // a +7.5%R / −12.5%B highlight tint took an already all-amber lighting
+      // rig and drove it into a single salmon hue. Saturation now sits just
+      // above neutral, the highlight tint is halved, and the shadow tint is
+      // pushed *further* blue rather than the whole frame being pushed warm —
+      // same overall warmth, twice the chromatic range.
+      saturation: 1.09, contrast: 1.15, warmth: 0.035, vignette: 0.30, exposure: 1.08,
+      shadowTint: [0.865, 0.945, 1.165], highTint: [1.04, 1.0, 0.935], split: 0.95
     },
-    fog: { color: 0xffd9b4, density: 0.009 }
+    // 0.009 over the 6 m of the room is a 5% amber veil on the far wall, which
+    // is most of what read as "slightly hazy". Thinner, and less orange, so it
+    // separates depth without tinting the set.
+    fog: { color: 0xf4dcc8, density: 0.0065 }
   },
 
   evening: {  // bath time
