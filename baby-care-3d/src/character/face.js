@@ -254,9 +254,14 @@ export function buildFaceMorphs(headGeometry) {
  * the texture was actually painted for.
  *
  * `irisDeg` is the angular radius the painted iris (0.34 of the canvas) ends up
- * subtending on the ball, i.e. how big the iris reads.
+ * subtending on the ball, i.e. how big the iris reads. 29° is the anatomically
+ * honest figure — it makes the iris half the diameter of the ball, which is
+ * what a real eye is — but this ball is deliberately oversized for cuteness
+ * while the *aperture* between the lids is not, so at 29° the iris filled 85 %
+ * of the opening and the eyes read as two beady dark dots with no sclera
+ * anywhere. Size the iris to the aperture, not to the ball.
  */
-function eyeballGeometry(R, segs, rings, irisDeg = 29) {
+function eyeballGeometry(R, segs, rings, irisDeg = 23.5) {
   const g = new THREE.BufferGeometry();
   const pos = [], nor = [], uv = [], idx = [];
   const thetaRef = (0.5 / 0.34) * irisDeg * DEG;      // θ at the texture's edge
@@ -930,14 +935,28 @@ export class Face {
       // where each lid's *edge* should cross the front of the eye (measured in
       // degrees from straight up) and back out the pivot angle — far easier to
       // reason about than raw rotations, and it makes the aperture explicit.
-      const upEdge = THREE.MathUtils.lerp(54 - wide * 10 + squint * 9, 101, close);
-      const loEdge = THREE.MathUtils.lerp(126 + wide * 6, 97, clamp01(close * 0.62 + squint * 0.95));
+      // At full close the two edges have to *cross*, not merely approach: the
+      // old pair stopped at 101° and 108°, leaving a 7° slit that let the ball
+      // show right through a fully closed eye — which is why `asleep` rendered
+      // as two hollow sockets with a bare eyeball in them instead of two shut
+      // lids. And the lower lid has to be allowed to complete its travel; a
+      // 0.62 coefficient means it never gets there however hard the mood asks.
+      const upEdge = THREE.MathUtils.lerp(54 - wide * 10 + squint * 9, 107, close);
+      const loEdge = THREE.MathUtils.lerp(126 + wide * 6, 96,
+        clamp01(Math.max(close, close * 0.62 + squint * 0.95)));
       e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
       e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;
       // the inner corner of the upper lid drops on a sad brow, lifts on a
       // furrow — the tell that separates "sad" from "cross"
       e.upper.rotation.z = e.s * (val('browSad') * 0.26 - val('browFurrow') * 0.20 + val('sulk') * 0.14);
+      // The lid caps roll their last 18 % inward, so the lid *margin* sits ~3 mm
+      // inside the eyeball. Two closed lids therefore meet along a line where
+      // neither is covering the ball, and the ball shows through it as a lit
+      // strip — which is what turned every shut-eyed frame into a pair of
+      // sockets with a bare eye in them. Nothing behind two closed lids can be
+      // seen anyway, so take the ball out with the cornea.
       const vis = close < 0.985;
+      e.ball.visible = vis;
       e.cornea.visible = vis;
       e.catch.visible = vis && close < 0.72;
       e.catch2.visible = e.catch.visible;

@@ -45,23 +45,26 @@ export const GARMENTS = {
   top: {
     groups: ['torso', 'armL', 'armR'],
     inflate: 0.0148,
-    lod: 0.92,
+    // the shirt is the garment that gets closest to the camera and the one
+    // whose hems cross the most curvature, and a hem's silhouette is only ever
+    // as smooth as the quad it crosses
+    lod: 1.08,
     mask: (x, y, z) => {
       // the collar sits low and wide, well clear of the head shell's own rim —
       // an overlapping neckline leaves the two surfaces fighting and shows as
       // a ring of hard flaps under the chin
-      // …and it is a *torso* band, so it has to stop at the shoulder line. The
+      // …and it is a *torso* band, so it has to stop before the elbow. The
       // sleeve patches are lofted round the arms and see this mask too: without
       // the lateral limit the y-band alone declares the whole arm clothed down
       // to the wrist, and the "sleeve" then ends wherever the arm patch runs
       // out rather than where the garment does — an open, untapered rim of
       // end-cap triangles folding over the hand.
-      const bodyM = band(0.2430, 0.4390, y) * (1 - sstep(0.0700, 0.0960, Math.abs(x)));
+      const bodyM = band(0.2430, 0.4390, y) * (1 - sstep(0.0980, 0.1240, Math.abs(x)));
       // short sleeves: a capsule around the top of each upper arm
       let sl = 0;
       for (const s of [1, -1]) {
         const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1120, 0.3600, 0.0180], s));
-        sl = Math.max(sl, 1 - sstep(0.026, 0.050, d));
+        sl = Math.max(sl, 1 - sstep(0.030, 0.054, d));
       }
       // neck hole
       const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4300) / 0.70) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.0455 ** 2)));
@@ -194,29 +197,43 @@ export class Outfit {
         rings: Math.max(5, Math.round(spec.rings * q)),
         capStart: spec.capStart, capEnd: spec.capEnd,
         tMax: spec.tMax, uvRepeat: this.uvRepeat,
-        inflate: def.inflate,
-        // Taper the offset out across the mask ramp so the hem closes onto the
-        // body instead of ending as an open shell edge floating `inflate` above
-        // it. It must land *just* under the skin — 3 mm, not 30 — because the
-        // ramp is only one or two grid steps wide, so whatever depth we ask for
-        // here is also the height of the wall the mesh has to drop in a single
-        // step. Ask for 30 mm on a 12 mm grid and every hem becomes a ring of
-        // edge-on triangles diving through the body: the shard fringe.
-        detail: (x, y, z) => -(def.inflate + 0.0030) * (1 - def.mask(x, y, z)),
-        // …and the same argument applies to the sinks buildPatch applies on its
-        // own account, which are sized for a shell that lives *at* the skin.
-        // `floorLevel` caps every one of them: a garment vertex may hide under
-        // the skin, never dive through the body.
-        floorLevel: -0.0026,
-        // `sinkDepth` is only the *tie* sink — enough that two shells sharing a
-        // surface (the sleeve cap and the shirt shoulder) never z-fight, and no
-        // more. Burying is not its job: a shell that has left its own volume is
-        // buried by the far larger deficit sink, which `floorLevel` now stops
-        // at the skin instead of letting it dive through the body. Setting this
-        // deeper than `inflate` looks right and is not — it buries the whole
-        // sleeve, because the shoulder is exactly where the torso group wins
-        // the *anatomy* dominance and exactly where the sleeve has to be.
-        skim: true, margin: 0.120, sinkDepth: 0.0035,
+        /* The garment is built *on the skin*, at iso-0, with exactly the same
+         * margins and sinks the body itself uses — and is then pushed out along
+         * the surface normal by `detail`. It is not marched to an offset
+         * iso-level, and the difference is the whole bug.
+         *
+         * Marching to iso-`inflate` looks equivalent and is not. The patch
+         * machinery resolves overlaps by *retracting* a shell into its own
+         * volume and sinking it under whichever neighbour won — which works
+         * because the neighbouring patch is right there covering it. Both of
+         * those are distances measured from the skin, so at iso-`inflate` they
+         * are all mis-scaled: the sink's "don't go deeper than the flesh you
+         * stand on" guard reads a depth of zero (the shell is *outside* the
+         * body) and collapses to 0.8 mm, so losing shells stay on the surface
+         * and interleave; the retraction, meanwhile, leaves neighbouring
+         * vertices 100 mm apart. Add a hem taper worth 30 mm of normal
+         * displacement on an 11 mm grid and every boundary becomes a ring of
+         * edge-on triangles diving through the body — the shard fringe.
+         *
+         * Offsetting the finished skin shell instead keeps every one of those
+         * relationships intact: both shells are displaced along the *same*
+         * field gradient by the same amount, so a loser sunk 3 mm under the
+         * winner is still 3 mm under it afterwards, and a hem that tapers to
+         * zero offset is still exactly on the skin.                          */
+        inflate: 0,
+        margin: 0.035, sinkDepth: 0.005,
+        detail: (x, y, z) => {
+          const mk = def.mask(x, y, z);
+          // …and the last millimetres go *under* the skin, so the ragged
+          // triangle boundary the mask trim leaves is buried rather than
+          // showing as a fringe of hard flat scraps around every hem.
+          return def.inflate * mk - 0.0045 * (1 - mk);
+        },
+        // Retraction can still park a vertex tens of millimetres inside the
+        // body, and once the shell above it is `inflate` proud the triangle
+        // reaching down to it is long enough to surface on the way. The floor
+        // says: hide under the skin by all means, never dive through the body.
+        floorLevel: -0.0032,
         collapse: spec.collapse
       }));
     }
@@ -273,7 +290,7 @@ export class Outfit {
       // shell's quads are three times a torso shell's.
       const sorted = Float64Array.from(lens).sort();
       const med = sorted.length ? sorted[sorted.length >> 1] : 0.012;
-      const limit = Math.max(med * 3.0, 0.024);
+      const limit = Math.max(med * 2.3, 0.022);
       for (let i = 0; i < lens.length; i++) {
         if (lens[i] > limit) continue;
         idx.push(cand[i * 3] + vo, cand[i * 3 + 1] + vo, cand[i * 3 + 2] + vo);
