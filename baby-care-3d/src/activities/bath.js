@@ -2570,6 +2570,15 @@ export class BathActivity {
     };
     // Shifted onto the measured centre of the skull — see _measureHead().
     set('head', this._babyPoint('head').add(this._headOffset || _v.set(0, 0, 0)));
+    this._dbgT = (this._dbgT || 0) + 1;
+    if (this._dbgT % 60 === 1) { try { const _a=this.anchors.get('head');
+      console.warn('[SYNCDBG]', this._dbgT, 'hp=', this._babyPoint('head').toArray().map(n=>n.toFixed(3)).join(','),
+        'off=', this._headOffset?.toArray().map(n=>n.toFixed(3)).join(','),
+        'anch=', _a.position.toArray().map(n=>n.toFixed(3)).join(','),
+        'nHead=', this.foam.blobs.filter(b=>b.region==='head').length,
+        'blob0w=', (()=>{const b=this.foam.blobs.find(b=>b.region==='head'); if(!b) return 'none';
+          const w=b.local.clone(); _a.updateMatrixWorld(); _a.localToWorld(w); return w.toArray().map(n=>n.toFixed(3)).join(',');})(),
+        'rootY=', this.root.position.y.toFixed(3)); } catch(e){} }
     set('body', this._babyPoint('body'));
     set('handL', this._babyPoint('handL'));
     set('handR', this._babyPoint('handR'));
@@ -2682,6 +2691,12 @@ export class BathActivity {
       this.foam.setHeadRadius(this._estimateHeadRadius());
       this._syncAnchors();
       this.foam.setAmount(v);
+      try { const _a=this.anchors.get('head'); const _hp=this._babyPoint('head');
+        console.warn('[FOAMDBG] hr=', this.foam.headRadius.toFixed(4),
+          'off=', this._headOffset?.toArray().map(n=>n.toFixed(3)).join(','),
+          'headWorld=', _hp.toArray().map(n=>n.toFixed(3)).join(','),
+          'anchor=', _a.position.toArray().map(n=>n.toFixed(3)).join(','),
+          'horn=', this.foam.horn.toFixed(2)); } catch(e){}
       this.foam.update(0.016, ctx);
       ctx.baby?.setFoam?.('hair', Math.min(1, v));
       ctx.baby?.setFoam?.('body', Math.min(1, v * 0.6));

@@ -443,6 +443,12 @@ export class FoamSystem {
       const s = b.r * wob * scaleK;
       _s.set(s, s * b.squash, s * (1.8 - b.squash));
       _m.compose(_wp, b.quat, _s);
+      if (!this.mesh.instanceColor) {
+        this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity*3), 3);
+      }
+      const _c = b.region === 'head' ? [1,0,0] : b.region === 'body' ? [0,1,0] : b.region === 'water' ? [0,0,1] : [1,1,0];
+      this.mesh.instanceColor.setXYZ(n, _c[0], _c[1], _c[2]);
+      this.mesh.instanceColor.needsUpdate = true;
       this.mesh.setMatrixAt(n++, _m);
       if (n >= this.capacity) break;
     }

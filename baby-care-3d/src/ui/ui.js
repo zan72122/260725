@@ -36,6 +36,9 @@ const ACTIVITY_LABEL = {
  *  score. Completing a card is the reward beat. */
 const STAR_SLOTS = 5;
 
+/** Hard ceiling on contextual choices shown at once. Rubric §4 #130. */
+const MAX_TOOLS = 5;
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const clamp01 = (v) => Math.min(1, Math.max(0, typeof v === 'number' && isFinite(v) ? v : 0));
@@ -220,7 +223,14 @@ export class UI {
     }
 
     this._layoutLabels();
-    if (this._promptTarget && this.els.prompt?.classList.contains('is-on')) this._layoutPrompt();
+    if (this._promptTarget && this.els.prompt?.classList.contains('is-on')) {
+      /* The target can walk out of frame after the prompt went up. Give it a
+         beat (a camera move passes through a lot of framings) and then take
+         the bubble down rather than leave an arrow aimed off the edge. */
+      if (this._targetOnScreen(this._promptTarget)) this._offTarget = 0;
+      else if ((this._offTarget = (this._offTarget || 0) + dt) > 0.5) { this.hidePrompt(); return; }
+      this._layoutPrompt();
+    }
     this._stepFlights(dt);
 
     this._needAcc += dt;
@@ -616,7 +626,19 @@ export class UI {
        only appears when a real target has been handed in. */
     /* An activity can also publish what its current step is about by setting
        `promptTarget` on itself; that saves every call site passing it. */
-    const t = target || this.app.activity?.promptTarget || null;
+    let t = target || this.app.activity?.promptTarget || null;
+
+    /* …and a target is only a target if the child can actually see it. A
+       prompt that names an object which is behind the camera, off the edge of
+       the frame or hidden this step is worse than no prompt at all: a
+       pre-literate player is told to tap something that is not on screen. In
+       that case the arrow would be a lie *and* the words would be, so the
+       whole bubble is withheld rather than pointed at nothing. */
+    if (t && !this._targetOnScreen(t)) {
+      if (target || this.app.activity?.promptTarget) { this.hidePrompt(); return; }
+      t = null;
+    }
+
     this._promptTarget = t;
     this._promptArrow = arrow === undefined ? !!t : !!arrow;
     this._layoutPrompt(true);
@@ -625,6 +647,39 @@ export class UI {
     this._promptTimer?.();
     this._promptTimer = seconds > 0 ? this.after(seconds, () => this.hidePrompt()) : null;
     this._sfx('pop');
+  }
+
+  /**
+   * Is this prompt target somewhere a child could actually point at?
+   *
+   * Three ways to fail: the object (or an ancestor) is switched off, it is
+   * behind the camera, or it projects outside the frame. The margin is
+   * generous — an object half off the edge is still findable — but a target
+   * in another room is not.
+   */
+  _targetOnScreen(src) {
+    if (!src) return false;
+    for (let n = src; n && n.isObject3D; n = n.parent) {
+      if (n.visible === false) return false;
+    }
+    const canvas = this.app.renderer?.domElement;
+    const w = canvas?.clientWidth || innerWidth;
+    const h = canvas?.clientHeight || innerHeight;
+    if (typeof src.getWorldPosition === 'function' || typeof src.z === 'number') {
+      const cam = this.app.camera;
+      if (!cam) return false;
+      const p = this._v;
+      if (typeof src.getWorldPosition === 'function') src.getWorldPosition(p);
+      else p.set(src.x, src.y, src.z);
+      p.project(cam);
+      if (!isFinite(p.x) || !isFinite(p.y) || p.z > 1) return false;   // behind the eye
+      const x = (p.x * 0.5 + 0.5) * w;
+      const y = (-p.y * 0.5 + 0.5) * h;
+      const m = 0.06;
+      return x > -w * m && x < w * (1 + m) && y > -h * m && y < h * (1 + m);
+    }
+    /* Already a screen point. */
+    return isFinite(src.x) && isFinite(src.y);
   }
 
   /** Re-aim an existing prompt at a 3D object (or Vector3), or clear it. */
@@ -689,6 +744,7 @@ export class UI {
     this._promptTimer = null;
     this._promptTarget = null;
     this._promptArrow = false;
+    this._offTarget = 0;
     this.els.prompt?.classList.remove('is-on');
   }
 
@@ -802,7 +858,11 @@ export class UI {
     const tray = this.els.ctxTray;
     if (!tray) return;
     tray.innerHTML = '';
-    for (const item of items) {
+    /* Five is the ceiling a four-year-old can hold at once (rubric §4 #130),
+       and the care bar already spends five. A contextual tray that hands over
+       more is a caller bug, not a layout problem — so it is clamped here
+       rather than wrapped into a second row over the character. */
+    for (const item of items.slice(0, MAX_TOOLS)) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ctx-btn' + (item.selected ? ' is-selected' : '');

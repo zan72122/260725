@@ -70,11 +70,23 @@ const GradeShader = {
     uFocusRange:  { value: 0.30 },
     uNear:        { value: 0.1 },
     uFar:         { value: 100 },
-    uLift:        { value: new THREE.Vector3(0.008, 0.004, 0.014) },
+    uLift:        { value: new THREE.Vector3(0.004, 0.002, 0.007) },
     uGain:        { value: new THREE.Vector3(1.03, 1.005, 0.985) },
     uSaturation:  { value: 1.11 },
     uContrast:    { value: 1.045 },
     uWarmth:      { value: 0.03 },
+    /* Black point. Measured (tools/histo.mjs) the whole 28-frame set lived
+     * between display 0.27 and 0.67 with *zero* pixels under 0.15 in six
+     * frames — rubric §4 #101. AgX's toe is deliberately long: display 0.15
+     * needs linear 0.018, and a room with a 0.33 env probe, a 0.23 hemisphere
+     * and a 0.5 fill never gets a surface that dark. The grade therefore has
+     * to author the black point rather than hoping the render produces one.
+     *
+     * The curve is `c²(1+k)/(c+k)`: exactly 0 at 0, unity gain well above k,
+     * and smooth everywhere in between, so it darkens the bottom two stops
+     * without the posterised step a subtract-and-clamp produces on a smooth
+     * wall gradient. Per mood in lighting.js `MOODS[*].grade.black`. */
+    uBlack:       { value: 0.0 },
     // Split toning — the single most useful lever for D38. A warm key against
     // a neutral shadow gives an image luminance range but no *chromatic* range,
     // and that is what makes a render read as "correctly exposed" rather than
@@ -101,7 +113,7 @@ const GradeShader = {
     uniform sampler2D tDepth;
     uniform float uTime, uExposure, uVignette, uGrain, uAberration;
     uniform float uDofStrength, uFocus, uFocusRange, uNear, uFar;
-    uniform float uSaturation, uContrast, uWarmth, uSplit;
+    uniform float uSaturation, uContrast, uWarmth, uSplit, uBlack;
     uniform vec2  uResolution;
     uniform vec3  uLift, uGain, uShadowTint, uHighTint;
 
@@ -221,6 +233,15 @@ const GradeShader = {
       col *= uExposure;
       col = agx(col);
 
+      // black point ---------------------------------------------------------
+      // See uBlack above. Applied *before* the split tone on purpose: it is
+      // what puts enough of the frame under the shadow weight's crossover for
+      // the cool tint to have anything to land on.
+      {
+        float k = max(1e-4, uBlack);
+        col = col * col * (1.0 + k) / (col + k);
+      }
+
       // split tone — cool shadow against warm key -----------------------------
       // Weighted on display luminance *after* the curve, so the split follows
       // what the eye reads as shadow rather than what the renderer called dark.
@@ -234,7 +255,14 @@ const GradeShader = {
       // golden mood was chromatically indistinguishable from day, and both
       // read cool. A split tone has to touch the shadows only; above ~0.30 the
       // eye is reading local colour, not shadow colour.
-      float shadowW = 1.0 - smoothstep(0.010, 0.30, sl);
+      //
+      // …and then the band was too *narrow*. With the black point above pulling
+      // the bottom of the range down, a crossover at 0.30 left the split tone
+      // touching under 5% of the frame — measured R:B ran 1.6–1.9 across every
+      // room shot, i.e. one hue, no chromatic range at all (§4 #137). 0.38 is
+      // still below the local-colour threshold on a lit cream wall (which now
+      // sits 0.45–0.62) but reaches the whole shadow side of the room.
+      float shadowW = 1.0 - smoothstep(0.006, 0.38, sl);
       float highW = smoothstep(0.45, 0.98, sl);
       col *= mix(vec3(1.0), uShadowTint, shadowW * uSplit);
       col *= mix(vec3(1.0), uHighTint, highW * uSplit);
@@ -577,7 +605,7 @@ export class RenderPipeline {
   /** Nudge the grade toward a mood (day / evening / night / bath). */
   setGrade({
     lift, gain, saturation, contrast, warmth, vignette, exposure,
-    shadowTint, highTint, split
+    shadowTint, highTint, split, black
   }) {
     const u = this.grade.uniforms;
     if (lift) u.uLift.value.fromArray(lift);
@@ -590,6 +618,7 @@ export class RenderPipeline {
     if (shadowTint) u.uShadowTint.value.fromArray(shadowTint);
     if (highTint) u.uHighTint.value.fromArray(highTint);
     if (split !== undefined) u.uSplit.value = split;
+    if (black !== undefined) u.uBlack.value = black;
   }
 
   resize() {

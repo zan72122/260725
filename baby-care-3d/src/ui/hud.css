@@ -848,25 +848,38 @@ button {
 
 #hud.has-tools { --tray-h: clamp(58px, 11.5vmin, 88px); }
 
+/* Contextual choices (garments, bath toys …).
+ *
+ * Two rules earn their keep here. It hugs the frame's *trailing* edge rather
+ * than the centre, because centred it lands squarely over the character it is
+ * asking you to dress — the one thing on screen the child is looking at. And
+ * it wears the same squircle as the care buttons: two rows of choices in two
+ * different shape languages read as two unrelated systems, which is exactly
+ * what made the wardrobe screen feel like ten scattered options instead of
+ * one row of clothes. */
 .ctx-tray {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  right: calc(var(--safe-r) + var(--gutter));
+  left: auto;
   bottom: calc(var(--safe-b) + var(--gutter) + var(--bar-h));
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-end;
   gap: clamp(6px, 1.3vmin, 14px);
-  max-width: min(94vw, 720px);
+  max-width: min(48vw, 520px);
 }
 .ctx-tray:empty { display: none; }
 .ctx-btn {
   pointer-events: auto;
   width: max(var(--touch), clamp(50px, 10vmin, 76px));
   height: max(var(--touch), clamp(50px, 10vmin, 76px));
-  border-radius: 50%;
-  background: linear-gradient(180deg, var(--face-1), var(--face-2));
-  box-shadow: 0 .6vmin 0 var(--rise), 0 1.2vmin 1.8vmin rgba(92, 52, 84, .22);
+  border-radius: 26%;      /* the care buttons' squircle, at the same ratio */
+  background: linear-gradient(180deg, var(--face-1) 0%, var(--face-1) 38%, var(--face-2) 100%);
+  box-shadow:
+    inset 0 .3vmin 0 rgba(255, 255, 255, .9),
+    inset 0 -.5vmin 0 rgba(155, 100, 140, .16),
+    0 .7vmin 0 var(--rise),
+    0 1.4vmin 2vmin rgba(92, 52, 84, .22);
   display: grid;
   place-items: center;
   transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
@@ -1247,11 +1260,13 @@ button {
   .act__label { display: none; }
   /* the care buttons no longer sit above the bottom edge */
   :root { --bar-h: 4px; }
+  /* The care buttons have moved to the right edge in this layout, so the
+     contextual row moves to the left one to stay out of their way. */
   .ctx-tray {
     left: calc(var(--safe-l) + var(--u));
     right: auto;
     transform: none;
-    max-width: 62vw;
+    max-width: 52vw;
     justify-content: flex-start;
   }
   .prompt { max-width: 62vw; }

@@ -61,6 +61,13 @@ const DADO = [
 ];
 const DADO_Y = 0.90;
 
+/* scratch, for the per-frame subject contact shadow */
+const _sv = new THREE.Vector3();
+const _sq = new THREE.Quaternion();
+const _ss = new THREE.Vector3();
+const _sm = new THREE.Matrix4();
+const _sc = new THREE.Color();
+
 export class Room {
   constructor({ tier = 2, fx = null } = {}) {
     this.tier = tier;
@@ -458,13 +465,15 @@ export class Room {
     this.rug.rotation.y = 0.14;
     this.group.add(this.rug);
     // the rug's own soft occlusion, wider and much fainter than a prop's …
-    S.add(0.05, 0.35, 1.30, 1.30, { opacity: 0.14, softness: 2.4, y: 0.002 });
-    // … plus the dark halo at its bound edge, which is what makes a rug sit
-    // *on* a floor instead of being printed on it. The ring has to peak just
-    // OUTSIDE the rug's own silhouette — peaked under it, the rug hides the
-    // one thing it is there to do.
-    S.ring(0.05, 0.35, 1.44, 1.44, 0.855, { opacity: 0.52, softness: 1.7, y: 0.0022 });
-    S.ring(0.05, 0.35, 1.30, 1.30, 0.935, { opacity: 0.34, softness: 3.4, y: 0.0024 });
+    S.add(0.05, 0.35, 1.34, 1.34, { opacity: 0.14, softness: 2.4, y: 0.002 });
+    /* … plus the dark halo at its bound edge, which is what makes a rug sit
+     * *on* a floor instead of being printed on it. The ring has to peak just
+     * OUTSIDE the rug's own silhouette — peaked under it, the rug hides the one
+     * thing it is there to do, and that is exactly what was happening: the
+     * binding now rolls out to 1.066 R ≈ 1.26 m, and both rings were peaking at
+     * 1.21–1.23 m, i.e. underneath it. Moved out, widened and darkened. */
+    S.ring(0.05, 0.35, 1.46, 1.46, 0.895, { opacity: 0.62, softness: 1.4, y: 0.0022 });
+    S.ring(0.05, 0.35, 1.66, 1.66, 0.815, { opacity: 0.30, softness: 0.9, y: 0.0024 });
 
     /* --- where the walls meet the floor ----------------------------------- */
     // A skirting board with no shadow line at its foot is the tell. One soft
@@ -472,6 +481,16 @@ export class Room {
     S.band(0, Z0 + 0.055, RW / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3 });
     S.band(X0 + 0.055, Z0 + RD / 2, RD / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3, rot: Math.PI / 2 });
     S.band(X1 - 0.055, Z0 + RD / 2, RD / 2 - 0.05, 0.075, { opacity: 0.42, softness: 1.3, rot: Math.PI / 2 });
+
+    /* --- the subject ------------------------------------------------------
+     * The baby is the one thing on this floor that moves, and he was the one
+     * thing with nothing under him: "in 05 and 07 the seated baby has no dark
+     * core where he meets the floor". The shadow map is far too soft at this
+     * penumbra to harden a contact, so he gets the same haze-plus-core pair
+     * every prop has — two instances reserved in the same sheet, rewritten
+     * from his world position in update(), for zero extra draw calls. */
+    this._subjectIdx = S.items.length;
+    S.pair(0, 0.40, 0.30, 0.30, { opacity: 0, softness: 1.0, core: 0.58 });
   }
 
   /* --------------------------------------------------------- dressing --- */
@@ -529,7 +548,7 @@ export class Room {
       [0.50, -1.34, { n: 2, spread: 0.17 }],
       [-0.88, -1.06, { n: 1 }]
     ];
-    this._clutterRig = P.buildClutter(this.M, spots, { seed: 77 });
+    this._clutterRig = P.buildClutter(this.M, spots, { seed: 77, surfaceY: (x, z) => this.surfaceY(x, z) });
     this._clutterRig.group.position.set(0, 0, 0);
     this.group.add(this._clutterRig.group);
     this._pick.push(...this._clutterRig.meshes);
@@ -609,6 +628,25 @@ export class Room {
   }
 
   /* ================================================================ api === */
+
+  /**
+   * Height of whatever is underfoot at a world (x, z): 0 on the boards, the
+   * pile height on the rug. Anything that stands on the floor — a toy, a block
+   * tower, and above all a *contact shadow* — needs this, because the rug is
+   * 26 mm thick and a shadow blob laid at y = 0.004 inside the rug's footprint
+   * is 22 mm below the surface it is meant to be darkening, i.e. invisible.
+   * That was the whole of defect D18 on the rug, which is where every toy, the
+   * block tower and the baby all sit.
+   */
+  surfaceY(x, z) {
+    const h = this.rug?.userData.height;
+    if (!h) return 0;
+    const p = this.rug.position, ry = this.rug.rotation.y;
+    const dx = x - p.x, dz = z - p.z;
+    const c = Math.cos(ry), s = Math.sin(ry);
+    const y = h(dx * c - dz * s, dx * s + dz * c);
+    return y > 0 ? y : 0;
+  }
 
   anchor(name) {
     return this._anchors.get(name) || null;
@@ -725,6 +763,7 @@ export class Room {
     // toys settling in or being tidied away — each one carries its own
     // contact shadow now, written inside the rig's update()
     this._clutterRig.update(dt);
+    this._updateSubjectShadow(ctx);
 
     /* --- the window's bounce light tracks the sky it is bouncing --------- */
     const k = 1 - Math.exp(-dt * 2.2);

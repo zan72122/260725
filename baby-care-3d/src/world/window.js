@@ -135,20 +135,35 @@ const SHAFT_FRAG = /* glsl */`
     float k = 1.0 + uSpread * t;
     vec2 s = vec2(vPos.x / max(1e-4, uHalfW * k), vPos.y / max(1e-4, uHalfH * k));
 
-    // Soft rectangular cross-section. The old 0.30 start made the beam's near
-    // end a hard-edged slab; a real shaft has no edge you can point at, it is
-    // an air-density gradient, so it starts soft and only gets softer.
-    float soft = mix(0.50, 0.98, t);
-    float ex = 1.0 - smoothstep(1.0 - soft, 1.04, abs(s.x));
-    float ey = 1.0 - smoothstep(1.0 - soft, 1.04, abs(s.y));
+    /* Cross-section.
+     *
+     * The critique's reading of this was "a flat hard-edged band on the wall
+     * with uniform intensity and no falloff", and both halves of that were
+     * fair. 1 - smoothstep(1 - soft, 1.04, |s|) with soft = 0.50 at the near
+     * end is *flat* across the middle 50% of the beam and only ramps in the
+     * outer half — so seen close to edge-on, where the eye is looking straight
+     * through the plateau, the beam has a top edge and a bottom edge and
+     * nothing in between. Two changes:
+     *
+     *   · The plateau is gone. A raised-cosine profile in each axis has no
+     *     interior at all — it is falling off from the axis outward everywhere,
+     *     which is what a real cone of lit air does.
+     *   · The profile *widens* down the beam (soft), so the near end is the
+     *     tightest and the far end has no findable edge.
+     */
+    float soft = mix(0.78, 1.06, t);
+    float ex = pow(clamp(1.0 - abs(s.x) / soft, 0.0, 1.0), 1.45);
+    float ey = pow(clamp(1.0 - abs(s.y) / soft, 0.0, 1.0), 1.35);
+    ex = ex * ex * (3.0 - 2.0 * ex);      // smoothstep the profile, not the edge
+    ey = ey * ey * (3.0 - 2.0 * ey);
     float edge = ex * ey;
     // a hotter core down the middle of the beam, which is what makes a shaft
     // read as a volume rather than a flat card
-    float core = exp(-(s.x * s.x + s.y * s.y) * 1.35);
-    edge *= 0.55 + 0.85 * core;
+    float core = exp(-(s.x * s.x + s.y * s.y) * 1.15);
+    edge *= 0.34 + 1.05 * core;
 
     // curtains eat the beam from the outside in: only |s.x| < uOpen gets through
-    edge *= 1.0 - smoothstep(uOpen * 0.82, uOpen, abs(s.x));
+    edge *= 1.0 - smoothstep(uOpen * 0.72, uOpen * 1.02, abs(s.x));
 
     // The mullion and transom carve real bars out of the light — and the bar
     // shadows blur out with distance exactly as a real penumbra does.
@@ -158,7 +173,16 @@ const SHAFT_FRAG = /* glsl */`
       - 0.54 * (1.0 - smoothstep(0.0, bw * 0.9, abs(s.y - uBarY)));
     bars = clamp(bars, 0.0, 1.0);
 
-    float fade = pow(1.0 - t, 1.25) * smoothstep(0.0, 0.05, t);
+    /* Density falloff along the length.
+     *
+     * pow(1 - t, 1.25) is a straight line for most of the beam and then dives
+     * in the last fifth — i.e. exactly the "uniform intensity then an edge" the
+     * critique measured. Lit air actually loses brightness as the inverse
+     * square of the spread *plus* the scattering it has already done, which is
+     * far closer to an exponential. The extra smoothstep at the mouth stops
+     * the beam starting with a lid on it where it leaves the glass.
+     */
+    float fade = exp(-t * 2.35) * (1.0 - t * t) * smoothstep(0.0, 0.09, t);
 
     // two noise layers drifting down the beam = airborne dust in motion
     float n1 = texture2D(uNoise, vec2(s.x * 0.30 + uTime * 0.011, t * 0.70 - uTime * 0.043)).r;
@@ -200,9 +224,14 @@ const POOL_FRAG = /* glsl */`
   uniform float uTime, uIntensity, uBarX, uBarY, uOpen;
   void main() {
     vec2 s = vUv * 2.0 - 1.0;
-    float ex = 1.0 - smoothstep(0.45, 1.0, abs(s.x));
-    float ey = 1.0 - smoothstep(0.40, 1.0, abs(s.y));
-    ex *= 1.0 - smoothstep(uOpen * 0.82, uOpen, abs(s.x));
+    // Same plateau problem as the beam: smoothstep(0.45, 1.0, ...) left the
+    // middle 45% of the pool at one flat value with a findable rim. A pool of
+    // sunlight on a floor has a soft penumbra all the way in from the edge.
+    float ex = pow(clamp(1.0 - abs(s.x) * 0.92, 0.0, 1.0), 1.4);
+    float ey = pow(clamp(1.0 - abs(s.y) * 0.94, 0.0, 1.0), 1.3);
+    ex = ex * ex * (3.0 - 2.0 * ex);
+    ey = ey * ey * (3.0 - 2.0 * ey);
+    ex *= 1.0 - smoothstep(uOpen * 0.72, uOpen * 1.02, abs(s.x));
     float bars = 1.0
       - 0.70 * (1.0 - smoothstep(0.0, 0.06, abs(s.x - uBarX)))
       - 0.55 * (1.0 - smoothstep(0.0, 0.05, abs(s.y - uBarY)));
@@ -258,32 +287,59 @@ const MOTE_FRAG = /* glsl */`
  * horizon colour — see `_buildExterior`, where the whole backdrop was moved off
  * the room's own lighting rig.
  */
+/*
+ * A second, larger correction to `gain`, and this one is measured.
+ *
+ * `tools/histo.mjs` over the 28-frame set: every frame without a HUD in it had
+ * **zero pixels above display 0.95**, and the whole image lived between 0.27
+ * and 0.67 — rubric §4 #101. The reason is arithmetic. AgX needs a *linear*
+ * value of 5.2 to reach display 0.95; at gain 1.55 the brightest channel the
+ * sky ever emitted was ~1.3, which lands at display 0.83. There was therefore
+ * nothing anywhere in the frame that could be a highlight, and the window —
+ * the one surface in a nursery that genuinely is two to three stops over the
+ * interior — read as a pale rectangle painted on the wall.
+ *
+ * The gains below put the *general* sky around display 0.88–0.92 (so the
+ * gradient, the clouds and the treeline silhouette all keep their detail) and
+ * the sun disc and its immediate glow above 0.95, which is where the frame's
+ * genuine near-white now comes from. It is also what finally puts the sun over
+ * the bloom pass' 1.02 threshold, so the opening gets a real halo instead of
+ * the whole frame getting a milky one.
+ *
+ * `haze` comes down with it: at 0.62 the golden dome was washed to one warm
+ * value from horizon to zenith, which threw away the only cool hue visible
+ * from inside the room.
+ */
 const SKY = {
   day: {
     // Pushed a stop of saturation back into the dome. The old mid/horizon pair
     // was a 6% blue against near-white, which through a 1.4 m opening reads as
     // "overcast" no matter what the room is doing.
     top: 0x3f86d4, mid: 0x84bcec, hor: 0xd7e7f2, sun: 0xfff6e2,
-    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.38,
-    gain: 1.55, ground: 0x8aa76e, aerial: 0.44,
+    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.30,
+    gain: 4.10, ground: 0x8aa76e, aerial: 0.44,
     shaft: 0xfff2dc, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
   },
   golden: {
-    top: 0x5f92d0, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
-    sunPos: [0.28, 0.40], sunSize: 0.052, glow: 0.58, stars: 0, haze: 0.62,
-    gain: 1.70, ground: 0x9a9a5c, aerial: 0.54,
+    top: 0x4f86cc, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
+    sunPos: [0.28, 0.40], sunSize: 0.052, glow: 0.58, stars: 0, haze: 0.44,
+    gain: 4.40, ground: 0x9a9a5c, aerial: 0.54,
     shaft: 0xffd7a0, shaftI: 1.55, cloud: 0xffe6cc, cloudA: 0.92
   },
   evening: {
     top: 0x33417a, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
-    sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.70,
-    gain: 1.10, ground: 0x67765a, aerial: 0.48,
+    sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.62,
+    gain: 2.35, ground: 0x67765a, aerial: 0.48,
     shaft: 0xffc79c, shaftI: 0.72, cloud: 0xd8bfc4, cloudA: 0.85
   },
   night: {
-    top: 0x101736, mid: 0x232f5c, hor: 0x3c4370, sun: 0xe2e8ff,
+    // The moon is the only near-white a night frame can honestly carry, and at
+    // gain 0.62 it was a grey disc. 1.35 puts the disc itself just over 0.95
+    // while the dome stays at 0.05–0.12, which is what makes it read as a moon
+    // rather than as a hole in the sky.
+    top: 0x101736, mid: 0x232f5c, hor: 0x3c4370, sun: 0xe8ecff,
     sunPos: [0.66, 0.78], sunSize: 0.026, glow: 0.20, stars: 1, haze: 0.30,
-    gain: 0.62, ground: 0x2a333c, aerial: 0.55,
+    gain: 1.10, ground: 0x2a333c, aerial: 0.55,
     shaft: 0xb0c2ff, shaftI: 0.26, cloud: 0x4a5480, cloudA: 0.7
   }
 };
@@ -466,6 +522,9 @@ export class WindowUnit {
   }
 
   build(ctx) {
+    // Held so `setWeather` can reach the lighting rig; every other caller
+    // already passes ctx per-call.
+    this._ctx = ctx;
     this._buildJoinery();
     this._buildExterior();
     this._buildShaft(ctx);
@@ -1097,11 +1156,17 @@ export class WindowUnit {
       glow: s.glow * (1 - overcast * 0.85),
       stars: s.stars * (1 - overcast),
       haze: Math.min(1, s.haze + overcast * 0.25),
-      cloudColor: C(s.cloud).lerp(C(0x8d939c), overcast * 0.55),
+      cloudColor: C(s.cloud).lerp(C(0x8d939c), overcast * 0.62),
       cloudOpacity: Math.min(1, 0.35 + overcast * 0.6 + (w === 'clear' ? 0.25 : 0.4)),
-      shaftColor: C(s.shaft).lerp(C(0xcfd8e6), overcast * 0.6),
-      // overcast light is diffuse: the beam does not vanish, it goes soft
-      shaftI: s.shaftI * (w === 'rain' ? 0.28 : w === 'snow' ? 0.5 : 1),
+      shaftColor: C(s.shaft).lerp(C(0xc4d0e2), overcast * 0.85),
+      // "Overcast light is diffuse: the beam does not vanish, it goes soft" was
+      // the right instinct and the wrong number. At 0.28 of a 1.55 golden shaft
+      // the beam was still 0.43 — plainly visible as a hard sun shaft lying
+      // across the wall in `60-weather-rain`, which is the single loudest tell
+      // that nothing about the light had changed. Under a rain deck there is no
+      // beam at all; what is left is the barely-there brightening of the air
+      // near the glass.
+      shaftI: s.shaftI * (w === 'rain' ? 0.055 : w === 'snow' ? 0.30 : 1),
       // An overcast sky is *dimmer* than a clear one but the cloud deck is
       // still far brighter than the room, so the gain drops rather than dies.
       gain: (s.gain ?? 1) * (1 - overcast * 0.34)
@@ -1128,6 +1193,14 @@ export class WindowUnit {
     if (this.snow) this.snow.visible = snow;
     if (this.snowLedge) this.snowLedge.visible = snow;
     this.rainMat.userData.setAmount(rain ? 1 : 0);
+    /* The room's `setWeather` (room.js:640) only ever set a bounce scale and
+     * handed the string down here, so the *rig* never heard about the weather
+     * at all and `60-weather-rain` came out as the clear frame at 86% exposure
+     * with an identical hue. The window is the object the weather is happening
+     * to and it is already on this call path, so it is the right place to tell
+     * the rig — see `LightingRig.setWeather` and the `WEATHER` table there for
+     * what overcast actually does to a key, a fill and a shadow kernel. */
+    this._ctx?.lighting?.setWeather?.(this.weather);
     if (instant) this._snapSky();
   }
 
@@ -1168,9 +1241,13 @@ export class WindowUnit {
     // beam's contribution stayed fixed in absolute terms and therefore fell in
     // relative terms — it stopped being visible as airborne light at all in the
     // wide shot. The beam is meant to be the best thing in that frame.
-    this.shaftU.uIntensity.value = 1.05 * i;
-    this.poolU.uIntensity.value = 0.86 * i;
-    this.moteU.uIntensity.value = 0.85 * Math.min(1.4, i);
+    //
+    // Up again with the exponential falloff above: the new profile has no
+    // plateau and drops far faster down the beam, so the same peak needs a
+    // larger multiplier to deliver the same amount of visible light.
+    this.shaftU.uIntensity.value = 1.55 * i;
+    this.poolU.uIntensity.value = 1.10 * i;
+    this.moteU.uIntensity.value = 0.95 * Math.min(1.4, i);
   }
 
   /** What the room should feed its window-bounce light. */
@@ -1184,6 +1261,7 @@ export class WindowUnit {
   /* --------------------------------------------------------------- tick -- */
 
   update(dt, ctx) {
+    if (ctx) this._ctx = ctx;
     this.time += dt;
     const t = this.time;
     const T = this.tgt;

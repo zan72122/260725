@@ -67,6 +67,19 @@ const TRAY_D = 0.32;
 const MOUTH_REACH = 0.085;   // "close enough to eat" radius
 const AAN_REACH = 0.19;      // "あーん" mouth-open radius
 
+/**
+ * Which way the working highchair faces, in world radians.
+ *
+ * The room anchor's own yaw (2.35 rad) points the chair at the +X/−Z corner,
+ * roughly a metre from two walls. Any face-to-face camera therefore has to
+ * stand *inside* the corner — outside the room shell, which is where `10`,
+ * `11` and `12` got their pure-black voids from. Turning the chair back into
+ * the room (facing the window wall, down and across the floor) gives every
+ * feed framing a metre of clean air to stand in and puts the window light on
+ * the baby's face instead of on the back of his head.
+ */
+const FEED_YAW = -0.89;
+
 export class FeedActivity {
   constructor(ctx) {
     this.ctx = ctx;
@@ -75,6 +88,8 @@ export class FeedActivity {
     this.picker = new S.Picker(ctx.renderer, ctx.camera);
 
     this.root = null;
+    this.shotPivot = null;       // rides the baby's head; every feed framing hangs off it
+    this._roomChairHidden = false;
     this.foods = {};             // id → THREE.Group
     this.item = null;            // the food currently in play
     this.held = null;            // { obj, kind } being dragged
@@ -116,6 +131,22 @@ export class FeedActivity {
     this.root.name = 'feed-rig';
     this.trash.obj(this.root);
     S.placeAtAnchor(this.root, ctx.room?.anchor?.('highchair'), [0, 0, 0], [0, 0, 0.35]);
+    // The room dresses that anchor with a *decorative* highchair of its own,
+    // and it is authored facing the +X/−Z corner. Two problems follow: the
+    // decorative chair sits inside ours (its tray at y 0.72 is what the old
+    // `10/11/12` frames were actually looking at the underside of), and any
+    // face-to-face camera in front of the baby ends up jammed into the corner
+    // with the room shell behind it — which is where the black voids came
+    // from. So the working chair takes the anchor's *position* and its own
+    // yaw, aimed back into the open room, and the decorative one steps aside
+    // for as long as this activity owns the screen.
+    this.root.rotation.set(0, FEED_YAW, 0);
+    const roomChair = ctx.room?.highchair;
+    if (roomChair && roomChair.visible) {
+      roomChair.visible = false;
+      this._roomChairHidden = true;
+      this.trash.fn(() => { roomChair.visible = true; this._roomChairHidden = false; });
+    }
     ctx.scene.add(this.root);
 
     this._makeMaterials();
@@ -170,12 +201,96 @@ export class FeedActivity {
       };
     }
 
+    this._buildShots();
+
     S.shade(this.root, true, true);
     // Crumbs, rice grains and tray hardware are far below the resolution of a
     // VSM map this soft — they cost a draw call each and shade nothing. GTAO
     // grounds them instead. (D10)
     S.trimShadowCasters(this.root, { minRadius: 0.055 });
     this._refreshTargets();
+  }
+
+  /* ------------------------------------------------------------- shots -- */
+
+  /**
+   * Feeding is the one activity where the subject and the prop are 25 cm
+   * apart and the prop is *between* the camera and the subject. A framing
+   * composed on the baby root (which sits on the seat, 40 cm below the face)
+   * aims straight into the underside of the tray; a framing composed on the
+   * tray loses the face. So this scene hands the rig a pivot that rides the
+   * baby's head and composes every feed shot around it, with the tray falling
+   * into the lower third by construction rather than by luck.
+   *
+   * Offsets read in the baby's own frame: +X is his left, +Y up, +Z the way
+   * he is facing. `restorePresets()` in app.setActivity puts the defaults
+   * back when the activity is torn down.
+   */
+  _buildShots() {
+    const ctx = this.ctx;
+    this.shotPivot = new THREE.Object3D();
+    this.shotPivot.name = 'feed-shot-pivot';
+    this.root.add(this.shotPivot);
+    this._syncShotPivot();
+
+    const rig = ctx.cameraRig;
+    if (!rig?.overridePreset) return;
+    rig.setSubject?.(this.shotPivot);
+
+    // Face-to-face across the tray. The eye sits 0.16 m above the baby's own
+    // eyeline and 0.80 m out; the aim point drops 0.10 m below it, which lands
+    // the crown ~18% down from the top edge and the tray rim ~85% down —
+    // face and food both whole, nothing cropped, no tray underside.
+    rig.overridePreset('table', {
+      space: 'subject',
+      pos: [0.255, 0.160, 0.800], target: [-0.015, -0.100, 0.020],
+      fov: 36, focusRange: 0.17, dof: 1.05, handheld: 0.70, roll: 0.6
+    });
+    // Three-quarter from the baby's right, lower and tighter: a different
+    // moment, not the same shot with a different apple in it.
+    rig.overridePreset('table-side', {
+      space: 'subject',
+      pos: [-0.430, 0.055, 0.560], target: [0.010, -0.075, 0.010],
+      fov: 40, focusRange: 0.13, dof: 1.25, handheld: 0.85, roll: 0.9
+    });
+    // The wide "golden hour in the nursery" framing still has to contain its
+    // subject: high and back, but pointed at the highchair.
+    rig.overridePreset('table-wide', {
+      space: 'subject',
+      pos: [0.900, 0.760, 1.560], target: [0.020, -0.320, 0.030],
+      fov: 40, focusRange: 0.42, dof: 0.75, handheld: 1.00, roll: 1.0
+    });
+    // Mess/detail framing — closer still, so food on the face reads.
+    rig.overridePreset('closeup', {
+      space: 'subject',
+      pos: [0.205, 0.105, 0.575], target: [-0.010, -0.060, 0.010],
+      fov: 33, focusRange: 0.11, dof: 1.30, handheld: 0.60, roll: 0.5
+    });
+    rig.overridePreset('face', {
+      space: 'subject',
+      pos: [0.150, 0.070, 0.470], target: [-0.010, -0.020, 0.010],
+      fov: 30, focusRange: 0.10, dof: 1.35, handheld: 0.50, roll: 0.4
+    });
+  }
+
+  /**
+   * Park the pivot on the head, in rig-root local space. Falls back to the
+   * seat plus a head's height so the very first snap is never wild.
+   */
+  _syncShotPivot() {
+    if (!this.shotPivot) return;
+    const b = this.ctx.baby;
+    let head = null;
+    try {
+      const bone = b?.bone?.('head');
+      if (bone?.isObject3D) head = bone.getWorldPosition(this._tmp2);
+    } catch (e) { head = null; }
+    if (!head || !Number.isFinite(head.x)) {
+      this.shotPivot.position.set(0, 0.318 + 0.395, 0.005);
+      return;
+    }
+    this.root.updateWorldMatrix(true, false);
+    this.shotPivot.position.copy(this.root.worldToLocal(this._tmp.copy(head)));
   }
 
   _resetCarve() {
@@ -1137,6 +1252,13 @@ export class FeedActivity {
       ctx.baby.group.quaternion.copy(this.root.quaternion);
     }
     try { ctx.baby?.playPose?.('sit', { seconds: 0.5 }); } catch (e) { /* rig may differ */ }
+
+    // The app snaps the camera the instant enter() returns, so the pivot the
+    // framings hang off has to already be on the head the baby *now* has.
+    try { ctx.baby?.group?.updateMatrixWorld?.(true); } catch (e) { /* ignore */ }
+    this._syncShotPivot();
+    this.ctx.cameraRig?.setSubject?.(this.shotPivot);
+
     S.mood(ctx, 'excited');
     S.babySay(ctx, 'hungry');
 
@@ -1163,7 +1285,9 @@ export class FeedActivity {
   async exit() {
     const ctx = this.ctx;
     this._entered = false;
+    ctx.cameraRig?.setSubject?.(null);
     S.hideSay(ctx);
+    this.promptTarget = null;
     S.lookAt(ctx, null);
     for (const l of this.labels) S.dropLabel(ctx, l);
     this.labels.length = 0;
@@ -2036,28 +2160,68 @@ export class FeedActivity {
 
   /* ---------------------------------------------------------- guidance --- */
 
+  /**
+   * A prompt is a promise that the thing it names is on screen and can be
+   * tapped right now. `promptTarget` is what UI#prompt reads to aim its arrow,
+   * and UI#prompt drops any prompt whose target is off-screen or hidden — so
+   * every branch here has to hand over the *actual* object it is talking
+   * about, and a branch with nothing to point at has to say something that
+   * names no object at all.
+   */
   _advise() {
     const ctx = this.ctx;
     if (!this._entered) return;
-    if (this.phase === 'burp') { S.say(ctx, 'せなかを とんとん', 'hand'); return; }
-    if (this.item?.state === 'residue') { S.say(ctx, 'ゴミばこに ポイ してね', 'hand'); return; }
-    if (!this.bibOn) {
-      S.say(ctx, 'まずは スタイを つけよう', 'hand');
-      this.hintRing.visible = true;
-      this.hintRing.position.set(this.bib.position.x, TRAY_Y + 0.016, this.bib.position.z);
-      return;
-    }
-    if (this.faceDirt > 0.45) { S.say(ctx, 'おしぼりで ふきふき しよう', 'hand'); }
-    else if (this.request) { S.say(ctx, 'たべものを もっていって「あーん」', 'heart'); }
-    else { S.say(ctx, 'すきな たべものを えらんでね', 'heart'); }
 
-    if (this.request && this.foods[this.request]?.visible !== false) {
+    const step = this._adviseStep();
+    this.promptTarget = step.target || null;
+    S.say(ctx, step.text, step.icon);
+
+    if (step.ring) {
       this.hintRing.visible = true;
-      this.hintRing.position.copy(this.foods[this.request].position);
+      this.hintRing.position.copy(step.ring);
       this.hintRing.position.y = TRAY_Y + 0.014;
     } else {
       this.hintRing.visible = false;
     }
+  }
+
+  /** The one thing the child should do next, and the object it lives on. */
+  _adviseStep() {
+    if (this.phase === 'burp') {
+      return { text: 'せなかを とんとん', icon: 'hand', target: this.patTarget };
+    }
+    if (this.item?.state === 'residue') {
+      const obj = this.foods[this.item.id];
+      return { text: 'ゴミばこに ポイ してね', icon: 'hand', target: this.bin, ring: obj?.position };
+    }
+    if (!this.bibOn && this.bib?.visible) {
+      return {
+        text: 'まずは スタイを つけよう', icon: 'hand', target: this.bib,
+        ring: this._tmp.set(this.bib.position.x, 0, this.bib.position.z)
+      };
+    }
+    // Mid-meal: the food is already at the mouth, so the thing to name is the
+    // food, not a bib that is on and no longer tappable.
+    const held = this.item && this.foods[this.item.id];
+    if (held?.visible !== false && (this.item?.state === 'sucking' || this.item?.state === 'eating')) {
+      const kind = FOODS[this.item.id]?.kind;
+      return {
+        text: kind === 'suck' ? 'ごくごく…おいしいね' : 'もぐもぐ、おいしいね',
+        icon: 'heart', target: held
+      };
+    }
+    if (this.faceDirt > 0.45 && this.wipeRoll?.visible !== false) {
+      return { text: 'おしぼりで おかおを ふこう', icon: 'hand', target: this.wipeRoll, ring: this.wipeRoll.position };
+    }
+    const want = this.request && this.foods[this.request];
+    if (want && want.visible !== false) {
+      return {
+        text: 'たべものを もっていって「あーん」', icon: 'heart',
+        target: want, ring: want.position
+      };
+    }
+    // Nothing specific is tappable — so name nothing specific.
+    return { text: 'ゆっくり たべようね', icon: 'heart', target: null };
   }
 
   /* ============================================================= frame === */
@@ -2068,6 +2232,7 @@ export class FeedActivity {
     this.clock.update(dt);
     this.patCooldown = Math.max(0, this.patCooldown - dt);
     this._wipeCooldown = Math.max(0, this._wipeCooldown - dt);
+    this._syncShotPivot();
 
     // the baby's eyes follow whatever is being carried
     if (this.held) {
@@ -2291,6 +2456,11 @@ export class FeedActivity {
       S.mood(ctx, 'yum');
     }
     S.lookAt(ctx, null);
+    // A staged pose is a *different moment* from the one enter() left on
+    // screen, so the guidance has to be re-derived. Without this the harness
+    // shots kept enter()'s "put the bib on" over a baby who is already wearing
+    // one and already mid-bottle.
+    this._advise();
   }
 
   /**

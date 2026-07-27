@@ -661,120 +661,86 @@ export function fabric({
 }
 
 /**
- * Cut-pile rug / carpet. Deliberately high normal strength — a nursery rug
- * is one of the few surfaces a child's eye lingers on.
+ * Loop-pile nursery rug.
+ *
+ * FIFTH pass, and the first one that stopped tuning numbers and looked at what
+ * was actually on the screen (defect D25 — "uniform salt-and-pepper stipple at
+ * every distance ... indistinguishable from compression noise").
+ *
+ * Every previous pass assumed the stipple came from the *tuft* field, and kept
+ * making the tufts bigger and fewer. It did not, and that is why four passes of
+ * that never moved it. The stipple came from two other places, both of which
+ * were feeding the **normal map at strength 2.8**:
+ *
+ *   1. `lay = fbm2(u, v, 5, 14, 3, …)`. Three octaves from a 5 × 14 base runs
+ *      the finest octave at 20 × 56 periods — a 13 mm anisotropic hash — and it
+ *      carried the *largest* single weight in the height field (0.44). At
+ *      strength 2.8 that is a fine directional hatch over the entire rug, which
+ *      is exactly what "salt-and-pepper" describes: short dark dashes, all the
+ *      same size, everywhere, at every distance.
+ *   2. A second Worley octave at `cells × 1.7` (≈36 cells, 20 mm) added on top
+ *      of it.
+ *
+ * So: the lay drops to two octaves off a 3 × 7 base — its finest feature is now
+ * ~50 mm, a broad vacuum stripe rather than a hatch — the fine Worley octave is
+ * gone from the relief entirely, the tuft becomes the dominant and *only*
+ * high-frequency term, and the normal strength comes down to 1.8 because a
+ * rounded loop of yarn does not need 2.8 to catch a rake.
+ *
+ * What is left is three scales and no fourth: drift (patches, reads across the
+ * room), lay (the stripe, reads at 2 m), and the loop itself (reads at 1 m and
+ * closer, as a *loop*, because it is now ~35 mm across and rounded rather than
+ * ~12 mm and conical).
  */
 export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 } = {}) {
   return cached(`rug:${color}:${seed}:${density}`, () => {
-    /* The rug read as sandpaper, not pile. 170 Worley cells across a 512²
-     * texture is 3 texels per tuft: below the Nyquist limit of the generator
-     * itself, so what shipped was aliased hash noise with a bit of colour on
-     * it. A tuft needs ~10 texels to have a shape at all, so the requested
-     * density is treated as a hint and clamped to that. The detail that is lost
-     * comes back as *relief* — the normal strength goes up, because what makes
-     * cut pile read is the way raking light catches the tops of the tufts, not
-     * per-tuft albedo speckle.
-     */
-    /* Second pass, because it still read as "uniform salt-and-pepper stipple
-     * at close range: noise, not fibre" (defect D25).
-     *
-     * The reason a field of Worley tufts reads as *noise* rather than as
-     * *pile* is that every tuft drew its shade from an independent hash, so
-     * adjacent tufts were uncorrelated — which is the literal definition of
-     * white noise, and the eye is extremely good at spotting it. Real pile is
-     * the opposite: fibres lie in clumps, clumps lie in drifts, and the drifts
-     * run with the lay. Value at a point is strongly correlated with the value
-     * 5 mm away and only weakly correlated 50 mm away.
-     *
-     * So the tuft field is now *modulated by two lower-frequency fields*
-     * instead of standing on its own:
-     *
-     *   drift  (period 3)  — broad tonal patches. The only octave that
-     *                        survives to the establishing shot, and what stops
-     *                        the rug reading as a flat disc from across the room.
-     *   clump  (period 13) — groups adjacent tufts into tufts-of-tufts and,
-     *                        crucially, *scales the per-tuft variance*, so the
-     *                        pile is busy in some places and calm in others
-     *                        instead of uniformly speckled everywhere.
-     *
-     * The per-tuft albedo term is roughly halved and its remaining swing is
-     * gated by `clump`; a second, finer Worley octave carries sub-tuft fibre
-     * that only resolves in the closeups. Same texel budget, three scales of
-     * structure instead of one.
-     */
-    /* Third pass. The rug still read as sandpaper in the face closeups, and the
-     * reason was the *second* Worley octave, not the first: `cells * 2.4`
-     * capped at size/4 gave 115 cells across a 512² map — 4.4 texels per fine
-     * tuft — and that octave went into the normal map at full strength. Four
-     * texels of cellular noise in a normal map is not fibre, it is per-pixel
-     * glitter, and once the rug is minified in the wide shot it turns into the
-     * salt-and-pepper stipple the critique keeps flagging.
-     *
-     * Both octaves are now held to a floor of ~10 texels per feature, and the
-     * fine one is weighted down. What the rug loses in per-tuft speckle it gets
-     * back in `lay` and `drift`, which are the octaves that actually survive to
-     * the screen at any distance.
-     */
-    /* Fourth pass — "the rug reads as fine noise / dither stipple rather than
-     * pile at this distance".
-     *
-     * The texel-per-tuft test was still the wrong one. What matters is *screen
-     * pixels* per tuft, and the arithmetic for the establishing shot is brutal:
-     * the rug is 2.36 m across, tiled 5×, so one tile is 470 mm; 39 tufts per
-     * tile is a tuft every 12 mm; at 2.5 m the rug spans ~400 px, i.e. 170
-     * px/m, so a tuft is *two pixels* and the fine octave was one and a half.
-     * A two-pixel cellular field with an independent per-cell shade is the
-     * textbook definition of dither, which is exactly what it looked like.
-     *
-     * Tufts are therefore roughly halved in number (size/22 ⇒ ~23 per tile,
-     * 20 mm, 3.5 px) and — see makeCarpet() — the rug's repeat is capped, which
-     * buys the rest. Nothing is lost: real cut pile of this weight has a tuft
-     * every 6–10 mm and you have never been able to resolve one from standing
-     * height. What you *do* see is the lay, the drift and the clumping, and
-     * those get the weight instead.
-     */
-    const cells = Math.max(8, Math.min(Math.round(density * 0.16), Math.floor(size / 22)));
-    const fineCells = Math.min(Math.round(cells * 1.7), Math.floor(size / 14));
-    // The pile lies in a direction: long, soft bands (the "vacuum stripe")
-    // stretched across the rug, which is most of what sells a cut pile.
-    const lay = (u, v) => fbm2(u, v, 5, 14, 3, seed + 5);
+    // ~20 texels per loop, and — with the repeat cap in makeCarpet — ~35 mm of
+    // world per loop, which is 14 screen pixels in the establishing shot and 30
+    // in the closeups. A loop you can see the shape of is pile; one you cannot
+    // is dither, and there is no useful territory in between.
+    const cells = Math.max(8, Math.min(Math.round(density * 0.16), Math.floor(size / 20)));
+    /* The lay: the direction the pile has been brushed. Two octaves, so the
+     * finest thing it can produce is ~50 mm — a stripe, not a hatch. This is
+     * the term that used to be the stipple. */
+    const lay = (u, v) => fbm2(u, v, 3, 7, 2, seed + 5);
     const drift = (u, v) => fbm(u, v, 3, 3, seed + 41);
-    const clump = (u, v) => fbm(u, v, 13, 3, seed + 67);
-    const height = (u, v) => {
+    const clump = (u, v) => fbm(u, v, 7, 2, seed + 67);
+    /* One loop of yarn: a rounded crown with a dark root gap between it and its
+     * neighbours. `f1 * 1.12` pushes the zero crossing just inside the cell
+     * boundary so the roots actually go dark instead of the crowns meeting flat,
+     * and the 1.5 exponent rounds the crown over — a linear cone reads as a
+     * faceted pebble under a strong normal map. */
+    const loop = (u, v) => {
       const w = worley(u, v, cells, seed);
-      const tuft = Math.pow(1 - w.f1, 1.35);
-      const f = Math.pow(1 - worley(u, v, fineCells, seed + 23).f1, 2.0);
-      return tuft * 0.54 + f * 0.05 + lay(u, v) * 0.44;
+      return Math.pow(Math.max(0, 1 - w.f1 * 1.12), 1.5);
     };
+    const height = (u, v) => loop(u, v) * 0.70 + lay(u, v) * 0.30;
     const map = generate(size, (u, v, out) => {
       const w = worley(u, v, cells, seed);
-      const h = Math.pow(1 - w.f1, 1.35);
+      const h = Math.pow(Math.max(0, 1 - w.f1 * 1.12), 1.5);
       const cl = clump(u, v);
       const dr = drift(u, v);
       const sweep = lay(u, v);
       const shade =
           0.80                        // base
-        + (dr - 0.5) * 0.20           // drifts        — reads across the room
+        + (dr - 0.5) * 0.26           // wool mottle   — reads across the room
         + (cl - 0.5) * 0.13           // clumping      — reads at a metre
-        + (sweep - 0.5) * 0.20        // directional lay
-        + h * 0.11                    // tuft tops     — reads at 30 cm
-        // Per tuft. This is white noise by construction — an independent hash
-        // per cell — so it is the one term that can only ever *become* stipple
-        // when the rug is minified. Halved, and gated harder by the clump field
-        // so it survives as "a busy patch of pile" rather than as an even
-        // dither over the whole disc.
-        + (w.id - 0.5) * (0.10 + cl * 0.90) * 0.042;
+        + (sweep - 0.5) * 0.15        // directional lay
+        + h * 0.15                    // loop crowns   — reads at 30 cm
+        // Per loop. White noise by construction — an independent hash per cell
+        // — so it is the one term that can only ever *become* stipple when the
+        // rug is minified. Kept as a whisper and gated by the clump field, so a
+        // patch of pile can be busy without the whole disc dithering.
+        + (w.id - 0.5) * (0.10 + cl * 0.90) * 0.030;
       const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });
-    // 4.2 sparkled: at rug distance a tuft is 2–3 screen pixels and a normal
-    // map that strong aliases into glitter. 3.4 still rakes properly.
-    // …and once the tufts were made twice as big, 3.4 became twice as loud —
-    // the per-tuft light/dark swing in the establishing shot was competing with
-    // the baby for attention. 2.8 keeps the rake and lets the pile sit down.
-    const normal = normalFromHeight(size, 2.8, height);
+    // 2.8 was tuned to make a 12 mm hatch visible. With the hatch gone and the
+    // loop three times the size, 1.8 rakes a loop properly and leaves nothing
+    // for the pixel grid to beat against.
+    const normal = normalFromHeight(size, 1.8, height);
     const rough = generate(size, (u, v, out) => {
-      // tuft tops catch a faint sheen; the roots are pure scatter. The drift
+      // loop crowns catch a faint sheen; the roots are pure scatter. The drift
       // field rides along, because an evenly-sheened rug is as much of a tell
       // as an evenly-coloured one.
       out[0] = out[1] = out[2] = Math.min(1, Math.max(0.2,

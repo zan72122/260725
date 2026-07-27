@@ -572,17 +572,22 @@ export function makeCarpet({ color = 0xffd7e6, repeat = 3, seed = 19, density = 
     sheenRoughness: 0.9,
     envMapIntensity: 0.7
   });
-  mat.normalScale.set(1.5, 1.5);
+  mat.normalScale.set(1.15, 1.15);
   /* Tiling cap. A rug is the one surface in the room that is *always* seen
    * whole, from standing height, at 2–3 m — so its tile is only ever minified,
    * never magnified, and the caller's `repeat` sets how many screen pixels a
-   * tuft gets. At repeat 5 on a 2.36 m rug a tuft lands on two pixels and the
-   * pile turns to dither (see TEX.carpet). 3.2 puts it on four to five, which
-   * is the point where the normal map starts describing a shape instead of
-   * flickering. Capped rather than exposed as a new argument because there is
+   * loop of pile gets. At repeat 5 on a 2.36 m rug a loop lands on two pixels
+   * and the pile turns to dither (see TEX.carpet). 3.2 put it on four or five,
+   * which was still inside the range where the eye reads "noise" rather than
+   * "fibre" — and the closeup framings (`05`, `07`) view this surface from
+   * 0.8 m, not 2.5 m, where four pixels is unarguably dither.
+   *
+   * 2.8 is 0.84 m of rug per tile: a loop is ~35 mm, which is 14 screen pixels
+   * in the establishing shot and 30 in a closeup. That is a *loop* at both
+   * distances. Capped rather than exposed as a new argument because there is
    * no rug in the game for which a finer tile would survive to the screen.
    */
-  unshare(mat, { repeat: Math.min(repeat, 3.2) });
+  unshare(mat, { repeat: Math.min(repeat, 2.8) });
   return mat;
 }
 
