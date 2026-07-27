@@ -1,0 +1,170 @@
+[
+  {
+    "id": "01-room-wide",
+    "file": "01-room-wide.png",
+    "scene": "play",
+    "note": "Establishing shot of the nursery. Judge: lighting, materials, composition, light shaft."
+  },
+  {
+    "id": "02-room-wide-hud",
+    "file": "02-room-wide-hud.png",
+    "scene": "play",
+    "note": "Same frame with HUD. Judge: UI craft against the 3D."
+  },
+  {
+    "id": "03-baby-face",
+    "file": "03-baby-face.png",
+    "scene": "play",
+    "note": "Hero face closeup. Judge: skin SSS, eyes, catchlights, hair."
+  },
+  {
+    "id": "04-baby-face-neutral",
+    "file": "04-baby-face-neutral.png",
+    "scene": "play",
+    "note": "Neutral expression — hardest to make appealing."
+  },
+  {
+    "id": "05-baby-cry",
+    "file": "05-baby-cry.png",
+    "scene": "play",
+    "note": "Tears, mouth interior, brow deformation."
+  },
+  {
+    "id": "06-baby-sleepy",
+    "file": "06-baby-sleepy.png",
+    "scene": "sleep",
+    "note": "Heavy lids, night lighting on skin."
+  },
+  {
+    "id": "07-baby-full",
+    "file": "07-baby-full.png",
+    "scene": "play",
+    "note": "Full body. Judge: proportions, silhouette, cloth, contact shadow."
+  },
+  {
+    "id": "10-feed-bottle",
+    "file": "10-feed-bottle.png",
+    "scene": "feed",
+    "note": "Bottle feeding mid-way. Judge: glass transmission, milk volume."
+  },
+  {
+    "id": "11-feed-messy",
+    "file": "11-feed-messy.png",
+    "scene": "feed",
+    "note": "Food on the face + bib stains."
+  },
+  {
+    "id": "12-feed-apple",
+    "file": "12-feed-apple.png",
+    "scene": "feed",
+    "note": "Bite marks, crumbs, tray."
+  },
+  {
+    "id": "20-bath-fill",
+    "file": "20-bath-fill.png",
+    "scene": "bath",
+    "note": "Tub filling. Judge: water surface, refraction, steam."
+  },
+  {
+    "id": "21-bath-foam",
+    "file": "21-bath-foam.png",
+    "scene": "bath",
+    "note": "Foam hair, bubbles, iridescence."
+  },
+  {
+    "id": "22-bath-splash",
+    "file": "22-bath-splash.png",
+    "scene": "bath",
+    "note": "Splash particles, wet skin."
+  },
+  {
+    "id": "23-bath-wet",
+    "file": "23-bath-wet.png",
+    "scene": "bath",
+    "note": "Wet skin roughness + drips + towel."
+  },
+  {
+    "id": "24-bath-caustics",
+    "file": "24-bath-caustics.png",
+    "scene": "bath",
+    "note": "Settled water after a splash. Judge: refraction bending the submerged legs, caustics on the tub floor, waterline meniscus, specular glints on the ripples."
+  },
+  {
+    "id": "25-bath-horn",
+    "file": "25-bath-horn.png",
+    "scene": "bath",
+    "note": "Foam-horn hairstyle closeup. Judge: lather volume and clustering, the sculpted peak, iridescent bubbles."
+  },
+  {
+    "id": "30-dress-outfit",
+    "file": "30-dress-outfit.png",
+    "scene": "dress",
+    "note": "Wardrobe + outfit selection."
+  },
+  {
+    "id": "31-dress-putting-on",
+    "file": "31-dress-putting-on.png",
+    "scene": "dress",
+    "note": "Garment mid-way over the head — cloth deformation."
+  },
+  {
+    "id": "40-play-blocks",
+    "file": "40-play-blocks.png",
+    "scene": "play",
+    "note": "Block tower. Judge: physics settle, wood material, AO."
+  },
+  {
+    "id": "41-play-collapse",
+    "file": "41-play-collapse.png",
+    "scene": "play",
+    "note": "Mid-collapse — motion, contact, dust."
+  },
+  {
+    "id": "42-play-ball",
+    "file": "42-play-ball.png",
+    "scene": "play",
+    "note": "Ball + crawl pose."
+  },
+  {
+    "id": "43-play-balloon",
+    "file": "43-play-balloon.png",
+    "scene": "play",
+    "note": "Balloon translucency + string."
+  },
+  {
+    "id": "50-sleep-crib",
+    "file": "50-sleep-crib.png",
+    "scene": "sleep",
+    "note": "Night crib. Judge: warm practical light, blanket cloth, mood."
+  },
+  {
+    "id": "51-sleep-asleep",
+    "file": "51-sleep-asleep.png",
+    "scene": "sleep",
+    "note": "Asleep closeup — the money shot for lighting."
+  },
+  {
+    "id": "52-sleep-lamp-off",
+    "file": "52-sleep-lamp-off.png",
+    "scene": "sleep",
+    "note": "Moonlight only. Judge: does it stay readable and pretty in low key."
+  },
+  {
+    "id": "60-weather-rain",
+    "file": "60-weather-rain.png",
+    "scene": "play",
+    "note": "Rain on the glass, overcast grade."
+  },
+  {
+    "id": "61-golden-hour",
+    "file": "61-golden-hour.png",
+    "scene": "feed",
+    "note": "Golden hour light shaft + dust motes."
+  },
+  {
+    "id": "62-clutter",
+    "file": "62-clutter.png",
+    "scene": "play",
+    "note": "Lived-in room with scattered toys."
+  }
+]
