@@ -26,6 +26,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { contactShadow } from '../engine/lighting.js';
 import { WaterSurface, WaterlineRing, TapStream, SteamVeil, DynamicTube, rng } from '../fx/water.js';
 import { FoamSystem } from '../fx/foam.js';
+import { trimShadowCasters } from './_shared.js';
 
 /* ------------------------------------------------------------ constants --- */
 
@@ -432,6 +433,11 @@ export class BathActivity {
     this.root.updateMatrixWorld(true);
     this.towelHome = this.towel.getWorldPosition(new THREE.Vector3());
     this._registerCameras();
+
+    // Tap knobs, the gauge bezel, the rinse cup and the hose collar each set
+    // castShadow individually; at this scale they cost a draw call apiece and
+    // shade nothing a soft VSM map can resolve. (D10)
+    trimShadowCasters(this.root, { minRadius: 0.050 });
 
     return this;
   }
@@ -1289,13 +1295,32 @@ export class BathActivity {
         });
       } catch (e) { /* the rig may not accept overrides — never fatal */ }
     };
-    // The hero shot: the bowl, the mixer above the rim, and enough headroom
-    // for a fully sculpted foam horn on a seated baby. Pulled in hard from the
-    // original framing, which left the tub at a third of the frame height and
-    // the bottom third empty floor.
-    add('tub', [0.324, 0.941, 1.064], [0.00, 0.52, 0.06], 34, 0.22);
-    // over the rim, tight on a baby sitting in the water
-    add('bath-face', [0.19, 0.87, 0.50], [0.02, 0.64, 0.02], 34, 0.14, 1.25);
+    // The set, in tub-local metres, is what every number below is reasoned
+    // from: bowl base 0.30, water surface 0.50 at full, rim 0.559, a seated
+    // baby's head centre ≈ 0.67, and a fully sculpted foam horn topping out
+    // ≈ 0.85. Two constraints follow and neither is a taste call.
+    //
+    //  · Headroom. The frame top must clear 0.85 or the horn is decapitated.
+    //  · Elevation. Look down too steeply and the water is a lid; too shallow
+    //    and the near rim (radius 0.29, top 0.559) cuts the waterline off. In
+    //    between, the *far* half of the surface reads — which is where the
+    //    meniscus round the torso, the refracted legs and the caustics on the
+    //    tub floor actually live.
+
+    // Hero: whole tub, mixer above the rim. A fully lathered horn measures
+    // ~0.93 rather than the 0.85 the foam spec implies, so the frame top sits
+    // at 1.02 — a tenth of a metre of air, which survives a taller horn.
+    add('tub', [0.392, 1.110, 1.275], [0.00, 0.60, 0.06], 34, 0.24);
+
+    // Water shot (24-bath-caustics, 25-bath-horn). ~22° above the surface: low
+    // enough to see through it to the tub floor, high enough that the sight
+    // line to the far waterline passes over the near rim at y ≈ 0.72.
+    add('bath-face', [0.32, 0.946, 0.752], [0.00, 0.615, 0.06], 34, 0.16, 1.25);
+
+    // Splash (22-bath-splash) needs air: droplets arc well above the rim, so
+    // this one is pulled back and aimed high rather than tight on the face.
+    add('closeup', [0.40, 1.152, 1.008], [0.00, 0.65, 0.06], 34, 0.20);
+
     // the towel-and-dryer stage on the mat
     add('bath-dry', [0.39, 0.72, 1.83], [0.02, 0.32, 0.50], 33, 0.22);
   }

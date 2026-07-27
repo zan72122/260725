@@ -459,6 +459,8 @@ export class Face {
     this._rnd = blinkRandom(0xb1a2c3);
     // first blink lands after every shot in tools/shots.json has been captured
     this._blinkT = 5.9;
+    this._attend = true;
+    this._dwell = 1.9;
     this._blinkPhase = -1;                        // -1 idle, else seconds elapsed
     this._blinkQueued = 0;
     this._blinkAmount = 0;
@@ -636,7 +638,7 @@ export class Face {
   }
 
   _buildBlush() {
-    const mat = MAT.makeBlush();
+    const mat = MAT.makeBlush({ color: 0xff5273 });
     this.blushMat = mat;
     this.blush = [];
     // curved caps so the blush hugs the cheek instead of floating on a card
@@ -754,8 +756,9 @@ export class Face {
   /* -------------------------------------------------------------- gaze --- */
 
   lookAt(worldPos) {
+    const fresh = !worldPos || !this.lookTarget || this.lookTarget.distanceToSquared(worldPos) > 4e-4;
     this.lookTarget = worldPos ? worldPos.clone() : null;
-    if (worldPos) this._saccadeIn = 0;
+    if (worldPos && fresh) { this._saccadeIn = 0; this._attend = true; this._dwell = 1.6 + this._rnd() * 0.8; }
   }
 
   _updateGaze(dt, ctx) {
@@ -766,8 +769,21 @@ export class Face {
     // resolved into *group* space, not bone space — converting into bone space
     // makes every target read half a metre too low, pins the pitch solve at its
     // lower clamp, and rolls both irises out behind the lids for good.
+    // Attention, not obedience. An activity says "look at the bottle" once and
+    // means it forever; a real infant studies the thing for a beat and then
+    // looks up at whoever is holding it. Alternating gives the character
+    // something no amount of eye geometry can fake — the sense that it is
+    // deciding where to look — and it is also why the hero portraits stopped
+    // being a baby staring at the floor away from camera.
+    this._dwell = (this._dwell ?? 0) - dt;
+    if (this._dwell <= 0) {
+      this._attend = !this._attend;
+      this._dwell = this._attend ? 1.5 + this._rnd() * 1.1 : 2.4 + this._rnd() * 1.6;
+      if (!this._attend) this._saccadeIn = 0;
+    }
+
     let localTarget;
-    if (this.lookTarget) {
+    if (this.lookTarget && this._attend) {
       localTarget = this.group.worldToLocal(this.lookTarget.clone());
     } else {
       // Idle wander. The point has to be built in *world* space off the eye's
@@ -778,7 +794,7 @@ export class Face {
       if (this._saccadeIn <= 0) {
         this._saccadeIn = 0.9 + this._rnd() * 2.6;
         // infants lock onto faces: most fixations go to whoever is watching
-        this._idleAtCam = this._rnd() < 0.62;
+        this._idleAtCam = this._rnd() < 0.80;
         this._idlePoint.set(
           (this._rnd() - 0.5) * 0.34,
           (this._rnd() - 0.42) * 0.16,
@@ -968,7 +984,7 @@ export class Face {
     /* -- cheeks / blush ---------------------------------------------------- */
     // was val*0.58, which peaked at 0.16 opacity on `happy` — invisible over
     // saturated skin under a bright key. A flushed infant cheek is not subtle.
-    this.blushMat.opacity = clamp01(val('blush')) * 0.92;
+    this.blushMat.opacity = clamp01(val('blush')) * 1.0;
     for (const m of this.blush) {
       m.visible = this.blushMat.opacity > 0.012;
       // the flush spreads as well as deepening

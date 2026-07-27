@@ -242,7 +242,7 @@ export class Hair {
     const pos = [], nor = [], uv = [], idx = [];
     let vo = 0;
     this.cowlick = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const root = onSkull(WHORL.clone().sub(SKULL.c).normalize()
         .add(V(0.10 * (i - 1), 0, 0.06 * (i - 1))).normalize(), 0.0030);
       const card = {
@@ -252,7 +252,7 @@ export class Hair {
       };
       let p = root.clone();
       const up = V(0.22 * (i - 1) + 0.10, 1, -0.30).normalize();
-      const len = 0.036 + i * 0.006;
+      const len = 0.020 + i * 0.004;
       for (let k = 0; k <= segs; k++) {
         const t = k / segs;
         // stands up, then curls back and over — a proper question-mark tuft
@@ -270,7 +270,7 @@ export class Hair {
       }
       for (let k = 0; k <= segs; k++) {
         const t = k / segs;
-        const w = 0.0060 * (1 - t * 0.55);
+        const w = 0.0075 * (1 - t * 0.5);
         card.halfW.push(w);
         const c = card.rest[k], s = card.side[k], n = card.normal[k];
         pos.push(c.x - s.x * w, c.y - s.y * w, c.z - s.z * w);

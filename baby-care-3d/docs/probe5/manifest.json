@@ -1,0 +1,14 @@
+[
+  {
+    "id": "01-room-wide",
+    "file": "01-room-wide.png",
+    "scene": "play",
+    "note": "Establishing shot of the nursery. Judge: lighting, materials, composition, light shaft."
+  },
+  {
+    "id": "61-golden-hour",
+    "file": "61-golden-hour.png",
+    "scene": "feed",
+    "note": "Golden hour light shaft + dust motes."
+  }
+]

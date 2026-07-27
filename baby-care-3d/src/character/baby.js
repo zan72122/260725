@@ -413,7 +413,7 @@ export class Baby {
     const head = R.bones.head;
     const neck = R.bones.neck;
     let yaw = 0, pitch = 0;
-    const t = this._lookTarget;
+    const t = (this.face && this.face._attend === false) ? null : this._lookTarget;
     if (t) {
       neck.updateWorldMatrix(true, false);
       const local = _v1.copy(t).applyMatrix4(_m1.copy(neck.matrixWorld).invert()).sub(head.position);

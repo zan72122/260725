@@ -189,7 +189,7 @@ export class Outfit {
         // hard flat shards around every neckline and cuff.
         detail: (x, y, z) => {
           const mk = def.mask(x, y, z);
-          return -def.inflate * (1 - mk) - 0.0105 * (1 - sstep(0.28, 0.70, mk));
+          return -def.inflate * (1 - mk) - 0.0150 * (1 - sstep(0.30, 0.55, mk));
         },
         // an 8 mm-proud shell needs a correspondingly deep dominance sink, or
         // the torso and sleeve shells interleave at the shoulder into a fan of
@@ -218,7 +218,7 @@ export class Outfit {
         // sawtooth of single triangles hanging past every hem
         let sum = 0;
         for (const v of [a, b, c]) sum += def.mask(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
-        if (sum / 3 > 0.30) idx.push(a, b, c);
+        if (sum / 3 > 0.02) idx.push(a, b, c);
       }
       vo += n;
     }
@@ -337,14 +337,14 @@ function mergeUsed(geo) {
 export const SHELL_PATCHES = {
   torso: {
     axis: [[0, 0.2520, -0.0020], [0, 0.3050, 0.0060], [0, 0.3620, 0.0060], [0, 0.4300, 0.0010]],
-    segs: 40, rings: 34, capStart: 6, capEnd: 3, tMax: 0.24
+    segs: 54, rings: 44, capStart: 6, capEnd: 3, tMax: 0.24
   },
   head: {
     star: true, center: [0, 0.5330, 0.0060], segs: 46, rings: 34, tMax: 0.22,
     collapse: { from: 0.86, to: [0, 0.4400, 0.0040] }
   },
-  armL: { axis: [[0.0820, 0.4010, 0.0040], [0.1265, 0.3480, 0.0225], [0.1570, 0.3010, 0.0420]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
-  armR: { axis: [[-0.0820, 0.4010, 0.0040], [-0.1265, 0.3480, 0.0225], [-0.1570, 0.3010, 0.0420]], segs: 22, rings: 22, capStart: 2, capEnd: 2, tMax: 0.14 },
+  armL: { axis: [[0.0820, 0.4010, 0.0040], [0.1265, 0.3480, 0.0225], [0.1570, 0.3010, 0.0420]], segs: 36, rings: 32, capStart: 2, capEnd: 2, tMax: 0.14 },
+  armR: { axis: [[-0.0820, 0.4010, 0.0040], [-0.1265, 0.3480, 0.0225], [-0.1570, 0.3010, 0.0420]], segs: 36, rings: 32, capStart: 2, capEnd: 2, tMax: 0.14 },
   legL: { axis: [[0.0430, 0.2620, 0.0040], [0.0520, 0.1680, 0.0000], [0.0560, 0.0660, 0.0040]], segs: 26, rings: 26, capStart: 2, capEnd: 2, tMax: 0.16 },
   legR: { axis: [[-0.0430, 0.2620, 0.0040], [-0.0520, 0.1680, 0.0000], [-0.0560, 0.0660, 0.0040]], segs: 26, rings: 26, capStart: 2, capEnd: 2, tMax: 0.16 },
   footL: { axis: [[0.0560, 0.0345, -0.0170], [0.0570, 0.0270, 0.0400]], segs: 20, rings: 15, capStart: 5, capEnd: 5, tMax: 0.10 },

@@ -107,6 +107,7 @@ try {
         app.activity.dispose?.();
         app.activity = null;
         app.activityName = '';
+        app._auditDispose?.();          // same census setActivity() would file
         for (let i = 0; i < 30; i++) app.step(1 / 60);
         const after = snap();
         out.push({ cycle: c + 1, name: n, built, after });

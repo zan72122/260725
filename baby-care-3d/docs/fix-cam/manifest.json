@@ -1,9 +1,33 @@
 [
   {
-    "id": "50-sleep-crib",
-    "file": "50-sleep-crib.png",
-    "scene": "sleep",
-    "note": "Night crib. Judge: warm practical light, blanket cloth, mood."
+    "id": "03-baby-face",
+    "file": "03-baby-face.png",
+    "scene": "play",
+    "note": "Hero face closeup. Judge: skin SSS, eyes, catchlights, hair."
+  },
+  {
+    "id": "10-feed-bottle",
+    "file": "10-feed-bottle.png",
+    "scene": "feed",
+    "note": "Bottle feeding mid-way. Judge: glass transmission, milk volume."
+  },
+  {
+    "id": "21-bath-foam",
+    "file": "21-bath-foam.png",
+    "scene": "bath",
+    "note": "Foam hair, bubbles, iridescence."
+  },
+  {
+    "id": "30-dress-outfit",
+    "file": "30-dress-outfit.png",
+    "scene": "dress",
+    "note": "Wardrobe + outfit selection."
+  },
+  {
+    "id": "40-play-blocks",
+    "file": "40-play-blocks.png",
+    "scene": "play",
+    "note": "Block tower. Judge: physics settle, wood material, AO."
   },
   {
     "id": "51-sleep-asleep",

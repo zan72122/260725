@@ -25,6 +25,7 @@ import {
   makeBlockSet, makeBall, makeBalloon, makeXylophone, makeDrum, makeToyBox,
   hitProxy, anchorPoint, anchorHasFurniture, snd
 } from '../fx/toys.js';
+import { trimShadowCasters } from './_shared.js';
 
 const clamp = THREE.MathUtils.clamp;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -219,6 +220,14 @@ export class PlayActivity {
     this.headTarget = hitProxy(res, 0.085, 'head');
     this.group.add(this.headTarget);
     this.pickables.push(this.headTarget);
+
+    // D10 — this scene already draws its own contact shadows (see the shadow
+    // field fed at the end of update()), so the xylophone bars, the balloon
+    // string, the handkerchief and the small hardware were paying for a second
+    // pass through the VSM map that shades nothing at this softness. The
+    // blocks (bounding radius 0.054) and the ball stay in: block-on-block
+    // shadow is what makes a tower read as stacked rather than printed.
+    trimShadowCasters(this.group, { minRadius: 0.050 });
 
     res.claim(this.group);
   }
