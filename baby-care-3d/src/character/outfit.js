@@ -137,13 +137,28 @@ export const GARMENTS = {
   },
   bib: {
     groups: ['torso'],
-    inflate: 0.0068,
-    lod: 0.8,
+    /* ── Why the bib rendered nothing ─────────────────────────────────────
+     * It was `inflate: 0.0068`. Every garment here is displaced outward from
+     * the *skin*, not from whatever is already worn — so a 6.8 mm bib sat
+     * 8 mm underneath the 14.8 mm `top`, fully enclosed by it, in the one
+     * scene (`feed`) where a bib is always worn over a shirt. Measured at
+     * runtime the mesh was built (371 triangles), visible, parented, and
+     * every vertex was outside the skin (mean +3.0 mm) — and every one of
+     * them was inside the shirt (mean +8.9 mm).
+     *
+     * The stack has to be authored explicitly, because the shells cannot see
+     * each other: skin 0 → bottom 7.2 → diaper 11.2 → top 14.8 → bib 21.5.
+     * A bib is the outermost layer on the torso; nothing goes over it.      */
+    inflate: 0.0215,
+    lod: 1.0,
     mask: (x, y, z) => {
-      if (z < 0.010) return 0;
-      const r = Math.hypot(x / 0.062, (y - 0.3880) / 0.058);
-      const neck = sstep(0.030, 0.052, Math.hypot(x / 0.9, (y - 0.4340) / 0.75));
-      return (1 - sstep(0.85, 1.05, r)) * neck;
+      if (z < 0.006) return 0;
+      // a bib silhouette: a broad rounded shield, wider at the top than the
+      // bottom, with a scooped neck opening
+      const w = 0.070 - 0.016 * sstep(0.360, 0.410, 0.770 - y);
+      const r = Math.hypot(x / w, (y - 0.3820) / 0.062);
+      const neck = sstep(0.030, 0.055, Math.hypot(x / 0.9, (y - 0.4330) / 0.72));
+      return (1 - sstep(0.82, 1.02, r)) * neck;
     },
     material: (c) => MAT.makeTerry({ color: c, repeat: 8, seed: 71 })
   }

@@ -441,9 +441,13 @@ export const MOODS = {
 /* ------------------------------------------------------------------ Face -- */
 
 export class Face {
-  constructor({ tier = 2, headGeometry } = {}) {
+  constructor({ tier = 2, headGeometry, field = null } = {}) {
     this.tier = tier;
     this.headGeometry = headGeometry;
+    // The implicit body field, when Baby hands it over. Anything that has to
+    // sit *on* the skin (the blush caps) is placed by querying it rather than
+    // by a hand-authored offset — see `_buildBlush`.
+    this.field = field;
     this.group = new THREE.Group();
     this.group.name = 'face';
 
@@ -642,16 +646,79 @@ export class Face {
     teeth.visible = false;
   }
 
+  /**
+   * Cheek blush.
+   *
+   * ── Why no cheek colour was visible in any frame ────────────────────────
+   *
+   * Nothing was wrong with the amplitude or the material. The caps were inside
+   * the skull. Two mistakes compounded:
+   *
+   *   1. `SphereGeometry`'s cap is a dome around **+Y**, but `Object3D.lookAt`
+   *      aims **+Z**. So the dome pointed *up* out of the mesh origin, not at
+   *      the target it was aimed at.
+   *   2. The origin was then pre-offset by (−53 mm, −55.5 mm) — the sphere
+   *      radius — on the assumption that the pole would come back out along
+   *      the aim. It did not, so the offset simply buried the origin.
+   *
+   * Measured at runtime, both caps ended up at x ≈ ±0 (i.e. on the midline,
+   * not on two cheeks), 6 cm behind the face, with the whole 62 mm cap sphere
+   * inside a head whose radius at the cheek is ~72 mm. `field.eval` at the
+   * origin was −5.5 mm: under the skin, drawn, depth-tested away.
+   *
+   * A third, quieter bug would have kept it invisible even so: the alpha is a
+   * *radial* sprite, and a sphere cap's UVs are (azimuth, arc) — sampling a
+   * disc-shaped alpha with polar coordinates puts alpha ≈ 0 over the entire
+   * patch. The cap is re-charted below so u,v are the flat disc coordinates
+   * the sprite was drawn in.
+   *
+   * The placement is now taken from the body field itself: Newton-step onto
+   * the iso-0 surface, take the gradient for the normal, lift 1.6 mm. That is
+   * the same discipline the garment shells had to learn — never author a
+   * surface-hugging offset by hand when the surface is available to ask.
+   */
   _buildBlush() {
     const mat = MAT.makeBlush({ color: 0xff5273 });
     this.blushMat = mat;
     this.blush = [];
-    // curved caps so the blush hugs the cheek instead of floating on a card
-    const geo = new THREE.SphereGeometry(0.062, 18, 12, 0, Math.PI * 2, 0, 0.32);
+
+    // Curvature deliberately much flatter than the cheek: a cap tighter than
+    // the surface it lies on dives its own rim into the skin, and the depth
+    // test then bites a hard crescent out of the patch.
+    const R = 0.150;
+    const CAP = 0.0150;                       // 30 mm across on the skin
+    const geo = new THREE.SphereGeometry(R, 24, 10, 0, Math.PI * 2, 0, Math.asin(CAP / R));
+    geo.rotateX(Math.PI / 2);                 // pole +Y → +Z, which is what lookAt aims
+    geo.translate(0, 0, -R);                  // pole at the local origin
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      uv.setXY(i, 0.5 + pos.getX(i) / (2 * CAP), 0.5 + pos.getY(i) / (2 * CAP));
+    }
+    uv.needsUpdate = true;
+
+    const n = [0, 0, 0];
+    const _z = new THREE.Vector3(0, 0, 1), _n = new THREE.Vector3();
     for (const s of [1, -1]) {
       const m = new THREE.Mesh(geo, mat);
-      m.position.set(FACE.cheek[0] * s * 0.20, FACE.cheek[1] - 0.0530, FACE.cheek[2] - 0.0555);
-      m.lookAt(new THREE.Vector3(FACE.cheek[0] * s * 3.2, FACE.cheek[1] - 0.010, FACE.cheek[2] + 0.09));
+      // Low and lateral: on the apple of the cheek, not up against the eye
+      // socket where the surface falls away and the cap rim buries itself.
+      let p = new THREE.Vector3(FACE.cheek[0] * 1.10 * s, FACE.cheek[1] - 0.0090, FACE.cheek[2] - 0.0075);
+      if (this.field) {
+        // land exactly on the skin, then face along its normal
+        for (let i = 0; i < 6; i++) {
+          const d = this.field.eval(p.x, p.y, p.z);
+          if (Math.abs(d) < 1e-5) break;
+          this.field.grad(p.x, p.y, p.z, n);
+          p.addScaledVector(_n.set(n[0], n[1], n[2]), -d);
+        }
+        this.field.grad(p.x, p.y, p.z, n);
+        _n.set(n[0], n[1], n[2]).normalize();
+      } else {
+        // fallback: outward from the head's centre of mass
+        _n.set(p.x - 0, p.y - 0.5330, p.z - 0.0060).normalize();
+      }
+      m.position.copy(p).addScaledVector(_n, 0.0030);
+      m.quaternion.setFromUnitVectors(_z, _n);
       m.renderOrder = 2;
       this.group.add(m);
       this.blush.push(m);
@@ -825,20 +892,38 @@ export class Face {
       localTarget = this.group.worldToLocal(w);
     }
 
-    // per-eye vergence: each eye aims at the point itself
-    for (const e of this.eyes) {
-      const p = e.pivot.position;
+    /* Per-eye vergence.
+     *
+     * Each eye aims at the point itself, which is right — but the previous
+     * version then clamped *each eye's absolute yaw* to ±0.34. That clamp is
+     * symmetric, so the moment the target is more than ~20° off axis both eyes
+     * hit the same rail at the same value and the difference between them —
+     * which is the entire vergence signal — is thrown away. The pair then
+     * points parallel, hard to one side, and reads wall-eyed. It is why the
+     * eyes never converged in `04`, `07`, `24`, `25` or `30`.
+     *
+     * Version (where the pair is looking) and vergence (how crossed they are)
+     * are separate degrees of freedom and have to be limited separately. The
+     * eyes may now reach ±0.44 in total, but only ever by adding vergence to a
+     * clamped conjugate angle, so they can never saturate *together*.        */
+    const yaw = [0, 0], pit = [0, 0];
+    for (let i = 0; i < this.eyes.length; i++) {
+      const p = this.eyes[i].pivot.position;
       const dx = localTarget.x - p.x, dy = localTarget.y - p.y, dz = Math.max(0.05, localTarget.z - p.z);
-      let yaw = Math.atan2(dx, dz);
+      yaw[i] = Math.atan2(dx, dz);
       // rotation.x is *positive downward* (it takes +z toward -y), so a target
       // above the eye needs a negative pitch
-      let pitch = -Math.atan2(dy, Math.hypot(dx, dz));
-      // tight clamps on purpose: the neck carries the bulk of the angle now,
-      // and an iris parked on its clamp behind the lower lid is why the eyes
-      // read as absent at gameplay distance
-      yaw = THREE.MathUtils.clamp(yaw, -0.34, 0.34);
-      pitch = THREE.MathUtils.clamp(pitch, -0.24, 0.22);
-      e.goalYaw = yaw; e.goalPitch = pitch;
+      pit[i] = -Math.atan2(dy, Math.hypot(dx, dz));
+    }
+    // conjugate angle — the neck carries the bulk of any large turn
+    let version = THREE.MathUtils.clamp((yaw[0] + yaw[1]) * 0.5, -0.30, 0.30);
+    // signed half-vergence; at a 40 cm target this is ~0.07 rad, which is small
+    // but is exactly the cue that says "those two eyes are looking at one thing"
+    let verg = THREE.MathUtils.clamp((yaw[0] - yaw[1]) * 0.5, -0.14, 0.14);
+    const pitchC = THREE.MathUtils.clamp((pit[0] + pit[1]) * 0.5, -0.24, 0.22);
+    for (let i = 0; i < this.eyes.length; i++) {
+      this.eyes[i].goalYaw = version + (i === 0 ? verg : -verg);
+      this.eyes[i].goalPitch = pitchC;
     }
 
     // saccade: eyes snap (≈40 ms) rather than easing, with micro-tremor on top
@@ -1001,9 +1086,10 @@ export class Face {
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';
 
     /* -- cheeks / blush ---------------------------------------------------- */
-    // was val*0.58, which peaked at 0.16 opacity on `happy` — invisible over
-    // saturated skin under a bright key. A flushed infant cheek is not subtle.
-    this.blushMat.opacity = clamp01(val('blush')) * 1.0;
+    // The amplitude was never the problem — the caps were inside the skull (see
+    // `_buildBlush`). Now that they are on the skin, 1.0 is a clown spot: it
+    // renders as two flat red discs. Blood under skin is a *tint*.
+    this.blushMat.opacity = clamp01(val('blush')) * 0.44;
     for (const m of this.blush) {
       m.visible = this.blushMat.opacity > 0.012;
       // the flush spreads as well as deepening

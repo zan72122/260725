@@ -1117,8 +1117,7 @@ export function makeBabySkin(opts = {}) {
     uDirtColor: { value: new THREE.Color(0x6a4a2e) },
     uWet:       { value: 0 },
     uBlush:     { value: 0 },
-    uGrimeScale:{ value: 9.0 },
-    uDirtDebug: { value: 0 }
+    uGrimeScale:{ value: 9.0 }
   };
   Object.assign(mat.userData.uniforms, extra);
   const base = mat.onBeforeCompile;
@@ -1149,22 +1148,39 @@ export function makeBabySkin(opts = {}) {
         uniform vec3  uDirtColor;
         uniform float uWet;
         uniform float uGrimeScale;
-        uniform float uDirtDebug;
         ${_NOISE_GLSL}
       `)
       // after the albedo is resolved, before lighting
       .replace('#include <color_fragment>', /* glsl */`
         #include <color_fragment>
-        float bcZone = clamp(dot(vBabyZone, uDirt), 0.0, 1.4);
-        float bcN = bcFbm(vBabyUv * uGrimeScale);
-        // smudges, not a flat tint: the noise decides where grime actually sits
-        float bcDirt = smoothstep(0.30, 0.92, bcZone * (0.45 + bcN * 1.05));
+        float bcZone = clamp(dot(vBabyZone, uDirt), 0.0, 1.0);
+        // Two scales: broad smears plus a finer crumb speckle inside them.
+        float bcN  = bcFbm(vBabyUv * uGrimeScale);
+        float bcN2 = bcFbm(vBabyUv * uGrimeScale * 3.7 + 11.3);
+
+        /* ── Why this used to render nothing ───────────────────────────────
+         * It was:
+         *     bcDirt = smoothstep(0.30, 0.92, bcZone * (0.45 + bcN * 1.05));
+         * i.e. the *amount* was multiplied into the smoothstep's argument.
+         * That makes the amount a threshold rather than an opacity. With bcN
+         * measured at ~0.1–0.5 over the face and body UV islands, the argument
+         * only clears the 0.30 edge once the amount is near 1, so the whole
+         * useful range of setDirt() fell inside the dead zone below the step.
+         * Measured on a render sweep at the cheek (sRGB, identical lighting):
+         *     amount 0.0 → 244   0.4 → 244   0.6 → 241
+         *     amount 0.75 → 231  0.9 → 209   1.0 → 191
+         * — nothing at all until 0.6, and the arm (zone 'body' ≈ 0.94) never
+         * moved at any amount. The game's own gameplay values sit at 0.2–0.8.
+         *
+         * The noise now decides only *where* grime sits; the amount scales the
+         * result linearly. Same smudged look, monotone from zero.            */
+        float bcPatch = 0.45 + 0.55 * smoothstep(0.16, 0.56, bcN) * (0.60 + 0.40 * bcN2);
+        float bcDirt = clamp(bcZone * 1.30 * bcPatch, 0.0, 1.0);
         diffuseColor.rgb = mix(diffuseColor.rgb,
                                uDirtColor * (0.55 + bcN * 0.55),
-                               bcDirt * 0.88);
+                               bcDirt * 0.92);
         // wet skin is darker and a touch more saturated
         diffuseColor.rgb *= mix(1.0, 0.86, uWet);
-        if (uDirtDebug > 0.5) diffuseColor.rgb = vec3(bcZone, bcN, bcDirt);
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
@@ -1204,25 +1220,47 @@ export function makeScalp({ color = 0x6f4c33 } = {}) {
   });
 }
 
-/** A water droplet clinging to skin. */
+/**
+ * A water droplet clinging to skin. Same fix as `makeTear`: a 2 mm bead with
+ * `transmission` renders as a hollow outlined ring, which is what the drops on
+ * the face and shoulders in `23-bath-wet` were.
+ */
 export function makeDroplet({ tint = 0xd8f0ff } = {}) {
   return memo('droplet' + tint, () => new THREE.MeshPhysicalMaterial({
     color: new THREE.Color(tint),
-    transparent: true, opacity: 0.62,
-    roughness: 0.02, metalness: 0,
-    transmission: 0.9, thickness: 0.003, ior: 1.333,
-    clearcoat: 1, clearcoatRoughness: 0,
-    envMapIntensity: 2.4, depthWrite: false
+    transparent: true, opacity: 0.55,
+    roughness: 0.06, metalness: 0,
+    ior: 1.333, specularIntensity: 1,
+    clearcoat: 1, clearcoatRoughness: 0.02,
+    envMapIntensity: 2.0, depthWrite: false
   }));
 }
 
-/** A tear: slightly thicker and brighter than a bath droplet, so it reads. */
+/**
+ * A tear.
+ *
+ * It used to carry `transmission: 0.85` at `thickness: 0.002` with
+ * `depthWrite: false`. A 3 mm bead that transmissive is optically almost
+ * nothing: the centre passes the background through untouched and only the
+ * grazing rim picks up any Fresnel, so what renders is a thin bright *outline*
+ * with a hole in it. At the inner canthi in `05` that read as lens dirt rather
+ * than as tears, which is the exact failure a transmissive tear is supposed to
+ * avoid.
+ *
+ * A real tear at this size reads as a bright specular bead with a dark wet
+ * core, so that is what this is now: no transmission, a low-opacity milky body
+ * to carry the volume, and a hard clearcoat for the highlight that actually
+ * sells it. It also writes depth, so overlapping beads on a tear track stop
+ * summing their alpha into a flat blob.
+ */
 export function makeTear() {
   return memo('tear', () => new THREE.MeshPhysicalMaterial({
-    color: 0xe6f6ff, transparent: true, opacity: 0.78,
-    roughness: 0.02, metalness: 0, transmission: 0.85,
-    thickness: 0.002, ior: 1.333, clearcoat: 1, clearcoatRoughness: 0,
-    envMapIntensity: 2.6, depthWrite: false
+    color: 0xdcefff, transparent: true, opacity: 0.62,
+    roughness: 0.06, metalness: 0,
+    ior: 1.333, specularIntensity: 1,
+    clearcoat: 1, clearcoatRoughness: 0.02,
+    sheen: 0.5, sheenColor: new THREE.Color(0xffffff),
+    envMapIntensity: 2.2, depthWrite: false
   }));
 }
 
@@ -1285,7 +1323,9 @@ export function makeBlush({ color = 0xff6e88, subsurface = 0xff4a3c } = {}) {
   });
   // The radial sprite carries the shape in its *alpha*; the RGB is white, so it
   // does not fight the base colour.
-  mat.alphaMap = view(TEX.radialSprite({ size: 128, power: 2.6, inner: 1, seed: 5 }));
+  // power 3.4: a wide soft shoulder with no hard core, so the patch has no
+  // edge of its own and dies out well before the cap's rim reaches the skin.
+  mat.alphaMap = view(TEX.radialSprite({ size: 128, power: 3.4, inner: 1, seed: 5 }));
   mat.transparent = true;
   mat.opacity = 0;
   mat.depthWrite = false;

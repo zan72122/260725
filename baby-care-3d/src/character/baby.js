@@ -123,7 +123,7 @@ export class Baby {
     this.headMesh.name = 'babyHead';
 
     /* -- face -------------------------------------------------------------- */
-    this.face = new Face({ tier: this.tier, headGeometry: anat.headGeometry });
+    this.face = new Face({ tier: this.tier, headGeometry: anat.headGeometry, field: this.field });
     this.face.build();
     this.face.headMesh = this.headMesh;
     this.face.setSkinMaterial(this.skinMat);

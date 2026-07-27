@@ -136,7 +136,31 @@ export function bodySpec() {
   cone('head', PRIO.head, [0, 0.4280, 0.0000], [0, 0.4700, 0.0040], 0.0360, 0.0340);            // neck
   for (const s of [1, -1]) {
     ell('head', PRIO.head, m([0.0415, 0.5065, 0.0300], s), [0.0280, 0.0250, 0.0255]); // cheek
-    ell('head', PRIO.head, m([0.0740, 0.5285, -0.0070], s), [0.0080, 0.0235, 0.0180]); // ear
+  }
+
+  /* -- ears ----------------------------------------------------------------
+   * The ear was a single ellipsoid at half-extents [8, 23.5, 18] mm with no
+   * `sharp` radius, so it joined the skull through the body's global k = 100
+   * exponential union — a ~10 mm fillet applied to an 8 mm feature. The union
+   * swallowed it: 28 review frames with a smooth egg on both sides of the
+   * head. It is exactly the failure the nose had in pass one, and the fix that
+   * worked there did not generalise here only because nobody carried it over.
+   *
+   * So the pinna now carries its own 3 mm fillet, and it is built as an ear
+   * rather than as a lump: a thin plate standing off the skull, a rolled helix
+   * round the top and back edge, an antihelix ridge inside it, and a lobe.
+   * The rolled rim is what makes an ear read at 200 px; a bare plate reads as
+   * a fin.                                                                  */
+  for (const s of [1, -1]) {
+    const EAR = 320, RIM = 460;
+    ell('head', PRIO.head, m([0.0678, 0.5290, -0.0055], s), [0.0055, 0.0225, 0.0170], EAR); // pinna plate
+    // helix — up the front edge, over the top, down the back
+    cone('head', PRIO.head, m([0.0690, 0.5175, 0.0060], s), m([0.0705, 0.5390, -0.0010], s), 0.0030, 0.0036, RIM);
+    cone('head', PRIO.head, m([0.0705, 0.5390, -0.0010], s), m([0.0672, 0.5265, -0.0195], s), 0.0036, 0.0028, RIM);
+    // antihelix — the inner Y-ridge; without it the concha is a flat dish
+    cone('head', PRIO.head, m([0.0655, 0.5210, -0.0015], s), m([0.0668, 0.5330, -0.0060], s), 0.0024, 0.0026, RIM);
+    // lobe
+    ell('head', PRIO.head, m([0.0655, 0.5140, -0.0025], s), [0.0052, 0.0072, 0.0078], 420);
   }
 
   /* -- the face proper -----------------------------------------------------
@@ -992,7 +1016,43 @@ function finishNormals(m) {
   }
 }
 
+/**
+ * Drop hairline triangles.
+ *
+ * Where the head patch hands its rays over to the neck tube (`tube.from`) two
+ * adjacent samples on the same ring can land within a few microns of each
+ * other, leaving triangles ~5 mm long and ~15 µm wide. Measured on the head
+ * shell: a whole ring of them at y = 0.470 — the jaw line — with aspect ratios
+ * up to 381:1 against a median of 2.5:1.
+ *
+ * They carry no surface: their two coincident corners mean removing one leaves
+ * a gap narrower than a wavelength. But they *do* rasterise, as a one-pixel
+ * streak whose normal comes from a cross product of two almost-parallel edges,
+ * i.e. noise. Under a strong key that is a row of bright specular dashes, and
+ * it is the broken white line that runs across the jaw in `03`, `04`, `05` and
+ * `07`. A healthy triangle here is ~10 mm²; the cut is at 0.05 mm², 200× below
+ * that, so nothing with any area to shade is ever removed.
+ */
+function dropSlivers(m) {
+  const P = m.pos, I = m.idx;
+  const out = [];
+  const MIN_AREA = 5e-8;                     // m² = 0.05 mm²
+  let dropped = 0;
+  for (let i = 0; i < I.length; i += 3) {
+    const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+    const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    if (Math.hypot(nx, ny, nz) * 0.5 < MIN_AREA) { dropped++; continue; }
+    out.push(I[i], I[i + 1], I[i + 2]);
+  }
+  if (!dropped) return m;
+  m.idx = new Uint32Array(out);
+  return m;
+}
+
 function toGeometry(m) {
+  dropSlivers(m);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(m.nor, 3));

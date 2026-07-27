@@ -147,9 +147,9 @@ export const MOODS = {
       // band around 55% with no clean white anywhere. Up 1/5 stop, with the
       // contrast raised to keep the extra light out of the shadows and the
       // vignette pulled back off the corners the furniture actually occupies.
-      saturation: 1.11, contrast: 1.10, warmth: 0.015, vignette: 0.14, exposure: 1.17,
+      saturation: 1.11, contrast: 1.10, warmth: 0.015, vignette: 0.14, exposure: 1.08,
       shadowTint: [0.895, 0.955, 1.14], highTint: [1.035, 1.0, 0.955], split: 1.0,
-      black: 0.085, white: 1.05
+      black: 0.115, white: 1.15
     },
     fog: { color: 0xf1ecf6, density: 0.005 }
   },
@@ -233,12 +233,12 @@ export const MOODS = {
       // above neutral, the highlight tint is halved, and the shadow tint is
       // pushed *further* blue rather than the whole frame being pushed warm —
       // same overall warmth, twice the chromatic range.
-      saturation: 1.06, contrast: 1.14, warmth: 0.010, vignette: 0.15, exposure: 1.22,
+      saturation: 1.06, contrast: 1.14, warmth: 0.010, vignette: 0.15, exposure: 1.31,
       shadowTint: [0.845, 0.935, 1.21], highTint: [1.025, 1.0, 0.955], split: 1.05, white: 1.06,
       // The deepest black point of the four daylight-ish moods: golden hour is
       // the one time of day whose whole identity is a long dark shadow next to
       // a hot rim of sun.
-      black: 0.078
+      black: 0.068
     },
     // 0.009 over the 6 m of the room is a 5% amber veil on the far wall, which
     // is most of what read as "slightly hazy". Thinner, and less orange, so it
@@ -260,9 +260,9 @@ export const MOODS = {
     hemiSky: 0xb4c6f4, hemiGround: 0xf0bc9c, hemiIntensity: 0.135,
     envIntensity: 0.235, shadowSpan: 5.2,
     grade: {
-      saturation: 1.10, contrast: 1.09, warmth: 0.05, vignette: 0.30, exposure: 1.00,
+      saturation: 1.10, contrast: 1.09, warmth: 0.05, vignette: 0.30, exposure: 1.14,
       shadowTint: [0.83, 0.92, 1.21], highTint: [1.03, 1.0, 0.95], split: 1.15,
-      black: 0.105, white: 1.10
+      black: 0.080, white: 1.10
     },
     fog: { color: 0xdcd6ee, density: 0.016 }
   },
@@ -286,7 +286,7 @@ export const MOODS = {
       // 8.9%. The whole difference is the practical (see `practicalTrim`), but
       // the grade was also carrying a +6% exposure into a mood that wants to be
       // under, not over.
-      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.40, exposure: 0.98,
+      saturation: 1.0, contrast: 1.11, warmth: -0.02, vignette: 0.42, exposure: 0.91,
       shadowTint: [0.80, 0.90, 1.26], highTint: [1.025, 1.0, 0.955], split: 1.2,
       black: 0.092, white: 1.32
     },
@@ -429,8 +429,10 @@ export class LightingRig {
     // exactly what `51-sleep-asleep` shows — a face blown to a flat near-white
     // mask that has lost all form, in a frame measuring p1 = 0.183 with 0.5%
     // below 0.15 while the same scene with the lamp *off* measures p1 = 0.02
-    // and 8.9%. 1.55 keeps a real, readable falloff across the cot and takes
-    // roughly a stop and a half off the near field.
+    // and 8.9%. 1.55 flattens the near field by about a stop and a half while
+    // keeping a readable falloff across the cot; the level then comes down
+    // through `_practicalTrim` below. Measured together, the fraction of `51`
+    // with a pinned red channel goes 23.8% → 0.0%.
     const practical = new THREE.PointLight(0xffc078, 0, 6, 1.55);
     practical.castShadow = false;
     root.add(practical);
@@ -453,7 +455,7 @@ export class LightingRig {
    */
   _installPracticalTrim(light) {
     let raw = light.intensity;
-    this._practicalTrim = 0.20;
+    this._practicalTrim = 0.16;
     Object.defineProperty(light, 'intensity', {
       configurable: true,
       get: () => raw * this._practicalTrim,
