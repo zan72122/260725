@@ -55,10 +55,17 @@ const SIZE = {
  * Draw a bubble radius with a hierarchy: mostly filler, a few heroes.
  * `pow(rand, bias)` with bias > 1 pushes the mass of the distribution down.
  */
-function pickRadius(rand, region) {
+function pickRadius(rand, region, k = 1) {
   const s = SIZE[region] || SIZE.body;
-  return s[0] + (s[1] - s[0]) * Math.pow(rand(), s[2]);
+  return (s[0] + (s[1] - s[0]) * Math.pow(rand(), s[2])) * k;
 }
+
+/**
+ * Lower tiers get fewer blobs, so they need slightly larger ones or the mass
+ * thins out into a scatter — which is the exact failure this whole rewrite is
+ * about. These factors hold surface coverage roughly constant across tiers.
+ */
+const SIZE_K = [1.42, 1.18, 1.0];
 
 /**
  * Radial displacement field for a suds blob: a unit sphere breathed in and out
@@ -143,6 +150,7 @@ export class FoamSystem {
     this.ctx = ctx;
     this.tier = Math.max(0, Math.min(2, ctx?.tier ?? 2));
     this.capacity = CAP[this.tier];
+    this._sizeK = SIZE_K[this.tier];
     this.headRadius = headRadius;
     this.blobs = [];
     this.horn = 0;
@@ -419,7 +427,7 @@ export class FoamSystem {
              hr * (0.30 + 0.72 * Math.sqrt(Math.max(0, 1 - k))) + (rand() - 0.35) * 0.014,
              Math.sin(a) * rad * 0.86);
       const b = this._spawn('head', _p, 0.02, SIZE.head[1]);
-      b.target = pickRadius(rand, 'head');
+      b.target = pickRadius(rand, 'head', this._sizeK);
       b.r = b.target;
     }
 
@@ -444,7 +452,7 @@ export class FoamSystem {
              c[1] + (rand() - 0.5) * 0.030,
              c[2] + Math.sin(a) * rad * 0.8);
       const b = this._spawn('body', _p, 0.02, SIZE.body[1]);
-      b.target = pickRadius(rand, 'body');
+      b.target = pickRadius(rand, 'body', this._sizeK);
       b.r = b.target;
       // Extra aspect spread on the skin: a lather patch is bubbles of every
       // proportion pressed together, not a bag of matched ellipsoids.
@@ -468,7 +476,7 @@ export class FoamSystem {
              0.001 + rand() * 0.005,
              Math.sin(a) * rad * 0.135 + (rand() - 0.5) * 0.015);
       const b = this._spawn('water', _p, 0.02, SIZE.water[1]);
-      b.target = pickRadius(rand, 'water');
+      b.target = pickRadius(rand, 'water', this._sizeK);
       b.r = b.target;
       // Floating suds sit half under. Flatten them *vertically* — which means
       // dropping the random tumble for a yaw-only rotation, or the squash axis

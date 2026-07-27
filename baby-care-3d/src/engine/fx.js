@@ -151,11 +151,11 @@ const KINDS = {
     // stop them travelling in parallel lines, and the depth fade band is wide
     // enough that one crossing the floor dissolves instead of slicing it.
     mode: 'billboard', shape: 'STAR5', blending: 'additive', lit: false,
-    capacity: 160, life: [0.55, 1.7], size: [0.009, 0.046],
+    capacity: 160, life: [0.55, 1.7], size: [0.010, 0.055],
     speed: [0.25, 1.35], spread: Math.PI * 0.9, dir: [0, 1, 0],
     gravity: -1.4, drag: 2.4, curl: 0.55, spin: [-3.5, 3.5], grow: 0.45,
     pop: false, twinkle: 9,
-    fadeIn: 0.20, fadeOut: 0.72, alpha: 0.55, palette: PAL.star, soft: 0.14
+    fadeIn: 0.20, fadeOut: 0.72, alpha: 0.85, palette: PAL.star, soft: 0.14
   }
 };
 
