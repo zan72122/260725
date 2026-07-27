@@ -511,8 +511,13 @@ export class SleepActivity {
     for (let r = NZ - 1; r >= 1; r--) this.borderIndices.push(at(0, r));
     this.borderIndices.push(at(0, 0));
 
+    // Cream piping on a quilt lit by a 2700 K practical is a blown-out white
+    // stripe, and the one edge that runs the full height of `51-sleep-asleep`
+    // was reading as a drawn line rather than as a bound hem. Same value as
+    // the quilt, a hair lighter, so it describes the edge instead of drawing
+    // attention to it.
     const pipeMat = res.mat(MAT.makeCloth({
-      color: 0xfdf3e4, weave: 'knit', threads: 70, repeat: 10, seed: 25, sheen: 0.9
+      color: 0xc7d9ef, weave: 'knit', threads: 70, repeat: 10, seed: 25, sheen: 0.75
     }));
     this.piping = new RopeMesh(res, this.borderIndices.length, {
       radius: 0.0055, sides: 6, taper: 0, material: pipeMat
@@ -521,12 +526,132 @@ export class SleepActivity {
     this.group.add(this.piping.mesh);
     this._borderPoints = this.borderIndices.map(() => new THREE.Vector3());
 
-    // colliders that stand in for the baby under the covers
+    this._buildCuff();
+
+    /* Colliders that stand in for the baby under the covers.
+     *
+     * They stood in for the *skin*, and the child under this quilt is wearing
+     * pyjamas: `character/outfit.js` builds the top 14.8 mm proud of the skin
+     * and the bottoms 7.6 mm, so a quilt resolved against a skin-sized sphere
+     * settles a centimetre and a half inside the clothes and the pyjama comes
+     * through it — which is what `51` and `52` were showing as "the pyjama
+     * shredding through the blanket". `CLOTHED` is the outermost garment level
+     * plus a little cloth thickness.
+     *
+     * There were also only three spheres, ending at the hips, so everything
+     * below the waist had nothing to drape over at all.                       */
+    const CLOTHED = 0.019;
     this.colliders = [
-      { p: new THREE.Vector3(), r: 0.072 },   // head
-      { p: new THREE.Vector3(), r: 0.082 },   // chest — this one breathes
-      { p: new THREE.Vector3(), r: 0.070 }    // hips
+      { p: new THREE.Vector3(), r: 0.072 + CLOTHED },   // head
+      { p: new THREE.Vector3(), r: 0.082 + CLOTHED },   // chest — this one breathes
+      { p: new THREE.Vector3(), r: 0.070 + CLOTHED },   // hips
+      { p: new THREE.Vector3(), r: 0.058 + CLOTHED },   // thighs
+      { p: new THREE.Vector3(), r: 0.044 + CLOTHED }    // shins / feet
     ];
+    this._clothed = CLOTHED;
+  }
+
+  /**
+   * The turned-back cuff along the pulled-up edge.
+   *
+   * `51-sleep-asleep` was bisected by a razor-straight full-height line: the
+   * quilt's head edge is a pinned column, so it was a mathematically perfect
+   * segment lit as a bright strip, with the baby's head against it. Two things
+   * were wrong with it and they are different problems.
+   *
+   *   · It was *straight*. Nothing in bedding is. Fixed in `_quiltUpdate` by
+   *     giving the pin row a shallow scallop in x and y instead of one x.
+   *   · It was an *edge*. A real blanket is turned back on itself at the top,
+   *     so what you see is a soft roll of doubled cloth with its lining
+   *     showing and a shadow under it — not the section through a card.
+   *
+   * This is the second one: a four-point profile lofted along the hem, lying
+   * back over the quilt, rebuilt every frame from the cloth the solver
+   * actually produced so it drapes with it and breathes with it.
+   */
+  _buildCuff() {
+    const res = this.res;
+    const NZ = this.quiltNZ;
+    const COLS = 4;
+    this.cuffCols = COLS;
+
+    const verts = (NZ + 1) * COLS;
+    const pos = new Float32Array(verts * 3);
+    const uv = new Float32Array(verts * 2);
+    const idx = [];
+    for (let r = 0; r <= NZ; r++) {
+      for (let c = 0; c < COLS; c++) {
+        uv[(r * COLS + c) * 2] = c / (COLS - 1);
+        uv[(r * COLS + c) * 2 + 1] = r / NZ;
+      }
+    }
+    for (let r = 0; r < NZ; r++) {
+      for (let c = 0; c < COLS - 1; c++) {
+        const a = r * COLS + c, b = a + 1, d = a + COLS, e = d + 1;
+        idx.push(a, d, b, b, d, e);
+      }
+    }
+    const geo = res.geo(new THREE.BufferGeometry());
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+
+    // the lining: the same cloth one step lighter and one step less saturated,
+    // which is what the inside of a quilt cover actually looks like
+    const mat = res.mat(MAT.makeCloth({
+      color: 0xdce8f8, weave: 'plain', threads: 150, repeat: 2, seed: 27,
+      sheen: 0.9, sheenColor: 0xeef5ff, roughness: 0.96, normalScale: 0.9
+    }));
+    mat.side = THREE.DoubleSide;
+
+    const cuff = new THREE.Mesh(geo, mat);
+    cuff.castShadow = true;
+    cuff.receiveShadow = true;
+    cuff.frustumCulled = false;
+    cuff.userData.tag = 'quilt';
+    this.group.add(cuff);
+    this.cuff = cuff;
+    this.pickables.push(cuff);
+
+    // t = distance back along the quilt from the hem, h = lift off its surface
+    this.cuffProfile = [[0.000, 0.0000], [0.021, 0.0165], [0.056, 0.0205], [0.088, 0.0055]];
+    this._cv = new THREE.Vector3();
+    this._cd = new THREE.Vector3();
+    this._cn = new THREE.Vector3();
+  }
+
+  /** Loft the cuff along whatever the hem row is doing this frame. */
+  _cuffUpdate() {
+    if (!this.cuff) return;
+    const NX = this.quiltNX, NZ = this.quiltNZ, COLS = this.cuffCols;
+    const cols = NX + 1;
+    const oa = this.quilt.geometry.attributes.position.array;
+    const nrm = this.simMesh.geometry.attributes.normal.array;
+    const out = this.cuff.geometry.attributes.position;
+    const oo = out.array;
+    const P = this._cv, D = this._cd, N = this._cn;
+
+    for (let r = 0; r <= NZ; r++) {
+      const i0 = r * cols, i1 = r * cols + 1;
+      P.set(oa[i0 * 3], oa[i0 * 3 + 1], oa[i0 * 3 + 2]);
+      D.set(oa[i1 * 3] - P.x, oa[i1 * 3 + 1] - P.y, oa[i1 * 3 + 2] - P.z);
+      if (D.lengthSq() < 1e-9) D.set(1, 0, 0); else D.normalize();
+      N.set(nrm[i0 * 3], nrm[i0 * 3 + 1], nrm[i0 * 3 + 2]);
+      if (N.lengthSq() < 1e-9) N.set(0, 1, 0); else N.normalize();
+      // a fold is never the same depth twice along its length
+      const wob = 1 + Math.sin(r * 1.37 + 0.6) * 0.16 + Math.sin(r * 0.71 + 2.4) * 0.09;
+      for (let c = 0; c < COLS; c++) {
+        const [t, h] = this.cuffProfile[c];
+        const j = (r * COLS + c) * 3;
+        oo[j] = P.x + D.x * t * wob + N.x * h * wob;
+        oo[j + 1] = P.y + D.y * t * wob + N.y * h * wob;
+        oo[j + 2] = P.z + D.z * t * wob + N.z * h * wob;
+      }
+    }
+    out.needsUpdate = true;
+    this.cuff.geometry.computeVertexNormals();
+    this.cuff.geometry.computeBoundingSphere();
   }
 
   _pinIndices() {
@@ -1483,7 +1608,7 @@ export class SleepActivity {
     ctx.state?.patch?.({ asleep: true });
 
     const head = ctx.baby?.headWorldPos?.();
-    if (head) ctx.fx?.burst?.('zzz', head, 3);
+    if (head) ctx.fx?.burst?.('zzz', head, 4, { radius: 0.05 });
     snd(ctx, 'play.chime', { gain: 0.4 });
     this._starTimer = this.t + (instant ? 1.0 : 2.2);
     this._snoreTimer = 1.8;
@@ -1610,9 +1735,16 @@ export class SleepActivity {
     if (this.asleep) {
       this._zzzTimer -= dt;
       if (this._zzzTimer <= 0) {
-        this._zzzTimer = 2.4;
+        this._zzzTimer = 1.9;
         const head = baby?.headWorldPos?.();
-        if (head) ctx.fx?.burst?.('zzz', head.clone().add(new THREE.Vector3(0, 0.05, 0)), 1);
+        // Three puffs at a spread of sizes rather than one hero sprite: a
+        // single large FX quad is what made the old cue read as a decal
+        // stamped on the sheet. A small cluster with a size hierarchy reads
+        // as something in the air above the cot.
+        if (head) {
+          const p = head.clone().add(new THREE.Vector3(0, 0.055, 0));
+          ctx.fx?.burst?.('zzz', p, 3, { radius: 0.035 });
+        }
       }
       this._snoreTimer -= dt;
       if (this._snoreTimer <= 0) {
@@ -1657,10 +1789,15 @@ export class SleepActivity {
     this.colliders[0].p.copy(head);
     this.colliders[1].p.copy(chest);
     this.colliders[2].p.copy(chest).lerp(head, -0.85);
+    // …and on down the body along the same head→chest axis, so the quilt has
+    // something to drape over below the waist instead of dropping to the
+    // mattress through the legs
+    this.colliders[3].p.copy(chest).lerp(head, -1.85);
+    this.colliders[4].p.copy(chest).lerp(head, -2.85);
     // breathing: the chest itself swells, so the quilt rises because the cloth
     // is genuinely being pushed — not because a sine was added to the mesh
     const breath = this.asleep ? Math.sin(this.t * 1.5) * 0.5 + 0.5 : 0;
-    this.colliders[1].r = 0.082 + breath * 0.011;
+    this.colliders[1].r = 0.082 + this._clothed + breath * 0.011;
 
     /* --- pins: the pulled-up edge and the tucked foot -------------------- */
     this.coverAmount += (this.coverTarget - this.coverAmount) * Math.min(1, dt * 1.6);
@@ -1674,14 +1811,29 @@ export class SleepActivity {
     const yFoot = this.surfaceY + 0.012;
 
     for (let r = 0; r <= NZ; r++) {
-      const z = this.cribPos.z + (r / NZ - 0.5) * this.quiltDepth;
+      const u = r / NZ;
+      const z = this.cribPos.z + (u - 0.5) * this.quiltDepth;
+      // The pulled-up hem used to be pinned to one x for every row, which is a
+      // ruler-straight segment 0.54 m long — and in `crib-face` that segment
+      // projects to a perfectly vertical line down the middle of the frame.
+      // Two out-of-phase waves plus a sag that is zero at the rails and
+      // largest mid-span give the same hem a shallow scallop with a low point
+      // over the chest, so it crosses the frame as cloth rather than as a cut.
+      // The amplitude scales with `coverAmount`: a quilt folded flat at the
+      // foot of the cot has nothing to scallop.
+      const wave = Math.sin(u * Math.PI * 2.35 + 0.7) * 0.62
+                 + Math.sin(u * Math.PI * 4.90 + 2.1) * 0.26;
+      const sag = Math.sin(u * Math.PI);
+      const a = this.coverAmount;
+      const xr = xHead + (wave * 0.030 + sag * 0.026) * a;
+      const yr = yHead + wave * 0.0085 * a - sag * 0.0060 * a;
       const iHead = r * cols;
       const iFoot = r * cols + NX;
       if (native) {
-        native.pin(iHead, this._pinV.set(xHead, yHead, z));
+        native.pin(iHead, this._pinV.set(xr, yr, z));
         native.pin(iFoot, this._pinV.set(this.xFoot, yFoot, z));
       } else {
-        this.sim.pin(iHead, xHead, yHead, z);
+        this.sim.pin(iHead, xr, yr, z);
         this.sim.pin(iFoot, this.xFoot, yFoot, z);
       }
     }
@@ -1724,6 +1876,8 @@ export class SleepActivity {
       this._borderPoints[i].set(oa[v * 3], oa[v * 3 + 1], oa[v * 3 + 2]);
     }
     this.piping.update(this._borderPoints);
+
+    this._cuffUpdate();
   }
 
   /**

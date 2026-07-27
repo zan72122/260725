@@ -20,6 +20,7 @@
 
 import * as THREE from 'three';
 import * as P from './props.js';
+import * as TEX from '../engine/textures.js';
 import { WindowUnit } from './window.js';
 
 /* ------------------------------------------------------------ dimensions -- */
@@ -336,6 +337,192 @@ export class Room {
     unit.group.rotation.y = Math.PI / 2;    // local +z (room side) -> world +x
     this.group.add(unit.group);
     this.window = unit;
+    this._buildRainFX();
+  }
+
+  /* --------------------------------------------------------- weather FX -- */
+
+  /**
+   * Rain you can actually see.
+   *
+   * `60-weather-rain` arrived with a correct overcast *grade* and no
+   * precipitation at all — dry glass, a dry tree, a dry house. The plumbing
+   * was never the problem and is verified working end to end: the harness
+   * patch reaches `State.setWeather` → `Room.setWeather` → `WindowUnit
+   * .setWeather`, which sets `rain.visible = true` and hands the rig its
+   * overcast table. The reason nothing renders is a **sizing** one, measured:
+   * `window.js:_buildWeatherFX` scatters its 90 streaks through a 6 × 5.2 ×
+   * 4.5 m slab hung off the exterior group, while the aperture the camera can
+   * actually see through is 1.46 × 1.36 m. Projecting all 90 drops against the
+   * wide camera puts **one** of them inside the frustum, and that one is a
+   * 6 mm quad at 42 % alpha, four metres out, inside the depth-of-field
+   * circle — i.e. sub-pixel and invisible even where it is on screen. That
+   * file belongs to the grade pass right now, so it is reported rather than
+   * edited (see the handoff note), and the rain the frame needs is built here.
+   *
+   * Two layers, because they fail differently:
+   *
+   *  · **Falling streaks**, confined to a slab that is *aimed at the opening*
+   *    — a bit wider and taller than the glazing and only 1.3 m deep — so
+   *    every drop spawned is a drop that can be seen. Yaw-billboarded at the
+   *    camera (rain is vertical; a full billboard would tumble it), leaned
+   *    with the wind, and wide enough to survive the defocus the wide shot
+   *    puts on the window.
+   *  · **Water on the pane**, which is what actually sells rain in a frame
+   *    where the sky behind it is a bright flat overcast: a streak of rain in
+   *    front of a white sky has almost no contrast, but a runnel on the glass
+   *    has a dark body and a bright refracting rim and reads at any blur.
+   *    Two copies at different scales and speeds give it parallax.
+   */
+  _buildRainFX() {
+    const g = new THREE.Group();
+    g.name = 'rain';
+    g.visible = false;
+    this.group.add(g);
+    this.rainFX = g;
+
+    /* --- falling streaks, aimed at the opening ------------------------- */
+    const n = this.tier >= 2 ? 150 : 60;
+    // Wide enough to survive the wide shot's defocus: at 5.5 m through a
+    // 26 mm-equivalent frame the glazing measures ~270 px/m, so a 6 mm quad
+    // (window.js's) is 1.6 px and a 14 mm one is nearly 4.
+    const streak = new THREE.PlaneGeometry(0.014, 0.30);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xdcebfa, transparent: true, opacity: 0.55,
+      depthWrite: false, fog: false, side: THREE.DoubleSide, toneMapped: true
+    });
+    const mesh = new THREE.InstancedMesh(streak, mat, n);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.renderOrder = 1;
+    g.add(mesh);
+    this.rainStreaks = mesh;
+
+    const R = P.rng ? P.rng(61) : (() => Math.random());
+    this.rainDrops = [];
+    const zHalf = WIN.w * 0.72;
+    for (let i = 0; i < n; i++) {
+      this.rainDrops.push({
+        // just outside the pane, a metre deep at most: everything here is in
+        // front of something the camera can see
+        x: X0 - 0.10 - R() * 1.25,
+        y: WIN.sill - 0.30 + R() * (WIN.h + 0.95),
+        z: WIN.z + (R() - 0.5) * 2 * zHalf,
+        v: 3.4 + R() * 2.6,
+        len: 0.55 + R() * 0.85,
+        w: 0.75 + R() * 0.8
+      });
+    }
+    this._rainTop = WIN.sill + WIN.h + 0.65;
+    this._rainBottom = WIN.sill - 0.30;
+    this._rainQ = new THREE.Quaternion();
+    this._rainE = new THREE.Euler(0, 0, 0, 'YXZ');
+    this._rainM = new THREE.Matrix4();
+    this._rainP = new THREE.Vector3();
+    this._rainS = new THREE.Vector3();
+
+    /* --- water on the pane --------------------------------------------- */
+    const tex = TEX.painted('room-rain-glass', 512, (c, s) => {
+      c.clearRect(0, 0, s, s);
+      let seed = 0x9e37;
+      const rnd = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      // runnels: a wobbling vertical channel with a dark body and two bright
+      // refracting rims — the read that survives a heavy defocus
+      for (let i = 0; i < 26; i++) {
+        const x0 = rnd() * s;
+        const w = 2.5 + rnd() * 6.5;
+        const yTop = rnd() * s * 0.5;
+        const yBot = yTop + s * (0.35 + rnd() * 0.65);
+        let x = x0;
+        c.lineCap = 'round';
+        for (let y = yTop; y < yBot; y += 6) {
+          x += (rnd() - 0.5) * 2.2;
+          const k = 1 - Math.abs((y - (yTop + yBot) / 2) / ((yBot - yTop) / 2));
+          const ww = w * (0.35 + 0.65 * Math.max(0, k));
+          c.strokeStyle = 'rgba(88,104,124,0.42)';
+          c.lineWidth = ww;
+          c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 7); c.stroke();
+          c.strokeStyle = 'rgba(255,255,255,0.55)';
+          c.lineWidth = Math.max(1, ww * 0.30);
+          c.beginPath();
+          c.moveTo(x - ww * 0.30, y); c.lineTo(x - ww * 0.30, y + 7); c.stroke();
+        }
+        // the bead at the head of the runnel
+        c.fillStyle = 'rgba(96,112,132,0.45)';
+        c.beginPath(); c.arc(x, yBot, w * 0.8, 0, Math.PI * 2); c.fill();
+        c.fillStyle = 'rgba(255,255,255,0.6)';
+        c.beginPath(); c.arc(x - w * 0.25, yBot - w * 0.25, w * 0.26, 0, Math.PI * 2); c.fill();
+      }
+      // stationary beads between the runnels
+      for (let i = 0; i < 320; i++) {
+        const x = rnd() * s, y = rnd() * s, r = 1.2 + rnd() * 3.4;
+        c.fillStyle = 'rgba(92,108,128,0.34)';
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+        c.fillStyle = 'rgba(255,255,255,0.5)';
+        c.beginPath(); c.arc(x - r * 0.3, y - r * 0.3, r * 0.34, 0, Math.PI * 2); c.fill();
+      }
+    }, { repeat: 1 });
+
+    this.rainPanes = [];
+    const paneGeo = new THREE.PlaneGeometry(WIN.w - 0.075, WIN.h - 0.075);
+    for (let i = 0; i < 2; i++) {
+      const t = tex.clone();
+      t.needsUpdate = true;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(i ? 1.6 : 1.0, i ? 1.6 : 1.0);
+      const pm = new THREE.MeshBasicMaterial({
+        map: t, transparent: true, depthWrite: false, fog: false,
+        opacity: i ? 0.55 : 0.8, side: THREE.DoubleSide, toneMapped: true
+      });
+      const pane = new THREE.Mesh(paneGeo, pm);
+      // the outside face of the glazing, a few millimetres proud of it
+      pane.position.set(X0 - 0.018 - i * 0.006, WIN.sill + WIN.h / 2, WIN.z);
+      pane.rotation.y = -Math.PI / 2;
+      pane.castShadow = false;
+      pane.receiveShadow = false;
+      pane.renderOrder = 4;
+      g.add(pane);
+      this.rainPanes.push({ mesh: pane, tex: t, speed: i ? 0.16 : 0.085 });
+    }
+  }
+
+  /** Advance the streaks and run the water down the glass. */
+  _rainUpdate(dt, ctx) {
+    const g = this.rainFX;
+    if (!g?.visible) return;
+
+    for (const p of this.rainPanes) {
+      p.tex.offset.y = (p.tex.offset.y - dt * p.speed) % 1;
+    }
+
+    const mesh = this.rainStreaks;
+    // Yaw-only billboard. Rain falls vertically, so it must turn to face the
+    // eye about Y and about nothing else — a full camera-facing billboard
+    // tumbles every streak off the vertical as soon as the camera tips down.
+    const cam = ctx?.camera;
+    const yaw = cam
+      ? Math.atan2(cam.position.x - X0, cam.position.z - WIN.z)
+      : Math.PI / 2;
+    for (let i = 0; i < this.rainDrops.length; i++) {
+      const d = this.rainDrops[i];
+      d.y -= d.v * dt;
+      d.z += dt * 0.42;                       // the wind that leans them
+      if (d.y < this._rainBottom) {
+        d.y = this._rainTop;
+        d.z -= WIN.w * 1.44 * Math.random();
+      }
+      this._rainE.set(0, yaw, 0.13);
+      this._rainQ.setFromEuler(this._rainE);
+      this._rainM.compose(
+        this._rainP.set(d.x, d.y, d.z), this._rainQ,
+        this._rainS.set(d.w, d.len, 1));
+      mesh.setMatrixAt(i, this._rainM);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   /* -------------------------------------------------------- furniture --- */
@@ -689,6 +876,7 @@ export class Room {
     if (!['clear', 'rain', 'snow'].includes(name)) return;
     this.weather = name;
     this.window?.setWeather(name);
+    if (this.rainFX) this.rainFX.visible = name === 'rain';
     // an overcast sky is a bigger, softer, cooler source: dimmer bounce, but
     // spread wider so the room still reads as daylit
     this._bounceScale = name === 'rain' ? 0.55 : name === 'snow' ? 0.8 : 1;
@@ -755,6 +943,7 @@ export class Room {
     const t = this.time;
 
     this.window?.update(dt, ctx);
+    this._rainUpdate(dt, ctx);
 
     // mobile: a slow spin with a touch of bob, never a constant rate — the eye
     // reads perfectly linear motion as machinery

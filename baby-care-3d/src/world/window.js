@@ -323,36 +323,66 @@ const MOTE_FRAG = /* glsl */`
  * value from horizon to zenith, which threw away the only cool hue visible
  * from inside the room.
  */
+/*
+ * Colour temperature, third correction — CRITIQUE-03 P8.
+ *
+ * The exterior is the only genuinely bright surface in the frame, so it is
+ * also the strongest single lever on the *hue* of the whole image: it lights
+ * the reveal, it drives the bloom, it sets the colour of the shaft and the
+ * floor pool, and in a wide shot it is a sixth of the frame. Two changes here,
+ * both measured with `tools/histo.mjs --matrix`:
+ *
+ *   · `day`'s sun was 0xfff6e2 — a warm white — and its shaft 0xfff2dc. At
+ *     noon neither is. Both go to a neutral-to-cool white, which is *also*
+ *     the only way this build gets a pixel over display 0.95: a saturated warm
+ *     source runs out of blue channel around 0.93 no matter how hard it is
+ *     driven, so the previous pass was right that exposure could not fix it
+ *     and wrong that nothing could. Hue could. Gain up with it.
+ *   · `evening` gains a much cooler dome. Dusk through a window is a blue-
+ *     violet sky with a warm band at the horizon, not a uniformly peach one —
+ *     and the room's warmth at that hour comes from the lamps, not the sky.
+ */
 const SKY = {
   day: {
     // Pushed a stop of saturation back into the dome. The old mid/horizon pair
     // was a 6% blue against near-white, which through a 1.4 m opening reads as
     // "overcast" no matter what the room is doing.
-    top: 0x3f86d4, mid: 0x84bcec, hor: 0xd7e7f2, sun: 0xfff6e2,
-    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.30,
-    gain: 8.50, ground: 0x8aa76e, aerial: 0.44,
-    shaft: 0xfff2dc, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
+    top: 0x3479cf, mid: 0x77b4ec, hor: 0xd2e6f6, sun: 0xfffdf8,
+    sunPos: [0.70, 0.80], sunSize: 0.030, glow: 0.34, stars: 0, haze: 0.26,
+    // 8.50 → 12.40. The wide shot puts the window off-centre and behind the
+    // focal plane, so the two things standing between the sky and the top of
+    // the curve are the vignette (×0.96 there) and the DOF bokeh, which is a
+    // 13-tap average of the sky *with the dark reveal around it* — measured,
+    // that alone costs the brightest pixel about 8%. Both are deliberate and
+    // neither should be removed for a histogram, so the source has to carry the
+    // margin instead.
+    gain: 12.40, level: 1.00, ground: 0x8aa76e, aerial: 0.44,
+    shaft: 0xfaf6ff, shaftI: 1.00, cloud: 0xffffff, cloudA: 0.95
   },
   golden: {
     top: 0x4f86cc, mid: 0xf0b877, hor: 0xffc98a, sun: 0xffdaa2,
     sunPos: [0.435, 0.455], sunSize: 0.030, glow: 0.40, stars: 0, haze: 0.44,
-    gain: 8.80, ground: 0x9a9a5c, aerial: 0.54,
+    gain: 8.80, level: 0.92, ground: 0x9a9a5c, aerial: 0.54,
     shaft: 0xffd7a0, shaftI: 1.55, cloud: 0xffe6cc, cloudA: 0.92
   },
   evening: {
-    top: 0x33417a, mid: 0x8b7fae, hor: 0xe6a891, sun: 0xffbe8c,
-    sunPos: [0.22, 0.28], sunSize: 0.048, glow: 0.62, stars: 0.3, haze: 0.62,
-    gain: 4.00, ground: 0x67765a, aerial: 0.48,
-    shaft: 0xffc79c, shaftI: 0.72, cloud: 0xd8bfc4, cloudA: 0.85
+    top: 0x27356e, mid: 0x6d76ac, hor: 0xc79098, sun: 0xffb488,
+    sunPos: [0.22, 0.24], sunSize: 0.048, glow: 0.58, stars: 0.45, haze: 0.52,
+    gain: 3.10, level: 0.42, ground: 0x5a6a58, aerial: 0.50,
+    shaft: 0xd2c2e8, shaftI: 0.52, cloud: 0xb8a8bc, cloudA: 0.85
   },
   night: {
     // The moon is the only near-white a night frame can honestly carry, and at
     // gain 0.62 it was a grey disc. 1.35 puts the disc itself just over 0.95
     // while the dome stays at 0.05–0.12, which is what makes it read as a moon
     // rather than as a hole in the sky.
-    top: 0x101736, mid: 0x232f5c, hor: 0x3c4370, sun: 0xe8ecff,
-    sunPos: [0.66, 0.78], sunSize: 0.026, glow: 0.20, stars: 1, haze: 0.30,
-    gain: 1.10, ground: 0x2a333c, aerial: 0.55,
+    top: 0x0c122e, mid: 0x1d2854, hor: 0x343c6a, sun: 0xeef2ff,
+    sunPos: [0.66, 0.78], sunSize: 0.026, glow: 0.20, stars: 1, haze: 0.28,
+    // Up from 1.10 to hold the moon disc over 0.95 now that the night grade's
+    // shoulder white point has come down from 1.32 to 1.16 and its exposure
+    // from 0.91 to 0.83. The dome is *darker* (see `top`/`mid` above) and the
+    // one specular in it is brighter — which is the whole read of a moon.
+    gain: 1.34, level: 0.15, ground: 0x232b36, aerial: 0.55,
     shaft: 0xb0c2ff, shaftI: 0.26, cloud: 0x4a5480, cloudA: 0.7
   }
 };
@@ -628,8 +658,22 @@ export class WindowUnit {
     this.group.add(glass);
     this.glass = glass;
 
-    // the film of running water, a few millimetres inside the pane
+    /* The film of running water, a few millimetres inside the pane.
+     *
+     * CRITIQUE-03 on `60-weather-rain`: "there is no rain. The window shows a
+     * dry tree, a dry house and clear glass. No droplets, no streaks, no
+     * runnels, nothing outside." The material was being built and switched on
+     * correctly — the defect was scale. `rainSheet()` authors one tile of
+     * runnels and beading, and it was being mapped 1:1 across a 1.39 × 1.29 m
+     * pane, so a droplet 8 px across in the source texture landed roughly 1 px
+     * across at this framing and the whole film averaged out to a faint sheen.
+     * Repeating it gives the drops a believable physical size (~15 mm), which
+     * is the difference between "wet glass" and "clean glass".
+     */
     this.rainMat = MAT.makeRainFilm({ seed: 29, speed: 0.11 });
+    for (const map of [this.rainMat.alphaMap, this.rainMat.normalMap]) {
+      if (map) { map.repeat.set(3.4, 3.0); map.needsUpdate = true; }
+    }
     this.rainMat.userData.setAmount(0);
     const film = new THREE.Mesh(glassGeo.clone(), this.rainMat);
     film.position.z = setZ - 0.004;
@@ -788,21 +832,38 @@ export class WindowUnit {
    * flagged. Re-run whenever the mood changes, because the colour it washes
    * toward is the sky's.
    */
+  /*
+   * `level` — the backdrop's exposure relative to midday.
+   *
+   * Unlit geometry has no lighting to respond to, which is the whole point
+   * (see `_buildExterior`) and also its one liability: the treeline and the
+   * garden were authored at midday values and then kept them at 9 pm. In the
+   * `night` matrix frame the near tree renders as a **bright saturated green**
+   * against a dark blue dome — a sunlit tree at midnight, and the single
+   * loudest thing in the opening. Aerial perspective could not fix it because
+   * it washes toward the horizon *hue* by distance, so the nearest tree, which
+   * is the biggest one in frame, is washed least.
+   *
+   * A per-mood scalar is what a real exterior does: the same albedo receiving
+   * three stops less light. Applied to the trees and the ground only — the sky
+   * and the cloud deck have their own `gain`, because they are the source.
+   */
   _applyAerial(sky) {
     if (!this._treeBase || !this.trees) return;
     const hor = new THREE.Color(sky.hor ?? 0xd7e7f2);
     const aerial = sky.aerial ?? 0.42;
+    const level = sky.level ?? 1;
     const c = new THREE.Color();
     for (let i = 0; i < this._treeBase.length; i++) {
       const b = this._treeBase[i];
-      c.setHex(b.color).lerp(hor, aerial * (0.22 + 0.78 * b.far));
+      c.setHex(b.color).lerp(hor, aerial * (0.22 + 0.78 * b.far)).multiplyScalar(level);
       this.trees.setColorAt(i, c);
     }
     if (this.trees.instanceColor) this.trees.instanceColor.needsUpdate = true;
     if (this.groundMat) {
       this.groundMat.color.setHex(
         this.weather === 'snow' ? 0xdfe6ea : (sky.ground ?? 0x7d9a63)
-      ).lerp(hor, aerial * 0.5);
+      ).lerp(hor, aerial * 0.5).multiplyScalar(level);
     }
   }
 
@@ -812,11 +873,29 @@ export class WindowUnit {
     const gy = this.groundY;
     const R = rng(53);
 
-    // rain: instanced streaks, wrapped in a slab just outside the glass
-    const n = this.tier >= 2 ? 90 : 40;
-    const streak = new THREE.PlaneGeometry(0.006, 0.34);
+    /* Rain: instanced streaks, wrapped in a slab just outside the glass.
+     *
+     * Second reason `60-weather-rain` had no rain in it. A 6 mm-wide plane at
+     * 3–5 m through a 1.4 m opening is a *third* of a pixel wide at 1440; at
+     * 42% opacity, over a bright sky, against SMAA, it resolves to nothing at
+     * all. Real rain seen at that distance is not resolved as individual drops
+     * either — it is read as streaks with visible width because each drop
+     * travels several centimetres during the eye's integration time. So the
+     * streaks get a believable *apparent* width rather than a believable
+     * physical one, they get pulled in toward the glass where they subtend
+     * more of the opening, and there are more of them.
+     *
+     * The colour is the other half. 0xd6e8f6 is a near-white, which is
+     * invisible against an overcast deck — the one thing behind the rain in
+     * this frame. Rain reads *dark* against a bright sky (it is refracting the
+     * ground) and light against the treeline, and there is no one colour that
+     * does both, so it takes the sky's own value at low opacity and gets its
+     * legibility from the normal-mapped film on the glass instead.
+     */
+    const n = this.tier >= 2 ? 220 : 90;
+    const streak = new THREE.PlaneGeometry(0.022, 0.34);
     const rainMat = new THREE.MeshBasicMaterial({
-      color: 0xd6e8f6, transparent: true, opacity: 0.42, depthWrite: false, fog: false,
+      color: 0xb9cede, transparent: true, opacity: 0.30, depthWrite: false, fog: false,
       side: THREE.DoubleSide
     });
     const rain = new THREE.InstancedMesh(streak, rainMat, n);
@@ -826,7 +905,7 @@ export class WindowUnit {
     const drops = [];
     for (let i = 0; i < n; i++) {
       drops.push({
-        x: (R() - 0.5) * 6, y: gy + R() * 5.2, z: -0.35 - R() * 4.5,
+        x: (R() - 0.5) * 5, y: gy + R() * 5.2, z: -0.22 - R() * 2.6,
         v: 5.5 + R() * 3.5, len: 0.7 + R() * 0.9
       });
     }
@@ -1157,11 +1236,25 @@ export class WindowUnit {
     const s = SKY[this.mood] || SKY.day;
     const w = this.weather;
     const overcast = w === 'rain' ? 0.85 : w === 'snow' ? 0.55 : 0;
-    const grey = new THREE.Color(w === 'snow' ? 0xe2e6ef : 0x93999f);
+    const grey = new THREE.Color(w === 'snow' ? 0xe2e6ef : 0xa8aeb6);
     const C = hex => new THREE.Color(hex);
-    // An overcast sky is *dimmer* than a clear one but the cloud deck is
-    // still far brighter than the room, so the gain drops rather than dies.
-    const gain = (s.gain ?? 1) * (1 - overcast * 0.34);
+    /* An overcast sky is *dimmer* than a clear one but the cloud deck is
+     * still far brighter than the room, so the gain drops rather than dies.
+     *
+     * …and 0.34 was still much too big a drop. Measured, `60-weather-rain` came
+     * back as the most value-compressed frame in the build (p5 0.227 → p95
+     * 0.535) with **zero** pixels above 0.95, and a third of that was here: the
+     * one surface in the frame with any headroom was being cut by a third
+     * before it started. A rain deck is not dim — stand under one and it is
+     * painful to look at; what it is, is *even*, *neutral* and *edgeless*.
+     * Neutral is the point. A white sky puts all three channels at the top
+     * together, so overcast and midday are the only two states in this build
+     * that can carry an honest near-white, where a saturated golden sun tops
+     * out around 0.93 with red already pinned. 0.10 keeps the deck a stop over
+     * the interior; the flatness is delivered by the collapsed key, the doubled
+     * shadow kernel and the lowest saturation in the build, which is where
+     * flatness belongs. */
+    const gain = (s.gain ?? 1) * (1 - overcast * 0.06);
     this.tgt = {
       top: C(s.top).lerp(grey, overcast * 0.78),
       mid: C(s.mid).lerp(grey, overcast * 0.82),
@@ -1180,7 +1273,11 @@ export class WindowUnit {
        * fixes the read and, not incidentally, is where the frame's genuine
        * near-white now comes from. `Color` components above 1 are a linear
        * multiplier on a MeshBasicMaterial, which is exactly what is wanted. */
-      cloudColor: C(s.cloud).lerp(C(0x8d939c), overcast * 0.62)
+      // …and the same correction applies to the deck itself: `0x8d939c` at 62%
+      // turned the brightest surface in an overcast frame into a mid grey. A
+      // nimbostratus base seen from below is a light neutral grey with almost
+      // no chroma, which is exactly what is wanted — neutral, and bright.
+      cloudColor: C(s.cloud).lerp(C(0xbcc2ca), overcast * 0.72)
         .multiplyScalar(gain * 1.06),
       cloudOpacity: Math.min(1, 0.35 + overcast * 0.6 + (w === 'clear' ? 0.25 : 0.4)),
       shaftColor: C(s.shaft).lerp(C(0xc4d0e2), overcast * 0.85),
@@ -1197,7 +1294,10 @@ export class WindowUnit {
     this._applyAerial({
       hor: this.tgt.hor.getHex(),
       ground: s.ground,
-      aerial: (s.aerial ?? 0.42) + overcast * 0.2
+      aerial: (s.aerial ?? 0.42) + overcast * 0.2,
+      // Overcast takes a stop off the garden as well as off the deck: the
+      // trees are lit by the same sky.
+      level: (s.level ?? 1) * (1 - overcast * 0.30)
     });
   }
 
@@ -1299,6 +1399,30 @@ export class WindowUnit {
   update(dt, ctx) {
     if (ctx) this._ctx = ctx;
     this.time += dt;
+
+    /* Follow the lighting rig's mood.
+     *
+     * This was the largest single reason the four moods did not read as four
+     * times of day, and it is not a colour choice — it is two systems that were
+     * never joined up. `app.setActivity()` moves the *rig* to
+     * `ACTIVITIES[scene].mood`, so `sleep` lights the room at night and `play`
+     * and `feed` light it at golden hour. The *exterior* is moved by
+     * `room.setMood()`, which is called from exactly two places: `room.reset()`
+     * (always `'day'`) and an explicit `state.timeOfDay` patch. Nothing joins
+     * them. Consequence, in the shipped 28-frame set: every sleep frame is a
+     * night interior seen against a bright blue midday sky with no moon and no
+     * stars, and every play and feed frame is a golden-hour interior against
+     * the same one — which also means the shaft, the floor pool and the dust
+     * motes, all of which take the *sky's* colour, were the wrong colour for
+     * the light that was actually casting them.
+     *
+     * Following the rig is correct in both directions: when the mood is set by
+     * a `timeOfDay` patch, `room.onState` drives the rig to the same name, so
+     * the two agree; when it is set by opening an activity, only the rig knows.
+     */
+    const rigMood = ctx?.lighting?.moodName?.();
+    if (rigMood && SKY[rigMood] && rigMood !== this.mood) this.setMood(rigMood);
+
     const t = this.time;
     const T = this.tgt;
     const k = 1 - Math.exp(-dt * 2.4);

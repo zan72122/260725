@@ -30,6 +30,25 @@ import * as M from '../engine/materials.js';
 import * as TEX from '../engine/textures.js';
 import * as S from './_shared.js';
 
+/* ---------------------------------------------------------------- modesty -
+ *
+ * The dressing room is the one screen that stands the character up, front-on,
+ * filling the frame, with the clothes deliberately half off — and it shipped a
+ * bare-crotched child through two review passes because the default outfit's
+ * nappy was on but only covered the waistband. `character/outfit.js` now holds
+ * the invariant for the whole rig (nothing below the waist is ever empty), and
+ * this is the local guard for every `setOutfit` this file makes: whatever comes
+ * off, the nappy stays on. It is deliberately belt-and-braces — this is a
+ * children's product and the failure mode is not one to leave to one layer.  */
+const bare = (v) => v === false || v === null || v === undefined;
+
+/** Copy of `outfit` that is never undressed below the waist. */
+function withNappy(outfit = {}) {
+  const out = { ...outfit };
+  if (bare(out.bottom) && bare(out.diaper)) out.diaper = true;
+  return out;
+}
+
 /* --------------------------------------------------------------- wardrobe - */
 
 export const GARMENTS = [
@@ -229,6 +248,7 @@ export class DressActivity {
 
   async build() {
     const ctx = this.ctx;
+    this._snapshotGarmentCache();
     this.root = new THREE.Group();
     this.root.name = 'dress-rig';
     this.trash.obj(this.root);
@@ -951,17 +971,65 @@ export class DressActivity {
    * way in. `State` is the record of the outfit; the dressing room is the one
    * screen where a mismatch between the two would be obvious.
    */
+  /** What the baby walked in wearing, so an interrupted change can undo. */
+  _snapshotOutfit() {
+    const o = this.ctx.state?.outfit;
+    this._outfitOnEnter = o ? { ...o } : null;
+  }
+
+  /** Put back whatever the baby walked in wearing. */
+  _restoreOutfit() {
+    const ctx = this.ctx;
+    const o = this._outfitOnEnter;
+    if (!o) return;
+    try { ctx.baby?.setOutfit?.({ ...o }); } catch (e) { /* rig may differ */ }
+    try { ctx.state?.patch?.({ outfit: { ...o } }); } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * Give back the garment variants this activity caused to be built.
+   *
+   * `character/outfit.js` caches a garment per (slot, colour) and keeps every
+   * variant on the rig, hidden, so re-dressing is instant. Correct for a
+   * wardrobe screen that the child is going to poke at, and a permanent
+   * scene-graph cost for one that was opened and left. `exit()` has already
+   * put the arrival outfit back, so anything hidden that we caused to exist is
+   * nobody's now — drop it. Anything still *worn* is character state and is
+   * left where it is.
+   */
+  _snapshotGarmentCache() {
+    const items = this.ctx.baby?.outfit?.items;
+    this._garmentKeys = items ? new Set(Object.keys(items)) : null;
+  }
+
+  _pruneGarmentCache() {
+    const outfit = this.ctx.baby?.outfit;
+    const keys = this._garmentKeys;
+    this._garmentKeys = null;
+    if (!outfit?.items || !keys) return;
+    for (const k of Object.keys(outfit.items)) {
+      if (keys.has(k)) continue;
+      const it = outfit.items[k];
+      if (!it?.mesh || it.mesh.visible) continue;
+      it.mesh.parent?.remove(it.mesh);
+      it.mesh.geometry?.dispose?.();
+      it.mat?.dispose?.();
+      delete outfit.items[k];
+    }
+  }
+
   _syncOutfitToBaby() {
     const ctx = this.ctx;
     const outfit = ctx.state?.outfit;
     if (!outfit) return;
+    this._snapshotOutfit();
     // Light up the tile the baby is already wearing. State records the cloth
     // *colour*, the rail records specs, so match on that.
     if (typeof outfit.top === 'number') {
       this.worn = this.garments.find(g => g.spec.color === outfit.top) || this.worn;
     }
     if (!ctx.baby?.setOutfit) return;
-    try { ctx.baby.setOutfit({ ...outfit }); } catch (e) { /* rig may differ */ }
+    try { ctx.baby.setOutfit(withNappy(outfit)); } catch (e) { /* rig may differ */ }
   }
 
   /**
@@ -1007,10 +1075,19 @@ export class DressActivity {
     this.labels.length = 0;
 
     // Never leave the baby half-dressed when the scene changes.
+    //
+    // This used to *finish* the interrupted change, which reads well in a
+    // sentence and badly in practice: an outfit the child never confirmed gets
+    // committed to the save, and — because `_stage` strips the current top
+    // before pulling the new one over the head — the rig ends up wearing two
+    // garment slots it did not have on the way in, which is the whole of the
+    // `activity "dress" left 2 scene nodes behind` warning. Walking out of a
+    // changing room half-changed puts you back in what you walked in wearing,
+    // so that is what happens here.
     if (this.dressing) {
-      this._applyOutfit(this.dressing.g);
       this._resetGarment(this.dressing.g);
       this.dressing = null;
+      this._restoreOutfit();
     }
     if (this._babyHome && ctx.baby?.group) {
       ctx.baby.group.position.copy(this._babyHome.pos);
@@ -1028,6 +1105,7 @@ export class DressActivity {
     this.washLoop = null;
     this.clock.clear();
     this.trash.flush();
+    this._pruneGarmentCache();
     this.garments.length = 0;
     this.dressing = null;
     this.laundry = null;
@@ -1312,7 +1390,7 @@ export class DressActivity {
     this._refreshPicker();          // pulls the tray: now the baby is the target
     this._setDetail(entry, true);
     entry.group.userData.railHome = entry.group.position.clone();
-    try { ctx.baby?.setOutfit?.({ top: null, bottom: null }); } catch (e) { /* ignore */ }
+    try { ctx.baby?.setOutfit?.(withNappy({ top: null, bottom: null })); } catch (e) { /* ignore */ }
 
     // sleeves start tucked; buttons start open
     for (const s of entry.sleeves) s.scale.set(1, 0.12, 1);
@@ -1523,11 +1601,11 @@ export class DressActivity {
   _applyOutfit(entry) {
     const ctx = this.ctx;
     const spec = entry.spec;
-    const outfit = {
+    const outfit = withNappy({
       top: spec.color,
       bottom: spec.skirt ? spec.color : spec.trim,
       diaper: true
-    };
+    });
     try { ctx.baby?.setOutfit?.(outfit); }
     catch (e) { /* rig may differ; the prop still told the story */ }
     // `Baby#setOutfit` already writes through to State, but say it explicitly
@@ -1834,7 +1912,7 @@ export class DressActivity {
       g.group.scale.set(1.04, 0.97, 1.04);
       this._deformOverHead(g, 1);
       S.mood(ctx, 'surprised');
-      try { ctx.baby?.setOutfit?.({ top: null }); } catch (e) { /* ignore */ }
+      try { ctx.baby?.setOutfit?.(withNappy({ top: null })); } catch (e) { /* ignore */ }
       S.say(ctx, 'あたまから すぽっ！', 'hand');
       return;
     }

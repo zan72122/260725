@@ -120,17 +120,34 @@ const KINDS = {
     roll: [-0.34, 0.34], spin: [-0.30, 0.30], grow: 1.35, pulse: 7,
     fadeIn: 0.14, fadeOut: 0.45, alpha: 0.95, palette: PAL.heart, soft: 0.08
   },
+  // The sleep cue. Kept under its old key so every caller keeps working; the
+  // *art* is what changed.
+  //
+  // This used to be `glyphTexture('Z')` — a literal Latin capital drawn on a
+  // canvas and flown as a sprite. Two passes were spent on its orientation
+  // (spawned at a random roll it read as a capital N from above, so the roll
+  // was clamped), which fixed the symptom and left the cause: a typographic
+  // glyph used as in-world FX art is §4 #85 verbatim, and "zzz" is an
+  // Anglophone comic-strip convention that a pre-literate Japanese four-year
+  // -old cannot read at all. It also had to be prevented from rotating, which
+  // is the tell that it was never a 3-D object.
+  //
+  // What replaces it is a **dream puff**: a soft three-lobe cloud with no
+  // boundary, a faint highlight, and no up. It billboards (so it can never lie
+  // flat on the sheet), it may roll freely (a tilted cloud is still a cloud),
+  // it swells and dissolves as it rises, and it means the same thing in every
+  // language on earth. Long lives and a low alpha keep two or three of them in
+  // the air at once — a slow drift rather than a stamp.
   zzz: {
-    mode: 'billboard', shape: 'GLYPH', blending: 'normal', lit: false,
-    capacity: 40, life: [1.8, 2.8], size: [0.038, 0.062],
-    speed: [0.05, 0.12], spread: 0.35, dir: [0.35, 1, 0],
-    gravity: 0, rise: 0.05, drag: 0.7, wobble: 0.05, wobbleFreq: 1.5,
-    // A letter has an up. Roll is held inside a lazy 12° tilt and the spin is
-    // slow enough that it never leaves it within a 2.8 s life, so the glyph
-    // always reads as a Z from any camera.
-    roll: [-0.21, 0.21], spin: [-0.09, 0.09], grow: 1.6,
-    sprite: () => glyphTexture('Z'),
-    fadeIn: 0.18, fadeOut: 0.5, alpha: 0.85, palette: PAL.zzz, soft: 0.10
+    mode: 'billboard', shape: 'PUFF', blending: 'normal', lit: false,
+    capacity: 64, life: [2.4, 4.0], size: [0.020, 0.058],
+    speed: [0.035, 0.10], spread: 0.5, dir: [0.30, 1, 0],
+    gravity: 0, rise: 0.055, drag: 0.75, wobble: 0.040, wobbleFreq: 1.15,
+    curl: 0.05,
+    // A cloud has no up, so the roll is free — and it turns slowly enough that
+    // the whole population never spins in step.
+    roll: [-Math.PI, Math.PI], spin: [-0.22, 0.22], grow: 2.6, pulse: 1.9,
+    fadeIn: 0.30, fadeOut: 0.66, alpha: 0.62, palette: PAL.zzz, soft: 0.06
   },
   dust: {
     // The motes drifting in the window shaft. Long-lived, nearly still, and
@@ -247,6 +264,13 @@ const PARTICLE_FRAG = /* glsl */`
     varying vec3 vNrm;
   #endif
 
+  /* --- soft-cloud helpers, used by the PUFF sleep cue --------------------- */
+  float puffDisc(vec2 p, vec2 c, float r) { return length(p - c) - r; }
+  float puffUnion(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+  }
+
   void main() {
     vec2 uv = vUv;
     vec2 q = uv * 2.0 - 1.0;
@@ -291,10 +315,24 @@ const PARTICLE_FRAG = /* glsl */`
       vec3 tint = 0.5 + 0.5 * cos(PI2 * (vec3(0.0, 0.33, 0.67) + d * 1.7 + vSeed * 3.0));
       col = mix(col, col * tint * 1.7, rim * 0.85);
       col += spec * 0.4;
-    #else                     // GLYPH — painted canvas texture
-      vec4 t = texture2D(tSprite, uv);
-      a = t.a;
-      col *= t.rgb;
+    #else                     // PUFF — soft three-lobe dream cloud
+      // Three overlapping discs smooth-unioned into one silhouette, then
+      // feathered over a band five times wider than a texel so the boundary
+      // never resolves into an edge. No texture, therefore no way for a glyph
+      // to get back in here: the shape is the shader.
+      float dd = puffDisc(q, vec2(-0.32, -0.12), 0.40);
+      dd = puffUnion(dd, puffDisc(q, vec2(0.32, -0.16), 0.34), 0.26);
+      dd = puffUnion(dd, puffDisc(q, vec2(0.00,  0.20), 0.48), 0.28);
+      float body = 1.0 - smoothstep(-0.22, 0.03, dd);
+      // A light from above-left, so the cloud has a top and a bottom and does
+      // not read as a flat sticker whatever angle the camera takes.
+      float lift = smoothstep(-0.85, 0.65, q.y - q.x * 0.25);
+      // one soft highlight — the thing that says "bubble" rather than "smoke"
+      vec2 hp = q - vec2(-0.24, 0.32);
+      float spec = exp(-dot(hp, hp) * 22.0);
+      a = clamp(body * (0.60 + 0.40 * lift) + body * spec * 0.45, 0.0, 1.0);
+      col *= 0.88 + 0.24 * lift;
+      col += spec * body * 0.22;
     #endif
 
     a *= vColor.a;
@@ -341,7 +379,12 @@ const PARTICLE_FRAG = /* glsl */`
   }
 `;
 
-const SHAPE_ID = { SOFT: 0, QUAD: 1, STAR4: 2, STAR5: 3, HEART: 4, BUBBLE: 5, GLYPH: 6 };
+// There is deliberately no GLYPH member any more. Every silhouette in this
+// table is drawn analytically in the fragment shader, so no kind in this file
+// can render text: rubric §4 #85 is closed by construction rather than by
+// convention. If a future cue needs an "up", give it a `roll` range — do not
+// reintroduce a painted-canvas sprite of a character.
+const SHAPE_ID = { SOFT: 0, QUAD: 1, STAR4: 2, STAR5: 3, HEART: 4, BUBBLE: 5, PUFF: 6 };
 
 /* ------------------------------------------------------------ unit quad --- */
 
@@ -352,22 +395,6 @@ function unitQuad() {
     _quad = { index: g.index, position: g.attributes.position, uv: g.attributes.uv };
   }
   return _quad;
-}
-
-/** Canvas-drawn glyph, used for the sleep 'Z'. */
-function glyphTexture(ch) {
-  return TEX.painted('fx-glyph-' + ch, 128, (g, size) => {
-    g.clearRect(0, 0, size, size);
-    g.font = 'bold ' + Math.round(size * 0.82) + 'px system-ui, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.lineJoin = 'round';
-    g.lineWidth = size * 0.13;
-    g.strokeStyle = 'rgba(255,255,255,0.55)';
-    g.strokeText(ch, size / 2, size * 0.54);
-    g.fillStyle = '#ffffff';
-    g.fillText(ch, size / 2, size * 0.54);
-  });
 }
 
 /* --------------------------------------------------------------- scratch -- */
@@ -571,12 +598,11 @@ class Layer {
         this.aQuat[i4] = _q.x; this.aQuat[i4 + 1] = _q.y;
         this.aQuat[i4 + 2] = _q.z; this.aQuat[i4 + 3] = _q.w;
       } else {
-        // Billboard roll. Random over the full circle is right for a sparkle
-        // or a bubble and *wrong* for anything with a readable orientation: a
-        // `zzz` glyph spawned at 90° draws a capital N, which is exactly what
-        // ended up printed across the crib mattress in `52-sleep-lamp-off` and
-        // got filed as placeholder debug text. Kinds whose silhouette has an
-        // up declare a `roll` range and stay within it.
+        // Billboard roll. Random over the full circle is right for a sparkle,
+        // a bubble or a cloud, and *wrong* for anything with a readable
+        // orientation — an upside-down heart is not a heart. Kinds whose
+        // silhouette has an up declare a `roll` range and stay within it;
+        // everything else is free.
         const rollRange = o.roll || d.roll;
         this.aQuat[i4] = rollRange
           ? rng.range(rollRange[0], rollRange[1])

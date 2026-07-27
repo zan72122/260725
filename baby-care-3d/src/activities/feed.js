@@ -67,6 +67,9 @@ const TRAY_D = 0.32;
 const MOUTH_REACH = 0.085;   // "close enough to eat" radius
 const AAN_REACH = 0.19;      // "あーん" mouth-open radius
 
+/** Where a loaded spoon waits, relative to the live mouth. See `_seatSpoon`. */
+const SPOON_OFFER = new THREE.Vector3(0.014, -0.026, 0.066);
+
 /**
  * Which way the working highchair faces, in world radians.
  *
@@ -133,6 +136,7 @@ export class FeedActivity {
 
   async build() {
     const ctx = this.ctx;
+    this._snapshotGarmentCache();
     this.root = new THREE.Group();
     this.root.name = 'feed-rig';
     this.trash.obj(this.root);
@@ -1344,9 +1348,48 @@ export class FeedActivity {
     this.noriFlake?.parent?.remove(this.noriFlake);
     this.clock.clear();
     this.trash.flush();
+    this._pruneGarmentCache();
     this.foods = {};
     this.item = null;
     this.held = null;
+  }
+
+  /**
+   * Give back the garment variants this activity caused to be built.
+   *
+   * `character/outfit.js` caches a garment per (slot, colour): the first time
+   * anything asks for a bib it lofts a new SkinnedMesh onto the rig and keeps
+   * it there, hidden, so the next tap is instant. That is right for the
+   * wardrobe and wrong for us — feeding a baby that has never worn a bib
+   * grows the scene graph by one node that `trash.flush()` can never reach,
+   * because the node hangs off the *rig*, not off `feed-rig`. That single
+   * node is the whole of the remaining `activity "feed" left 1 scene nodes
+   * behind` warning.
+   *
+   * `exit()` has already taken the bib off, so by the time we get here the
+   * variant is hidden and nothing is using it. Drop anything hidden that was
+   * not on the rig when we arrived; leave anything still worn alone, because
+   * that is character state and not ours to revoke.
+   */
+  _snapshotGarmentCache() {
+    const items = this.ctx.baby?.outfit?.items;
+    this._garmentKeys = items ? new Set(Object.keys(items)) : null;
+  }
+
+  _pruneGarmentCache() {
+    const outfit = this.ctx.baby?.outfit;
+    const keys = this._garmentKeys;
+    this._garmentKeys = null;
+    if (!outfit?.items || !keys) return;
+    for (const k of Object.keys(outfit.items)) {
+      if (keys.has(k)) continue;
+      const it = outfit.items[k];
+      if (!it?.mesh || it.mesh.visible) continue;
+      it.mesh.parent?.remove(it.mesh);
+      it.mesh.geometry?.dispose?.();
+      it.mat?.dispose?.();
+      delete outfit.items[k];
+    }
   }
 
   /* ============================================================= input === */
@@ -2032,6 +2075,33 @@ export class FeedActivity {
     else this.clock.after(0.6, () => this._advise());
   }
 
+  /**
+   * Park the loaded spoon in the air just in front of the lips.
+   *
+   * `11-feed-messy` shipped with the spoon bowl half-buried in the baby's
+   * throat and the handle disappearing into the jaw. The cause was not the
+   * offset — it was *when* the offset was measured. `_stage()` samples
+   * `_mouthLocal()` during `setState`, which runs before the rig has been
+   * lowered into the highchair, so it read a mouth ~0.14 m above where the
+   * mouth ends up. The spoon was then frozen at that stale point for the whole
+   * warm-up while the head travelled away from it — landing wherever the neck
+   * happened to be by the time the shutter opened.
+   *
+   * So the spoon is no longer *placed*; it is *carried*. Every frame of a
+   * staged pose it re-reads the live mouth and sits 6.6 cm in front of it and
+   * 2.6 cm below — clear air by a wide margin on a head whose half-depth is
+   * ~7 cm — with the bowl tipped up toward the lips and the handle running
+   * down and out of the face. Wherever the rig settles, the spoon is in front
+   * of the mouth and nowhere near the throat.
+   */
+  _seatSpoon(dt = 0) {
+    this._mouthLocal(this._tmp);
+    this._tmp2.copy(this._tmp).add(SPOON_OFFER);
+    if (dt > 0) this.spoon.position.lerp(this._tmp2, Math.min(1, dt * 12));
+    else this.spoon.position.copy(this._tmp2);
+    this.spoon.rotation.set(-0.62, 0.10, 0.30);
+  }
+
   _returnSpoon() {
     const from = this.spoon.position.clone();
     const fromQ = this.spoon.quaternion.clone();
@@ -2318,6 +2388,11 @@ export class FeedActivity {
         if (it.t <= 0 && it.state === 'eating') { it.t = 0.6; this._doBite(); }
       } else if (it.state === 'sucking') {
         this._updateSuck(dt);
+      } else if (it.frozen && it.id === 'porridge' && it.state === 'held' && !this.held) {
+        // A staged pose is held for several simulated seconds while the rig
+        // settles into the chair; the spoon has to ride the mouth for all of
+        // them. See `_seatSpoon`.
+        this._seatSpoon(dt);
       }
     }
 
@@ -2482,9 +2557,11 @@ export class FeedActivity {
     } else if (id === 'porridge') {
       this._setPorridge(1 - k);
       this.spoonScoop.visible = k < 0.98;
-      this.spoon.position.copy(this._tmp).add(new THREE.Vector3(0.012, -0.030, 0.062));
-      this.spoon.rotation.set(-0.55, 0, 0.35);
+      // Snap now, then track: `update()` re-seats it every frame for as long
+      // as the pose is frozen, because the mouth this reads is the mouth of a
+      // rig that has not been lowered into the chair yet.
       this.item.state = 'held';
+      this._seatSpoon(0);
       S.mood(ctx, 'yum');
     } else if (id === 'banana') {
       const peels = Math.min(3, Math.floor(k * 4));

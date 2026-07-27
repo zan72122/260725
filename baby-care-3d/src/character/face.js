@@ -31,13 +31,13 @@ export const FACE = {
   // bigger, 3.5 mm further apart and on the head's vertical midline, which is
   // where an infant's are; combined with a much shallower orbit (anatomy.js)
   // that is most of the difference between "baby" and "little old man".
-  eye: [0.0335, 0.5355, 0.0450],   // eyeball centre (baby's left)
+  eye: [0.0335, 0.5355, 0.0512],   // eyeball centre (baby's left)
   eyeR: 0.0208,
   lidR: 0.0226,
   brow: [0.0330, 0.5548, 0.0618],
   browHalf: 0.0198,
   // the lip line, now that the lips are real volumes rather than a groove
-  mouth: [0, 0.4906, 0.0744],
+  mouth: [0, 0.4906, 0.0732],
   mouthHalf: 0.0200,
   jawPivot: [0, 0.5150, -0.0080],
   cheek: [0.0400, 0.5120, 0.0600],
@@ -62,8 +62,8 @@ const L = {
   gladY: 0.5480, gladZ: 0.0640,               // glabella, between the brows
   foreY: 0.5700, foreZ: 0.0570,               // mid-forehead
   cheekX: 0.0400, cheekY: 0.5090, cheekZ: 0.0620,
-  cornerX: 0.0182, cornerY: 0.4904, cornerZ: 0.0654,   // mouth corner
-  lipY: 0.4906, lipZ: 0.0748,                 // lip centre
+  cornerX: 0.0196, cornerY: 0.4904, cornerZ: 0.0642,   // mouth corner
+  lipY: 0.4906, lipZ: 0.0736,                 // lip centre
   upperLipY: 0.4952, lowerLipY: 0.4862,
   chinY: 0.4790, chinZ: 0.0630,
   noseY: 0.5150, noseZ: 0.0700,               // bridge
@@ -80,7 +80,7 @@ const L = {
  * the eyeballs completely buried under a fold of cheek. The cheek may reach the
  * lower lid margin; it may not climb past it.
  */
-const belowEye = y => sstep(0.5395, 0.5195, y);
+const belowEye = y => sstep(0.5330, 0.5150, y);
 
 const g1 = (d, r) => Math.exp(-(d * d) / (r * r));
 const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
@@ -156,14 +156,14 @@ const MORPHS = [
   ['smileSmall', (ax, x, y, z, s, o) => {
     const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - L.cornerZ), 0.015);
     const ch = g1(Math.hypot(ax - L.cheekX, y - L.cheekY, z - L.cheekZ), 0.026) * belowEye(y);
-    o[1] += 0.0058 * c + 0.0032 * ch; o[0] += 0.0024 * c * s; o[2] += 0.0012 * ch;
+    o[1] += 0.0056 * c + 0.0032 * ch; o[0] += 0.0042 * c * s; o[2] += 0.0012 * ch;
   }],
   ['smileBig', (ax, x, y, z, s, o) => {
     const c = g1(Math.hypot(ax - L.cornerX, y - L.cornerY, z - (L.cornerZ - 0.001)), 0.019);
     const ch = g1(Math.hypot(ax - (L.cheekX + 0.002), y - (L.cheekY + 0.003), z - (L.cheekZ - 0.003)), 0.028) * belowEye(y);
     const lip = g1(Math.hypot(ax, y - L.upperLipY, z - L.lipZ), 0.020);
     o[1] += 0.0126 * c + 0.0106 * ch + 0.0036 * lip;
-    o[0] += 0.0080 * c * s + 0.0034 * ch * s;
+    o[0] += 0.0094 * c * s + 0.0036 * ch * s;
     o[2] += 0.0052 * ch - 0.0012 * c;
     // No nasolabial fold. It used to be carved in here at 4.2 mm, and it is
     // the loudest "old man" signal a face can carry — infants do not have the
@@ -305,7 +305,7 @@ export function buildFaceMorphs(headGeometry) {
  * of the opening and the eyes read as two beady dark dots with no sclera
  * anywhere. Size the iris to the aperture, not to the ball.
  */
-function eyeballGeometry(R, segs, rings, irisDeg = 33) {
+function eyeballGeometry(R, segs, rings, irisDeg = 28) {
   const g = new THREE.BufferGeometry();
   const pos = [], nor = [], uv = [], idx = [];
   const thetaRef = (0.5 / 0.34) * irisDeg * DEG;      // θ at the texture's edge
@@ -342,8 +342,17 @@ function lidGeometry(R, halfAngle, segs, rings) {
   for (let j = 0; j <= rings; j++) {
     const t = j / rings;
     const th = halfAngle * t;
-    // the last 18% of the cap tucks in, giving the lid margin a rounded edge
-    const roll = 1 - 0.16 * sstep(0.82, 1.0, t);
+    /* The last of the cap tucks in, giving the lid margin a rounded edge
+     * rather than a knife edge. It used to pull in by 16 % over the last 18 %
+     * of the cap, which sounds small and is not: the lid is only 8.7 % larger
+     * in radius than the eyeball, so anything tucked in by more than that is
+     * *inside* the ball and covers nothing. Measured, the lid stopped occluding
+     * 8° before its nominal margin — at each lid — so the solve below could ask
+     * for two edges that cross by 11° and still leave a 5° strip of bare
+     * eyeball showing through a "closed" eye, and a drowsy lid that was asked
+     * for a 2° slit rendered a 19° stare. 10 % over the last 14 % keeps the
+     * rounded margin and brings the deficit down to ~3°. */
+    const roll = 1 - 0.10 * sstep(0.86, 1.0, t);
     for (let i = 0; i <= segs; i++) {
       const ph = (i / segs) * Math.PI * 2;
       const st = Math.sin(th), ct = Math.cos(th);
@@ -393,7 +402,7 @@ function lashGeometry(R, halfAngle, segs) {
       // canthal axis, so cos(ph) is exactly the inner/outer coordinate
       const outer = 0.5 - 0.5 * Math.cos(ph);
       const th = halfAngle + t * (0.055 + 0.105 * outer);
-      const rr = R * (1 - 0.16) * (1 - t * 0.055);
+      const rr = R * (1 - 0.10) * (1 - t * 0.050);
       const st = Math.sin(th), ct = Math.cos(th);
       const nx = st * Math.cos(ph), ny = ct, nz = st * Math.sin(ph);
       pos.push(nx * rr, ny * rr, nz * rr);
@@ -498,9 +507,9 @@ export const MOODS = {
    * anything. So: no smile, brows up a touch (an infant's default is mild
    * interest, not composure), lids fully open, and just enough jaw to part the
    * lips without opening the mouth bag behind them. */
-  neutral:   { jawOpen: 0.11, browRaise: 0.13, blush: 0.22, smileSmall: 0.05 },
-  happy:     { smileBig: 0.86, smileSmall: 0.55, eyeSquint: 0.58, browRaise: 0.44, blush: 0.64, jawOpen: 0.16, cheekPuff: 0.14 },
-  giggle:    { smileBig: 1.0, smileSmall: 0.4, eyeSquint: 0.95, browRaise: 0.55, jawOpen: 0.44, blush: 0.88, noseWrinkle: 0.45, cheekPuff: 0.26, headTilt: -0.20 },
+  neutral:   { jawOpen: 0.12, browRaise: 0.13, blush: 0.24, smileSmall: 0.05 },
+  happy:     { smileBig: 0.86, smileSmall: 0.55, eyeSquint: 0.40, browRaise: 0.44, blush: 0.64, jawOpen: 0.16, cheekPuff: 0.14 },
+  giggle:    { smileBig: 1.0, smileSmall: 0.4, eyeSquint: 0.66, browRaise: 0.55, jawOpen: 0.44, blush: 0.88, noseWrinkle: 0.45, cheekPuff: 0.26, headTilt: -0.20 },
   sad:       { browSad: 1.0, mouthFrown: 0.94, lidLower: 0.54, chinRaise: 0.48, headTilt: -0.40, blush: 0.34, tears: 0.22, browLift: 0.18 },
   cry:       { browSad: 1.0, mouthCry: 1.0, jawOpen: 0.88, lidClose: 0.90, tears: 1.0, noseWrinkle: 0.78, blush: 1.0, cheekPuff: 0.30, chinRaise: 0.30 },
   sleepy:    { sleepSoft: 0.88, lidLower: 0.92, browRaise: 0.26, jawOpen: 0.10, headTilt: 0.28, blush: 0.32, smileSmall: 0.18 },
@@ -509,7 +518,7 @@ export const MOODS = {
   sulk:      { sulk: 1.0, browFurrow: 0.74, mouthPout: 0.72, lidLower: 0.44, headTilt: 0.30, blush: 0.32, cheekPuff: 0.18 },
   shy:       { smileSmall: 0.68, eyeSquint: 0.44, lidLower: 0.56, blush: 1.0, chinRaise: 0.42, headTilt: 0.36, browSad: 0.26 },
   excited:   { smileBig: 0.96, eyeWide: 0.88, browRaise: 0.98, jawOpen: 0.58, blush: 0.72, cheekPuff: 0.10 },
-  yum:       { smileSmall: 0.72, eyeSquint: 0.82, lipsPurse: 0.58, cheekPuff: 0.46, blush: 0.46, noseWrinkle: 0.30, browRaise: 0.26 }
+  yum:       { smileSmall: 0.72, eyeSquint: 0.58, lipsPurse: 0.58, cheekPuff: 0.46, blush: 0.46, noseWrinkle: 0.30, browRaise: 0.26 }
 };
 
 /* ------------------------------------------------------------------ Face -- */
@@ -556,7 +565,7 @@ export class Face {
   /* ------------------------------------------------------------- build --- */
 
   build() {
-    const irisColors = [0x4a3728, 0x3b2a1e, 0x5c4630];
+    const irisColors = [0x5b4530, 0x3b2a1e, 0x5c4630];
     this.eyeMat = MAT.makeEye({ iris: irisColors[0], sclera: 0xfffaf7 });
     // makeCornea() is memoised and shared; take a private copy so the veil can
     // be pulled right down without changing anything else that asks for one.
@@ -687,27 +696,40 @@ export class Face {
    * The mouth is a "bag": a dark bowl that sits inside the depression the
    * jawOpen morph scoops out of the face. The lips stay skin; everything you
    * see through them belongs to this group.
+   *
+   * ── Why `cry` rendered a scarlet lozenge stuck on the chin ───────────────
+   *
+   * Size. The bowl is 21 mm across before scaling, times (1.28, 1, 0.82) on
+   * the geometry, times a group scale that reached (1.89, 1.89, 1.15) at a
+   * full bawl — 101 mm wide and 79 mm tall. The baby's entire jaw is 102 mm
+   * wide. So the bag was not inside the mouth; it was a red ellipsoid slightly
+   * larger than the lower half of the head, and the parts of it outside the
+   * lip opening simply drew over the face.
+   *
+   * The bag now tops out at 41 × 29 mm, which is a bawling infant's mouth, and
+   * it sits far enough back that its front pole stays behind the lip surface
+   * even after the jawOpen morph has scooped that surface 16 mm inward.
    */
   _buildMouth() {
     const grp = new THREE.Group();
-    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0235);
+    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0230);
     this.group.add(grp);
     this.mouthGroup = grp;
 
-    const cav = new THREE.SphereGeometry(0.0210, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62);
+    const cav = new THREE.SphereGeometry(0.0165, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62);
     cav.rotateX(-Math.PI / 2);
-    cav.scale(1.28, 1.0, 0.82);
+    cav.scale(1.15, 1.0, 0.80);
     this.mouthMat = MAT.makeMouthInterior();
     const cavity = new THREE.Mesh(cav, this.mouthMat);
     cavity.renderOrder = 1;
     grp.add(cavity);
     this.cavity = cavity;
 
-    const tongueGeo = new THREE.SphereGeometry(0.0105, 16, 12);
+    const tongueGeo = new THREE.SphereGeometry(0.0080, 16, 12);
     tongueGeo.scale(1.15, 0.55, 1.35);
     this.tongueMat = MAT.makeTongue();
     const tongue = new THREE.Mesh(tongueGeo, this.tongueMat);
-    tongue.position.set(0, -0.0072, 0.0055);
+    tongue.position.set(0, -0.0056, 0.0044);
     grp.add(tongue);
     this.tongue = tongue;
 
@@ -717,7 +739,7 @@ export class Face {
     const teeth = new THREE.Group();
     for (let i = 0; i < 2; i++) {
       const t = new THREE.Mesh(new THREE.BoxGeometry(0.0044, 0.0038, 0.0022), toothMat);
-      t.position.set((i - 0.5) * 0.0052, -0.0022, 0.0122);
+      t.position.set((i - 0.5) * 0.0052, -0.0018, 0.0096);
       teeth.add(t);
     }
     grp.add(teeth);
@@ -761,11 +783,20 @@ export class Face {
     this.blushMat = mat;
     this.blush = [];
 
-    // Curvature deliberately much flatter than the cheek: a cap tighter than
-    // the surface it lies on dives its own rim into the skin, and the depth
-    // test then bites a hard crescent out of the patch.
-    const R = 0.150;
-    const CAP = 0.0150;                       // 30 mm across on the skin
+    /* Curvature and size.
+     *
+     * The two failure modes are not symmetric, and that decides the number. A
+     * cap *tighter* than the cheek dives its own rim into the skin and the
+     * depth test bites a hard crescent out of it — tried at 48 mm against this
+     * cheek and it rendered as two red gill-slashes beside the mouth. A cap
+     * *flatter* than the cheek only floats, and because the alpha sprite is a
+     * radial disc that has already faded to zero by the rim, a float of a few
+     * millimetres cannot be seen at all. So err flat, and keep the patch small
+     * enough that it stays on the apple: at 30 mm it reached the mouth corner,
+     * which is where the crescents were landing and why they read as a wound
+     * rather than a flush.                                                   */
+    const R = 0.140;
+    const CAP = 0.0132;                       // 26 mm across on the skin
     const geo = new THREE.SphereGeometry(R, 24, 10, 0, Math.PI * 2, 0, Math.asin(CAP / R));
     geo.rotateX(Math.PI / 2);                 // pole +Y → +Z, which is what lookAt aims
     geo.translate(0, 0, -R);                  // pole at the local origin
@@ -781,7 +812,9 @@ export class Face {
       const m = new THREE.Mesh(geo, mat);
       // Low and lateral: on the apple of the cheek, not up against the eye
       // socket where the surface falls away and the cap rim buries itself.
-      let p = new THREE.Vector3(FACE.cheek[0] * 1.06 * s, FACE.cheek[1] - 0.0075, FACE.cheek[2] - 0.0080);
+      // on the *apple*, level with the bottom of the eye, not down beside the
+      // mouth where the surface turns over and the cap has to fight the lips
+      let p = new THREE.Vector3(FACE.cheek[0] * 1.02 * s, FACE.cheek[1] + 0.0020, FACE.cheek[2] - 0.0060);
       if (this.field) {
         // land exactly on the skin, then face along its normal
         for (let i = 0; i < 6; i++) {
@@ -796,7 +829,7 @@ export class Face {
         // fallback: outward from the head's centre of mass
         _n.set(p.x - 0, p.y - 0.5330, p.z - 0.0060).normalize();
       }
-      m.position.copy(p).addScaledVector(_n, 0.0030);
+      m.position.copy(p).addScaledVector(_n, 0.0032);
       m.quaternion.setFromUnitVectors(_z, _n);
       m.renderOrder = 2;
       this.group.add(m);
@@ -945,7 +978,7 @@ export class Face {
       if (this._saccadeIn <= 0) {
         this._saccadeIn = 0.9 + this._rnd() * 2.6;
         // infants lock onto faces: most fixations go to whoever is watching
-        this._idleAtCam = this._rnd() < 0.80;
+        this._idleAtCam = this._rnd() < 0.92;
         this._idlePoint.set(
           (this._rnd() - 0.5) * 0.34,
           (this._rnd() - 0.42) * 0.16,
@@ -961,8 +994,8 @@ export class Face {
       const w = _t10.copy(eyeW);
       if (this._idleAtCam && ctx?.camera) {
         w.setFromMatrixPosition(ctx.camera.matrixWorld);
-        w.addScaledVector(right, this._idlePoint.x * 0.25);
-        w.y += this._idlePoint.y * 0.25;
+        w.addScaledVector(right, this._idlePoint.x * 0.14);
+        w.y += this._idlePoint.y * 0.14;
       } else {
         w.addScaledVector(fwd, this._idlePoint.z)
           .addScaledVector(right, this._idlePoint.x);
@@ -998,7 +1031,7 @@ export class Face {
     let version = THREE.MathUtils.clamp((yaw[0] + yaw[1]) * 0.5, -0.30, 0.30);
     // signed half-vergence; at a 40 cm target this is ~0.07 rad, which is small
     // but is exactly the cue that says "those two eyes are looking at one thing"
-    let verg = THREE.MathUtils.clamp((yaw[0] - yaw[1]) * 0.5, -0.14, 0.14);
+    let verg = THREE.MathUtils.clamp((yaw[0] - yaw[1]) * 0.5, -0.095, 0.095);
     const pitchC = THREE.MathUtils.clamp((pit[0] + pit[1]) * 0.5, -0.24, 0.22);
     for (let i = 0; i < this.eyes.length; i++) {
       this.eyes[i].goalYaw = version + (i === 0 ? verg : -verg);
@@ -1110,8 +1143,14 @@ export class Face {
       // bottom; a narrow slit over a big ball is what makes a stylised eye read
       // as "hooded", i.e. adult.
       const upEdge = THREE.MathUtils.lerp(49 - wide * 10 + squint * 9, 107, close);
+      // The lower lid trails the upper. Drooping off to sleep is almost purely
+      // an *upper*-lid movement — the lower one barely rises until the eye is
+      // nearly shut — and driving both from `close` at the same rate is why
+      // `sleepy` could not produce a heavy-lidded slit: whatever the upper lid
+      // came down by, the lower one went down to meet it and the aperture
+      // stayed centred and open. The exponent keeps full close intact.
       const loEdge = THREE.MathUtils.lerp(131 + wide * 6, 96,
-        clamp01(Math.max(close, close * 0.62 + squint * 0.95)));
+        clamp01(Math.max(Math.pow(close, 1.6), close * 0.62 + squint * 0.95)));
       e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
       e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;
       // the inner corner of the upper lid drops on a sad brow, lifts on a
@@ -1157,15 +1196,18 @@ export class Face {
     const open = clamp01(val('jawOpen') + val('yawnWide') * 1.5 + val('mouthCry') * 0.62);
     const g = this.mouthGroup;
     const wide = clamp01(val('smileBig') * 0.9 + val('mouthCry'));
-    g.visible = open > 0.13;
+    // 0.15, not 0.13: `neutral` now carries a little jawOpen so the lips part
+    // at rest, and the threshold has to stay clear of it — a resting baby with
+    // the mouth *bag* switched on is a baby with a black slot in its face.
+    g.visible = open > 0.15;
     g.scale.set(
-      0.70 + wide * 0.85 + open * 0.34,
-      0.34 + open * 1.55,
-      0.55 + open * 0.60);
-    g.position.y = FACE.mouth[1] - open * 0.0150;
-    g.position.z = FACE.mouth[2] - 0.0235 - open * 0.0165;
-    this.tongue.position.y = -0.0072 - open * 0.0030 + (ov.tongue || 0) * 0.004;
-    this.tongue.position.z = 0.0055 - open * 0.0060 + (ov.tongue || 0) * 0.020;
+      0.42 + wide * 0.62 + open * 0.16,
+      0.16 + open * 0.95,
+      0.45 + open * 0.45);
+    g.position.y = FACE.mouth[1] - open * 0.0130;
+    g.position.z = FACE.mouth[2] - 0.0230 - open * 0.0105;
+    this.tongue.position.y = -0.0056 - open * 0.0026 + (ov.tongue || 0) * 0.004;
+    this.tongue.position.z = 0.0044 - open * 0.0044 + (ov.tongue || 0) * 0.014;
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';
 
     /* -- cheeks / blush ---------------------------------------------------- */

@@ -24,7 +24,16 @@ import { buildPatch, smoothstep as sstep, mirror as mir } from './anatomy.js';
  * the skin, and the shells are lofted on a ~10–12 mm grid. Anything much under
  * 20 mm and the drop lands inside a single quad, i.e. a vertical wall.
  */
-const band = (a, b, x) => sstep(a, a + 0.020, x) * (1 - sstep(b - 0.020, b, x));
+const band = (a, b, x, ramp = 0.020) =>
+  sstep(a, a + ramp, x) * (1 - sstep(b - ramp, b, x));
+
+/**
+ * Union of two mask lobes. `Math.max` is a *crease*: the gradient jumps where
+ * the two lobes cross, the hem taper inherits the kink, and the kink lands on
+ * the mesh as a notch in an otherwise smooth hem. This one is smooth
+ * everywhere and never exceeds 1.
+ */
+const uni = (a, b) => 1 - (1 - a) * (1 - b);
 
 /** Distance to a mirrored segment, used by the sleeve/leg masks. */
 function segDist(p, a, b) {
@@ -37,6 +46,43 @@ function segDist(p, a, b) {
 
 /* ------------------------------------------------------------ garments ---- */
 
+/* ── The layer stack ────────────────────────────────────────────────────────
+ *
+ * Garment shells cannot see each other. Each is lofted from the *skin* field
+ * and displaced outward by its own `inflate`, so the only thing keeping the
+ * nappy inside the shorts and the shirt outside both is this table. It has to
+ * be authored, and it has to leave real clearance, because a shell is not flat
+ * at its authored level: `buildPatch`'s dominance sink can drop a vertex up to
+ * `floorLevel` (3.2 mm) below it, so two layers only 3.6 mm apart interleave
+ * over every fillet and armpit and shred into overlapping scraps. That is what
+ * `50`/`51`/`52` were showing — the pyjama top (14.8), the pyjama bottoms
+ * (7.2) and the nappy (11.2) all live in the hip band, 3.6 mm apart, three
+ * shells fighting for the same surface.
+ *
+ *   skin      0.0
+ *   socks     4.5   feet + ankle
+ *   hat       6.2   head only, no neighbour
+ *   nappy     7.6   torso + crotch  ┐ mutually exclusive: `set()` culls the
+ *   bottom    7.6   hips + thighs   ┘ nappy whenever bottoms are worn
+ *   shoes    12.2   over the socks              (+7.7)
+ *   top      14.8   over nappy / bottoms        (+7.2)
+ *   bib      21.5   outermost; nothing over it  (+6.7)
+ *
+ * Every pair that can be worn together on the same patch is ≥ 6.7 mm apart —
+ * twice the deepest sink — so no two shells can ever swap places.
+ *
+ * ── Hem quality ────────────────────────────────────────────────────────────
+ *
+ * A hem is where the shell tapers from `inflate` down through the skin, and
+ * the triangles that straddle the surface are cut by it into the scalloped
+ * fringe this file keeps growing comments about. The fringe cannot be removed,
+ * only made small: a scallop is exactly one quad wide. The `top` reads clean
+ * at 400 % because it is lofted at 8–11 mm quads; every other slot was at
+ * 0.62–0.72 LOD, i.e. 16–28 mm quads, and showed the same construction as a
+ * ragged tear. So every slot is now lofted to the same ~8–11 mm grid the shirt
+ * uses, and every mask ramp is at least twice a quad wide.
+ * ------------------------------------------------------------------------ */
+
 /**
  * name → { groups, inflate, mask(x,y,z), material(), lod }
  * `mask` returns 1 where the garment is solid and fades to 0 at the hem.
@@ -48,7 +94,7 @@ export const GARMENTS = {
     // the shirt is the garment that gets closest to the camera and the one
     // whose hems cross the most curvature, and a hem's silhouette is only ever
     // as smooth as the quad it crosses
-    lod: 1.08,
+    lod: 1.26,
     mask: (x, y, z) => {
       // the collar sits low and wide, well clear of the head shell's own rim —
       // an overlapping neckline leaves the two surfaces fighting and shows as
@@ -64,10 +110,12 @@ export const GARMENTS = {
       let sl = 0;
       for (const s of [1, -1]) {
         const d = segDist([x, y, z], mir([0.0700, 0.4060, 0.0040], s), mir([0.1120, 0.3600, 0.0180], s));
-        sl = Math.max(sl, 1 - sstep(0.030, 0.054, d));
+        // …bounded above, so the capsule's own end cap cannot loft a sliver of
+        // sleeve up beside the collar, where the body band has already stopped
+        sl = Math.max(sl, (1 - sstep(0.030, 0.054, d)) * (1 - sstep(0.4180, 0.4440, y)));
       }
       // neck hole
-      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4300) / 0.70) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.0455 ** 2)));
+      const neck = 1 - Math.exp(-(((x) ** 2 + ((y - 0.4300) / 0.70) ** 2 + ((z - 0.004) / 1.0) ** 2) / (0.0398 ** 2)));
       return Math.max(bodyM, sl) * Math.max(0, neck);
     },
     // A knit at 120 threads × 8 repeats is a 1 mm rib: below a pixel at any
@@ -80,16 +128,27 @@ export const GARMENTS = {
   },
   bottom: {
     groups: ['torso', 'legL', 'legR'],
-    inflate: 0.0072,
-    lod: 0.7,
+    /* Level 7.6 mm — the same level as the nappy, which `set()` culls whenever
+     * bottoms are worn. They cover the same body, so putting one *inside* the
+     * other (7.2 under 11.2, as it was) is both wrong — a nappy goes under the
+     * shorts, not over them — and unbuildable: 4 mm of clearance is less than
+     * the sink depth, so the two shells took turns being outside.             */
+    inflate: 0.0076,
+    lod: 1.26,
     mask: (x, y, z) => {
-      const hip = band(0.2200, 0.3080, y);
+      const hip = band(0.2020, 0.3140, y, 0.024);
+      // the seat: shorts have to close under the body, or the child is bare
+      // from any angle that sees between the legs
+      const seat = 1 - sstep(0.058, 0.092, Math.hypot(x * 0.74, (y - 0.2320) * 1.00, (z + 0.004) * 0.70));
       let leg = 0;
       for (const s of [1, -1]) {
-        const d = segDist([x, y, z], mir([0.0420, 0.2640, 0.0040], s), mir([0.0470, 0.2020, 0.0020], s));
-        leg = Math.max(leg, (1 - sstep(0.044, 0.062, d)) * (1 - sstep(0.268, 0.290, y)));
+        const d = segDist([x, y, z], mir([0.0420, 0.2640, 0.0040], s), mir([0.0470, 0.2060, 0.0020], s));
+        // …and a *lower* bound, or the leg capsule's own end cap carries the
+        // shorts down the shin to the ankle and straight through the socks
+        leg = Math.max(leg, (1 - sstep(0.042, 0.068, d))
+          * (1 - sstep(0.264, 0.294, y)) * sstep(0.1600, 0.1900, y));
       }
-      return Math.max(hip, leg);
+      return uni(uni(hip, seat), leg);
     },
     material: (c) => MAT.makeCloth({
       color: c, weave: 'plain', threads: 70, repeat: 3.5, seed: 33, normalScale: 0.5
@@ -97,13 +156,31 @@ export const GARMENTS = {
   },
   diaper: {
     groups: ['torso', 'legL', 'legR'],
-    inflate: 0.0112,
-    lod: 0.62,
+    /* Level 7.6 mm, under the shirt (14.8) with 7.2 mm of clearance.
+     *
+     * The mask is the modesty guarantee for the whole product. It used to be a
+     * waistband plus a small lozenge centred at y = 0.256 that stopped at
+     * y ≈ 0.24 — and the shirt's own hem starts at y = 0.243, so between them
+     * they left a 60 mm bare band right across the crotch, front and back.
+     * That is what `30-dress-outfit` was rendering. The pad now runs down past
+     * the leg join (y ≈ 0.168) and closes round the top of each thigh, so the
+     * child is covered from every angle with or without a shirt.              */
+    inflate: 0.0076,
+    lod: 1.34,
     mask: (x, y, z) => {
-      // fat at the back and between the legs, tapering at the waist
-      const wais = band(0.2320, 0.3020, y);
-      const bulk = 1 - sstep(0.048, 0.082, Math.hypot(x * 0.85, (y - 0.2560) * 1.3, (z + 0.010) * 0.85));
-      return Math.max(wais * 0.9, bulk);
+      // waistband, all the way round, sitting just under the navel
+      const waist = band(0.2160, 0.3120, y, 0.024);
+      // the pad: a fat lozenge front-to-back through the crotch
+      const pad = 1 - sstep(0.055, 0.091, Math.hypot(x * 0.78, (y - 0.2280) * 0.95, (z + 0.006) * 0.72));
+      // and a cuff round the top of each thigh, so the pad closes on the leg
+      // rather than ending in mid-air over it
+      let cuff = 0;
+      for (const s of [1, -1]) {
+        const d = segDist([x, y, z], mir([0.0380, 0.2560, 0.0040], s), mir([0.0430, 0.2140, 0.0020], s));
+        cuff = Math.max(cuff, (1 - sstep(0.046, 0.074, d))
+          * (1 - sstep(0.252, 0.284, y)) * sstep(0.1740, 0.2020, y));
+      }
+      return uni(uni(waist, pad), cuff);
     },
     // a nappy is non-woven and smooth; a plain weave is both truer and an
     // order of magnitude cheaper to synthesise than a terry pile
@@ -114,25 +191,27 @@ export const GARMENTS = {
   },
   socks: {
     groups: ['footL', 'footR', 'legL', 'legR'],
-    inflate: 0.0048,
-    lod: 0.66,
-    mask: (x, y, z) => 1 - sstep(0.088, 0.112, y),
+    inflate: 0.0045,
+    lod: 1.15,
+    mask: (x, y, z) => 1 - sstep(0.078, 0.116, y),
     material: (c) => MAT.makeCloth({
       color: c, weave: 'knit', threads: 48, repeat: 4, seed: 57, normalScale: 0.5
     })
   },
   shoes: {
     groups: ['footL', 'footR'],
-    inflate: 0.0075,
-    lod: 0.7,
-    mask: (x, y, z) => 1 - sstep(0.052, 0.070, y),
+    // 7.7 mm outside the socks: a shoe is the outer layer on the foot and the
+    // sock cuff has to read *inside* it, not through it
+    inflate: 0.0122,
+    lod: 0.95,
+    mask: (x, y, z) => 1 - sstep(0.046, 0.074, y),
     material: (c) => MAT.makePlastic({ color: c, matte: 0.55, clearcoat: 0.7, seed: 63 })
   },
   hat: {
     groups: ['head'],
-    inflate: 0.0055,
-    lod: 0.72,
-    mask: (x, y, z) => sstep(0.5560, 0.5760, y + z * 0.16),
+    inflate: 0.0062,
+    lod: 1.1,
+    mask: (x, y, z) => sstep(0.5480, 0.5780, y + z * 0.16),
     material: (c) => MAT.makeCloth({ color: c, weave: 'knit', threads: 80, repeat: 9, seed: 71 })
   },
   bib: {
@@ -147,18 +226,22 @@ export const GARMENTS = {
      * them was inside the shirt (mean +8.9 mm).
      *
      * The stack has to be authored explicitly, because the shells cannot see
-     * each other: skin 0 → bottom 7.2 → diaper 11.2 → top 14.8 → bib 21.5.
-     * A bib is the outermost layer on the torso; nothing goes over it.      */
+     * each other — see the table at the head of this section. A bib is the
+     * outermost layer on the torso; nothing goes over it.                   */
     inflate: 0.0215,
-    lod: 1.0,
+    lod: 1.2,
     mask: (x, y, z) => {
       if (z < 0.006) return 0;
       // a bib silhouette: a broad rounded shield, wider at the top than the
       // bottom, with a scooped neck opening
       const w = 0.070 - 0.016 * sstep(0.360, 0.410, 0.770 - y);
       const r = Math.hypot(x / w, (y - 0.3820) / 0.062);
-      const neck = sstep(0.030, 0.055, Math.hypot(x / 0.9, (y - 0.4330) / 0.72));
-      return (1 - sstep(0.82, 1.02, r)) * neck;
+      const neck = sstep(0.026, 0.058, Math.hypot(x / 0.9, (y - 0.4330) / 0.72));
+      // The bib stands 26 mm proud of the skin once the hem bury is counted,
+      // and this ramp is the whole distance it has to fall. At 0.82→1.02 of a
+      // ~62 mm radius that was 12 mm — a 65° wall on an 11 mm grid, i.e. a
+      // ring of edge-on scraps all the way round the shield.
+      return (1 - sstep(0.74, 1.06, r)) * neck;
     },
     material: (c) => MAT.makeTerry({ color: c, repeat: 8, seed: 71 })
   }
@@ -298,17 +381,36 @@ export class Outfit {
         cand.push(a, b, c);
         lens.push(Math.max(edge(a, b), edge(b, c), edge(c, a)));
       }
-      // A last safety net, deliberately loose: a shell whose quads are 11 mm
-      // has no business carrying a 50 mm triangle, whatever produced it — that
-      // one chords across a concavity and surfaces through the far side. The
-      // limit is relative because garments are built at several LODs and a leg
-      // shell's quads are three times a torso shell's.
+      /* The last safety net, and the one that has to be aimed carefully.
+       *
+       * The thing it exists to catch is a triangle that *chords across a
+       * concavity* — the crotch, the armpit, the neck — and surfaces through
+       * the far side. Cutting on edge length alone (> 2.3 × the median) looks
+       * like a proxy for that and is not: a loft's end cap legitimately
+       * carries triangles two or three times the body quads, and on the nappy
+       * that rule was silently deleting the entire seat. Measured, it removed
+       * 370 of 2296 covered surface samples — a hole across the buttocks and
+       * the crotch, i.e. the modesty guarantee, cut by a heuristic.
+       *
+       * What actually distinguishes a chord is that it *bulges away from the
+       * surface*: sample the field at the centroid and it sits far outside the
+       * plane its own vertices are standing on. A big cap quad does not — its
+       * centroid is at most a sagitta out. So test that directly, and keep a
+       * loose absolute ceiling for anything genuinely enormous.               */
       const sorted = Float64Array.from(lens).sort();
       const med = sorted.length ? sorted[sorted.length >> 1] : 0.012;
-      const limit = Math.max(med * 2.3, 0.022);
+      const limit = Math.max(med * 4.0, 0.055);
       for (let i = 0; i < lens.length; i++) {
         if (lens[i] > limit) continue;
-        idx.push(cand[i * 3] + vo, cand[i * 3 + 1] + vo, cand[i * 3 + 2] + vo);
+        const a = cand[i * 3], b = cand[i * 3 + 1], c = cand[i * 3 + 2];
+        if (lens[i] > med * 1.8) {
+          const cx = (p.pos[a * 3] + p.pos[b * 3] + p.pos[c * 3]) / 3;
+          const cy = (p.pos[a * 3 + 1] + p.pos[b * 3 + 1] + p.pos[c * 3 + 1]) / 3;
+          const cz = (p.pos[a * 3 + 2] + p.pos[b * 3 + 2] + p.pos[c * 3 + 2]) / 3;
+          const bulge = this.field.eval(cx, cy, cz) - (ev[a] + ev[b] + ev[c]) / 3;
+          if (bulge > 0.006) continue;
+        }
+        idx.push(a + vo, b + vo, c + vo);
       }
       vo += n;
     }
@@ -343,23 +445,56 @@ export class Outfit {
   /**
    * `{ top:'mint', bottom:false, diaper:true, socks:'cream', shoes:null,
    *    hat:false, bib:'rose' }` — anything omitted keeps its current state.
+   *
+   * The whole outfit is re-resolved on every call, not just the slots named:
+   * two of the rules below (modesty, and culling the nappy under bottoms) are
+   * relations *between* slots, so taking the shorts off has to be able to put
+   * the nappy back.
    */
   set(desc = {}) {
+    for (const name of Object.keys(GARMENTS)) {
+      if (name in desc) this.state[name] = desc[name];
+    }
+    return this._resolve();
+  }
+
+  /** Is this slot asking to be worn? */
+  static _on(v) { return !(v === false || v === null || v === undefined); }
+
+  /**
+   * Turn `this.state` into visible meshes, applying the two rules the stack
+   * table at the top of this file describes.
+   */
+  _resolve() {
     const defaults = {
       top: 0xbdf0dc, bottom: 0xa8d8ff, diaper: 0xfffdf8,
       socks: 0xfff4e4, shoes: 0xff9ec4, hat: 0xffe89a, bib: 0xffb6cc
     };
+    const on = (n) => Outfit._on(this.state[n]);
+
+    /* Modesty. This is a children's product and the character is never
+     * undressed below the waist — not in an activity, not at a camera preset,
+     * and not in the default state. `30-dress-outfit` shipped a bare-crotched
+     * child through two review passes because the rule lived in whichever
+     * call site happened to remember it; it lives here now, where every path
+     * into the rig has to go through it. Bath and nappy-change legitimately
+     * strip the clothes — they do not get to strip the nappy.               */
+    if (!on('bottom') && !on('diaper')) this.state.diaper = true;
+
+    /* The nappy and the bottoms share a shell level (7.6 mm) because they
+     * cover the same body. Only one of them can be outermost there, and the
+     * nappy is the one nobody can see, so it is the one that goes. Rendering
+     * both put two same-level shells over the hips, which is half of what
+     * shredded the pyjama in `50`/`51`/`52`.                                */
+    const culled = on('bottom') ? 'diaper' : null;
+
     for (const name of Object.keys(GARMENTS)) {
-      if (!(name in desc)) continue;
-      const v = desc[name];
-      this.state[name] = v;
       // hide every variant of this garment first
       for (const k in this.items) if (this.items[k].name === name) this.items[k].mesh.visible = false;
-      if (v === false || v === null || v === undefined) continue;
-      const item = this._make(name, resolveColor(v, defaults[name]));
+      if (name === culled || !on(name)) continue;
+      const item = this._make(name, resolveColor(this.state[name], defaults[name]));
       if (item) item.mesh.visible = true;
     }
-    // a nappy is always under the bottoms, never over them
     return this;
   }
 

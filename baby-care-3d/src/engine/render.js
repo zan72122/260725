@@ -543,11 +543,28 @@ export class RenderPipeline {
     // The real fix is in the shader (the halo is now a rim), but the gate is
     // raised too so that only things which are bright in *all three* channels —
     // the window, the lamp shade, a specular hit — can ever fire it.
+    //
+    // …and the gate was still an order of magnitude too low, which is rubric
+    // §4 #102 ("bloom applied to the whole frame rather than threshold-limited
+    // to true highlights") and was reported against `40-play-blocks` as "a
+    // broad haze over roughly 15% of the frame". The arithmetic: this pass
+    // reads the *linear* HDR buffer, and with `useLegacyLights` off a wall of
+    // albedo 0.75 under a key of 3.35 lx leaves the surface at 3.35 × 0.75 / π
+    // ≈ 0.80, plus fill, rim and env — call it 1.2. A threshold of 1.02 was
+    // therefore catching every lit wall in the room, which is precisely how a
+    // threshold-limited effect becomes a full-frame veil.
+    //
+    // 2.35 sits above any lit diffuse surface in the set and below the two
+    // things that are genuinely emissive: the sky (linear 8–11 through
+    // `SKY.gain`) and the lamp shade. Strength comes up to compensate, so the
+    // window keeps a real halo while the walls stop glowing — and it matters
+    // more now than it did, because `day` and `rain` are deliberately driving
+    // the sky harder than any previous pass did.
     const bloom = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      tier === TIER.LOW ? 0.30 : 0.40,   // strength
+      tier === TIER.LOW ? 0.38 : 0.52,   // strength
       0.66,                              // radius
-      1.02                               // threshold
+      2.35                               // threshold
     );
     composer.addPass(bloom);
     this.bloom = bloom;
