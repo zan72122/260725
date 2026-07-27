@@ -1317,12 +1317,31 @@ export class BathActivity {
     // line to the far waterline passes over the near rim at y ≈ 0.72.
     add('bath-face', [0.32, 0.946, 0.752], [0.00, 0.615, 0.06], 34, 0.16, 1.25);
 
-    // Splash (22-bath-splash) needs air: droplets arc well above the rim, so
-    // this one is pulled back and aimed high rather than tight on the face.
-    add('closeup', [0.40, 1.152, 1.008], [0.00, 0.65, 0.06], 34, 0.20);
-
     // the towel-and-dryer stage on the mat
     add('bath-dry', [0.39, 0.72, 1.83], [0.02, 0.32, 0.50], 33, 0.22);
+
+    this._addPreset = add;
+    this._syncCloseup();
+  }
+
+  /**
+   * `closeup` has to mean two different things in this scene, because the baby
+   * is in two different places: sitting in the water (22-bath-splash) or
+   * standing on the mat being towelled (23-bath-wet). The rig resolves against
+   * one subject at a time and that subject is the tub, so re-aim the preset
+   * whenever the baby moves rather than trying to serve both from one framing.
+   * `overridePreset` re-points the live goal too, so this is safe mid-shot.
+   */
+  _syncCloseup() {
+    if (!this._addPreset) return;
+    if (this.inTub) {
+      // Splash needs air: droplets arc well above the rim, so this is pulled
+      // back and aimed high rather than tight on the face.
+      this._addPreset('closeup', [0.40, 1.152, 1.008], [0.00, 0.65, 0.06], 34, 0.20);
+    } else {
+      // On the mat, standing and dripping — a whole-body framing.
+      this._addPreset('closeup', [0.446, 0.779, 1.751], [0.02, 0.30, 0.50], 34, 0.22);
+    }
   }
 
   _goTo(preset, seconds = 1.1) {
@@ -1580,6 +1599,7 @@ export class BathActivity {
     b.group.rotation.set(0, this.tub.rotation.y + 0.16, 0);
     b.playPose?.('bathe', { seconds: 0.5 });
     this.inTub = true;
+    this._syncCloseup();
   }
 
   _placeBabyOnMat() {
@@ -1590,6 +1610,7 @@ export class BathActivity {
     b.group.rotation.set(0, this.tub.rotation.y + 0.30, 0);
     b.playPose?.('stand', { seconds: 0.5 });
     this.inTub = false;
+    this._syncCloseup();
   }
 
   /* ============================================================ phases == */
