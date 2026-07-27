@@ -545,7 +545,16 @@ export function makeCarpet({ color = 0xffd7e6, repeat = 3, seed = 19, density = 
     envMapIntensity: 0.7
   });
   mat.normalScale.set(1.5, 1.5);
-  unshare(mat, { repeat });
+  /* Tiling cap. A rug is the one surface in the room that is *always* seen
+   * whole, from standing height, at 2–3 m — so its tile is only ever minified,
+   * never magnified, and the caller's `repeat` sets how many screen pixels a
+   * tuft gets. At repeat 5 on a 2.36 m rug a tuft lands on two pixels and the
+   * pile turns to dither (see TEX.carpet). 3.2 puts it on four to five, which
+   * is the point where the normal map starts describing a shape instead of
+   * flickering. Capped rather than exposed as a new argument because there is
+   * no rug in the game for which a finer tile would survive to the screen.
+   */
+  unshare(mat, { repeat: Math.min(repeat, 3.2) });
   return mat;
 }
 
