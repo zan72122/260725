@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0e3b52">
+<title>じはんき シミュレーター 3D</title>
+<style>
+  *, *::before, *::after {
+    margin:0; padding:0; box-sizing:border-box;
+    -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none;
+    -webkit-user-select:none; user-select:none;
+  }
+  html, body {
+    width:100%; height:100%; overflow:hidden; position:fixed;
+    background:#0e3b52; touch-action:none; overscroll-behavior:none;
+    font-family:'Hiragino Maru Gothic ProN','ヒラギノ丸ゴ ProN W4','M PLUS Rounded 1c','Yu Gothic','Meiryo',sans-serif;
+  }
+  #game-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  /* =================== タイトル =================== */
+  #title-screen {
+    position:absolute; inset:0; z-index:60; overflow:hidden;
+    background:linear-gradient(180deg,#6fc4f0 0%,#a9e0f7 45%,#e8f6fd 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3.2vmin; transition:opacity .55s ease;
+  }
+  #title-screen.hidden { opacity:0; pointer-events:none; }
+  #title-logo {
+    font-size:8.4vmin; font-weight:bold; color:#e8402f; text-align:center; line-height:1.25;
+    text-shadow:0 .7vmin 0 #fff, 0 1.3vmin 2.2vmin rgba(0,60,90,.30); z-index:2;
+  }
+  #title-logo .sub { display:block; font-size:4.2vmin; color:#0e6b96; margin-top:1vmin; }
+  #title-art { font-size:20vmin; line-height:1; z-index:2; animation:bob 2.4s ease-in-out infinite;
+               filter:drop-shadow(0 2vmin 1.6vmin rgba(0,60,90,.28)); }
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(-3deg);} 50%{transform:translateY(-2.4vmin) rotate(3deg);} }
+  #start-btn {
+    font-family:inherit; font-size:6vmin; font-weight:bold; color:#fff; border:none; cursor:pointer;
+    background:linear-gradient(180deg,#ff8a5c,#e8402f); border-radius:6vmin; padding:2.8vmin 9vmin;
+    box-shadow:0 1.4vmin 0 #b32a1c, 0 2.4vmin 3vmin rgba(0,50,80,.35); z-index:2;
+    animation:pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.06);} }
+  #start-btn:active { transform:translateY(1vmin) scale(.98); box-shadow:0 .4vmin 0 #b32a1c; }
+  #title-note { font-size:2.9vmin; color:#0e6b96; z-index:2; text-align:center; line-height:1.6; }
+  .cloud { position:absolute; background:#fff; border-radius:50%; opacity:.8; animation:drift linear infinite; }
+  @keyframes drift { from{transform:translateX(-40vw);} to{transform:translateX(140vw);} }
+
+  /* =================== HUD =================== */
+  #hud {
+    position:absolute; inset:0; z-index:20; pointer-events:none;
+    opacity:0; transition:opacity .5s;
+  }
+  #hud.visible { opacity:1; }
+
+  /* ほし */
+  #stars {
+    position:absolute;
+    top:calc(env(safe-area-inset-top,0px) + 1.4vmin);
+    left:calc(env(safe-area-inset-left,0px) + 1.6vmin);
+    background:rgba(255,255,255,.90); border-radius:99px;
+    padding:.9vmin 2.6vmin .9vmin 1.6vmin;
+    display:flex; align-items:center; gap:1vmin;
+    font-size:4.2vmin; font-weight:bold; color:#c77b00;
+    box-shadow:0 .6vmin 1.4vmin rgba(0,0,0,.18);
+  }
+  #stars.pop { animation:starPop .5s ease; }
+  @keyframes starPop { 0%{transform:scale(1);} 40%{transform:scale(1.25);} 100%{transform:scale(1);} }
+
+  /* いまのきんがく */
+  #credit-chip {
+    position:absolute;
+    top:calc(env(safe-area-inset-top,0px) + 1.4vmin);
+    left:50%; transform:translateX(-50%);
+    background:rgba(10,18,24,.86); border:.35vmin solid rgba(120,255,150,.5);
+    border-radius:99px; padding:.9vmin 3vmin;
+    font-size:4.2vmin; font-weight:bold; color:#5cff86;
+    text-shadow:0 0 1.6vmin rgba(60,255,120,.7);
+    box-shadow:0 .6vmin 1.4vmin rgba(0,0,0,.24);
+    white-space:nowrap;
+  }
+
+  /* みぎの道具ボタン */
+  #tools {
+    position:absolute;
+    top:calc(env(safe-area-inset-top,0px) + 8.5vmin);
+    right:calc(env(safe-area-inset-right,0px) + 1.6vmin);
+    display:flex; flex-direction:column; gap:1.4vmin; pointer-events:auto;
+  }
+  .tool {
+    width:11.5vmin; height:11.5vmin; max-width:76px; max-height:76px;
+    border:none; border-radius:3.4vmin; cursor:pointer;
+    background:rgba(255,255,255,.92); color:#0e3b52;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:.2vmin; font-family:inherit; font-weight:bold;
+    box-shadow:0 .8vmin 0 rgba(0,0,0,.18), 0 1.2vmin 2vmin rgba(0,0,0,.16);
+    transition:transform .12s, background .2s;
+  }
+  .tool .ic { font-size:4.6vmin; line-height:1; }
+  .tool .tx { font-size:2.2vmin; line-height:1; }
+  .tool:active { transform:translateY(.6vmin); box-shadow:0 .2vmin 0 rgba(0,0,0,.18); }
+  .tool.on { background:linear-gradient(180deg,#ffe27a,#ffc93c); color:#6b4a00;
+             box-shadow:0 .8vmin 0 #c99a10, 0 1.2vmin 2vmin rgba(0,0,0,.18); }
+  .tool.hide { display:none; }
+  .tool.attn { animation:attn 1.1s ease-in-out infinite; }
+  @keyframes attn { 0%,100%{transform:scale(1);} 50%{transform:scale(1.10);} }
+
+  /* ヒント */
+  #hint {
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom,0px) + 23%);
+    background:rgba(255,255,255,.94); color:#123; border-radius:99px;
+    padding:1.4vmin 4vmin; font-size:3.9vmin; font-weight:bold;
+    box-shadow:0 .8vmin 1.8vmin rgba(0,0,0,.22);
+    max-width:min(88vw, 620px); text-align:center; line-height:1.35;
+    transition:opacity .3s, transform .3s;
+  }
+  #hint.dim { opacity:0; transform:translateX(-50%) translateY(1.2vmin); }
+  #hint .accent { color:#e8402f; }
+
+  /* まんなかのおしらせ */
+  #toast {
+    position:absolute; left:50%; top:38%; transform:translate(-50%,-50%) scale(.8);
+    background:rgba(255,255,255,.96); border-radius:5vmin;
+    padding:2.4vmin 6vmin; font-size:6vmin; font-weight:bold; color:#e8402f;
+    box-shadow:0 1.4vmin 3vmin rgba(0,0,0,.28);
+    opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+    text-align:center; line-height:1.3;
+  }
+  #toast.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+
+  /* おしごとモードの帯 */
+  #work-banner {
+    position:absolute; left:50%; transform:translateX(-50%);
+    top:calc(env(safe-area-inset-top,0px) + 9vmin);
+    background:linear-gradient(180deg,#ffd84a,#ffb300); color:#5a3d00;
+    border-radius:99px; padding:1vmin 3.4vmin; font-size:3.4vmin; font-weight:bold;
+    box-shadow:0 .8vmin 1.6vmin rgba(0,0,0,.22); display:none; white-space:nowrap;
+  }
+  #work-banner.show { display:block; }
+
+  /* うりあげの表示 */
+  #sales-chip {
+    position:absolute;
+    top:calc(env(safe-area-inset-top,0px) + 1.4vmin);
+    left:calc(env(safe-area-inset-left,0px) + 1.6vmin);
+    background:rgba(255,255,255,.92); border-radius:99px;
+    padding:.9vmin 2.4vmin; font-size:3.4vmin; font-weight:bold; color:#0e6b96;
+    box-shadow:0 .6vmin 1.4vmin rgba(0,0,0,.18); display:none; white-space:nowrap;
+  }
+  #sales-chip.show { display:block; }
+
+  /* 横画面がせまいときの調整 */
+  @media (orientation:landscape) and (max-height:520px) {
+    #hint { font-size:4.6vmin; }
+    .tool { width:13vmin; height:13vmin; }
+    .tool .ic { font-size:5.4vmin; }
+    .tool .tx { font-size:2.5vmin; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<!-- ============ HUD ============ -->
+<div id="hud">
+  <div id="stars"><span>⭐</span><span id="star-count">0</span></div>
+  <div id="sales-chip">うりあげ <span id="sales-count">0</span>えん</div>
+  <div id="credit-chip">0えん</div>
+  <div id="work-banner">🔧 おしごとモード</div>
+
+  <div id="tools">
+    <button class="tool" id="btn-switch"><span class="ic">🔁</span><span class="tx">きりかえ</span></button>
+    <button class="tool" id="btn-xray"><span class="ic">👀</span><span class="tx">なかを みる</span></button>
+    <button class="tool on" id="btn-help"><span class="ic">🤝</span><span class="tx">おてつだい</span></button>
+    <button class="tool" id="btn-work"><span class="ic">🔧</span><span class="tx">おしごと</span></button>
+    <button class="tool" id="btn-sound"><span class="ic">🔊</span><span class="tx">おと</span></button>
+    <button class="tool hide" id="btn-trash"><span class="ic">🗑️</span><span class="tx">すてる</span></button>
+  </div>
+
+  <div id="hint">おかねを いれてね</div>
+  <div id="toast"></div>
+</div>
+
+<!-- ============ タイトル ============ -->
+<div id="title-screen">
+  <div id="title-art">🥤</div>
+  <div id="title-logo">じはんき シミュレーター<span class="sub">3D  ～ ほんものそっくり じどうはんばいき ～</span></div>
+  <button id="start-btn">はじめる</button>
+  <div id="title-note">おかねを ドラッグして いれよう<br>ひかった ボタンを おすと しょうひんが おちてくるよ</div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="src/util.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/products.js"></script>
+<script src="src/machine_parts.js"></script>
+<script src="src/machine_base.js"></script>
+<script src="src/machine_drink.js"></script>
+<script src="src/machine_snack.js"></script>
+<script src="src/money.js"></script>
+<script src="src/world.js"></script>
+<script src="src/consume.js"></script>
+<script src="src/restock.js"></script>
+<script src="src/ui.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
