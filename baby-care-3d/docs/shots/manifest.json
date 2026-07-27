@@ -45,19 +45,19 @@
     "id": "10-feed-bottle",
     "file": "10-feed-bottle.png",
     "scene": "feed",
-    "note": "Bottle feeding mid-way. Judge: glass transmission, milk volume."
+    "note": "Bottle feeding mid-way, face-to-face across the tray. Judge: the face and the bottle are both whole and both readable; glass transmission, milk volume."
   },
   {
     "id": "11-feed-messy",
     "file": "11-feed-messy.png",
     "scene": "feed",
-    "note": "Food on the face + bib stains."
+    "note": "Food on the face + bib stains, tight on the face and the spoon."
   },
   {
     "id": "12-feed-apple",
     "file": "12-feed-apple.png",
     "scene": "feed",
-    "note": "Bite marks, crumbs, tray."
+    "note": "Two bites in, low three-quarter from the baby's right. Judge: bite marks in the real geometry, crumbs, tray. Must not read as the same moment as 10."
   },
   {
     "id": "20-bath-fill",
@@ -129,7 +129,7 @@
     "id": "43-play-balloon",
     "file": "43-play-balloon.png",
     "scene": "play",
-    "note": "Balloon translucency + string."
+    "note": "Balloon translucency + string, shot close enough to judge both — the balloon and the whole run of string down to its anchor are in frame, with the baby off to one side for scale. HUD off because the care bar sits exactly where the string lands."
   },
   {
     "id": "50-sleep-crib",
@@ -159,7 +159,7 @@
     "id": "61-golden-hour",
     "file": "61-golden-hour.png",
     "scene": "feed",
-    "note": "Golden hour light shaft + dust motes."
+    "note": "Golden hour light shaft + dust motes, raking across the highchair. Judge: the shaft and the falloff — but the baby in the highchair is the subject the light is falling on, and has to be in frame."
   },
   {
     "id": "62-clutter",
