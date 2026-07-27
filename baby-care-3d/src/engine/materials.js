@@ -1114,7 +1114,7 @@ export function makeBabySkin(opts = {}) {
   const mat = makeSkin(opts);
   const extra = {
     uDirt:      { value: new THREE.Vector4(0, 0, 0, 0) },
-    uDirtColor: { value: new THREE.Color(0x6a4a2e) },
+    uDirtColor: { value: new THREE.Color(0x6b5843) },
     uWet:       { value: 0 },
     uBlush:     { value: 0 },
     uGrimeScale:{ value: 9.0 }
@@ -1176,9 +1176,16 @@ export function makeBabySkin(opts = {}) {
          * result linearly. Same smudged look, monotone from zero.            */
         float bcPatch = 0.45 + 0.55 * smoothstep(0.16, 0.56, bcN) * (0.60 + 0.40 * bcN2);
         float bcDirt = clamp(bcZone * 1.30 * bcPatch, 0.0, 1.0);
-        diffuseColor.rgb = mix(diffuseColor.rgb,
-                               uDirtColor * (0.55 + bcN * 0.55),
-                               bcDirt * 0.92);
+        /* Grime has to *desaturate* as well as darken. 0x6a4a2e is very nearly
+         * the hue of warm-lit skin, so under the feed scene's amber key a
+         * correct 0.75 face dirt read as "more saturated baby" rather than as
+         * food: measured, the cheek moved (253,162,106) → (236,119,64), a large
+         * change that carries no information because the hue never moved. Same
+         * note as makeMuck() above — dirty is darker *and* greyer, or it reads
+         * as shadow. */
+        vec3 bcGrime = uDirtColor * (0.55 + bcN * 0.55);
+        bcGrime = mix(bcGrime, vec3(dot(bcGrime, vec3(0.2126, 0.7152, 0.0722))), 0.40);
+        diffuseColor.rgb = mix(diffuseColor.rgb, bcGrime, bcDirt * 0.92);
         // wet skin is darker and a touch more saturated
         diffuseColor.rgb *= mix(1.0, 0.86, uWet);
       `)

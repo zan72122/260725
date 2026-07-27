@@ -1036,14 +1036,23 @@ function finishNormals(m) {
 function dropSlivers(m) {
   const P = m.pos, I = m.idx;
   const out = [];
-  const MIN_AREA = 5e-8;                     // m² = 0.05 mm²
+  // A triangle thinner than this cannot shade: at the tightest framing in the
+  // shot list one screen pixel covers ~0.09 mm of the face, so 0.15 mm is
+  // under two pixels wide however long the triangle is.
+  const MIN_ALT = 1.5e-4;                    // m = 0.15 mm
   let dropped = 0;
   for (let i = 0; i < I.length; i += 3) {
     const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3;
     const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
     const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    if (Math.hypot(nx, ny, nz) * 0.5 < MIN_AREA) { dropped++; continue; }
+    const area2 = Math.hypot(nx, ny, nz);              // = 2 × area
+    const eMax = Math.sqrt(Math.max(
+      ux * ux + uy * uy + uz * uz,
+      vx * vx + vy * vy + vz * vz,
+      (vx - ux) ** 2 + (vy - uy) ** 2 + (vz - uz) ** 2));
+    // shortest altitude = 2·area / longest edge
+    if (eMax < 1e-12 || area2 / eMax < MIN_ALT) { dropped++; continue; }
     out.push(I[i], I[i + 1], I[i + 2]);
   }
   if (!dropped) return m;
@@ -1072,7 +1081,7 @@ function toGeometry(m) {
 const LOD = [
   { head: [56, 40], torso: [28, 22], arm: [16, 14], hand: [18, 14], leg: [18, 16], foot: [20, 14] },
   { head: [76, 54], torso: [34, 28], arm: [20, 18], hand: [26, 20], leg: [22, 20], foot: [28, 18] },
-  { head: [96, 68], torso: [44, 38], arm: [24, 24], hand: [34, 26], leg: [28, 28], foot: [34, 22] }
+  { head: [96, 84], torso: [44, 38], arm: [24, 24], hand: [34, 26], leg: [28, 28], foot: [34, 22] }
 ];
 
 /**
