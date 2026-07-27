@@ -427,7 +427,7 @@ export class FoamSystem {
         // hanging in the air with a gap under it.
         _p.set(
           Math.cos(a) * rad + Math.sin(k * Math.PI) * this.headRadius * 0.22,
-          this.headRadius * (0.78 + k * 1.02),
+          this.headRadius * (0.76 + k * 0.70),
           Math.sin(a) * rad * 0.9);
         b.local.lerpVectors(b.base, _p, this.horn);
         scaleK = 1 - this.horn * k * 0.55;

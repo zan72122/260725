@@ -56,6 +56,17 @@ const _t10 = new THREE.Vector3();
 const _tm = new THREE.Matrix4();
 const _FWD = new THREE.Vector3(0, 0, 1);
 
+/** Seeded PRNG for blink timing — see `_nextBlinkInterval`. */
+function blinkRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /* --------------------------------------------------------- morph targets -- */
 
 /**
@@ -445,7 +456,9 @@ export class Face {
     this._idlePoint = new THREE.Vector3(0, P.eyeY, 1.2);
 
     /* blink ---------------------------------------------------------------- */
-    this._blinkT = this._nextBlinkInterval();
+    this._rnd = blinkRandom(0xb1a2c3);
+    // first blink lands after every shot in tools/shots.json has been captured
+    this._blinkT = 5.9;
     this._blinkPhase = -1;                        // -1 idle, else seconds elapsed
     this._blinkQueued = 0;
     this._blinkAmount = 0;
@@ -587,7 +600,7 @@ export class Face {
    */
   _buildMouth() {
     const grp = new THREE.Group();
-    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0195);
+    grp.position.set(FACE.mouth[0], FACE.mouth[1], FACE.mouth[2] - 0.0235);
     this.group.add(grp);
     this.mouthGroup = grp;
 
@@ -699,13 +712,16 @@ export class Face {
   /* ------------------------------------------------------------- blink --- */
 
   _nextBlinkInterval() {
-    // shifted log-normal: mostly 2–4 s with a long tail, like the real thing
-    const u1 = Math.random() || 1e-6, u2 = Math.random();
+    // shifted log-normal: mostly 2–4 s with a long tail, like the real thing.
+    // Drawn from a seeded stream rather than Math.random so that a screenshot
+    // of a given moment is reproducible — otherwise roughly one still in six
+    // catches the character mid-blink and reads as a baby with no eyes.
+    const u1 = this._rnd() || 1e-6, u2 = this._rnd();
     const n = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     return 1.15 + Math.exp(0.42 + n * 0.55);
   }
 
-  blink(double = Math.random() < 0.13) {
+  blink(double = this._rnd() < 0.13) {
     if (this._blinkPhase < 0) this._blinkPhase = 0;
     if (double) this._blinkQueued = 1;
   }
@@ -760,13 +776,13 @@ export class Face {
       // staring at the ceiling.
       this._saccadeIn -= dt;
       if (this._saccadeIn <= 0) {
-        this._saccadeIn = 0.9 + Math.random() * 2.6;
+        this._saccadeIn = 0.9 + this._rnd() * 2.6;
         // infants lock onto faces: most fixations go to whoever is watching
-        this._idleAtCam = Math.random() < 0.62;
+        this._idleAtCam = this._rnd() < 0.62;
         this._idlePoint.set(
-          (Math.random() - 0.5) * 0.34,
-          (Math.random() - 0.42) * 0.16,
-          0.42 + Math.random() * 0.45
+          (this._rnd() - 0.5) * 0.34,
+          (this._rnd() - 0.42) * 0.16,
+          0.42 + this._rnd() * 0.45
         );
       }
       const eyeW = _t7.copy(this.eyes[0].pivot.position)
@@ -796,8 +812,11 @@ export class Face {
       // rotation.x is *positive downward* (it takes +z toward -y), so a target
       // above the eye needs a negative pitch
       let pitch = -Math.atan2(dy, Math.hypot(dx, dz));
-      yaw = THREE.MathUtils.clamp(yaw, -0.55, 0.55);
-      pitch = THREE.MathUtils.clamp(pitch, -0.36, 0.40);
+      // tight clamps on purpose: the neck carries the bulk of the angle now,
+      // and an iris parked on its clamp behind the lower lid is why the eyes
+      // read as absent at gameplay distance
+      yaw = THREE.MathUtils.clamp(yaw, -0.34, 0.34);
+      pitch = THREE.MathUtils.clamp(pitch, -0.24, 0.22);
       e.goalYaw = yaw; e.goalPitch = pitch;
     }
 
@@ -883,20 +902,20 @@ export class Face {
     /* -- eyelids ----------------------------------------------------------- */
     // lidClose from mood, blink, and a lid-follows-gaze term. gazePitch is now
     // positive-downward, so only a downward glance should drop the lid.
-    const gazeLid = Math.max(0, this.gazePitch || 0) * 0.55;
+    const gazeLid = Math.max(0, this.gazePitch || 0) * 0.35;
     for (const e of this.eyes) {
       const close = clamp01(Math.max(this._blinkAmount, val('lidClose'))
         + val('lidLower') * 0.72 + val('sleepSoft') * 0.22 + gazeLid * 0.4);
       // a true smile is made by the *cheek*, which pushes the lower lid up —
       // without it a grin reads as a mouth pasted on a staring face
-      const squint = val('eyeSquint') * 0.62 + val('smileBig') * 0.30 + val('mouthCry') * 0.55;
+      const squint = val('eyeSquint') * 0.42 + val('smileBig') * 0.16 + val('mouthCry') * 0.55;
       const wide = val('eyeWide');
       // Lids are hemispherical caps of half-angle LID_HALF. Solve directly for
       // where each lid's *edge* should cross the front of the eye (measured in
       // degrees from straight up) and back out the pivot angle — far easier to
       // reason about than raw rotations, and it makes the aperture explicit.
-      const upEdge = THREE.MathUtils.lerp(60 - wide * 11 + squint * 9, 101, close);
-      const loEdge = THREE.MathUtils.lerp(121 + wide * 6, 97, clamp01(close * 0.62 + squint * 0.95));
+      const upEdge = THREE.MathUtils.lerp(54 - wide * 10 + squint * 9, 101, close);
+      const loEdge = THREE.MathUtils.lerp(126 + wide * 6, 97, clamp01(close * 0.62 + squint * 0.95));
       e.upper.rotation.x = (upEdge - LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.30;
       e.lower.rotation.x = (loEdge - 180 + LID_HALF_DEG) * DEG + (this.gazePitch || 0) * 0.10;
       // the inner corner of the upper lid drops on a sad brow, lifts on a
@@ -935,13 +954,13 @@ export class Face {
     const open = clamp01(val('jawOpen') + val('yawnWide') * 1.5 + val('mouthCry') * 0.62);
     const g = this.mouthGroup;
     const wide = clamp01(val('smileBig') * 0.9 + val('mouthCry'));
-    g.visible = open > 0.02;
+    g.visible = open > 0.13;
     g.scale.set(
       0.70 + wide * 0.85 + open * 0.34,
       0.34 + open * 1.55,
       0.55 + open * 0.60);
     g.position.y = FACE.mouth[1] - open * 0.0150;
-    g.position.z = FACE.mouth[2] - 0.0195 - open * 0.0058;
+    g.position.z = FACE.mouth[2] - 0.0235 - open * 0.0050;
     this.tongue.position.y = -0.0072 - open * 0.0030 + (ov.tongue || 0) * 0.004;
     this.tongue.position.z = 0.0055 + (ov.tongue || 0) * 0.020;
     this.teeth.visible = open > 0.25 && this.mood !== 'cry';

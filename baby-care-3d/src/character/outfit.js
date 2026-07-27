@@ -38,7 +38,7 @@ function segDist(p, a, b) {
 export const GARMENTS = {
   top: {
     groups: ['torso', 'armL', 'armR'],
-    inflate: 0.0082,
+    inflate: 0.0148,
     lod: 0.92,
     mask: (x, y, z) => {
       // the collar sits low and wide, well clear of the head shell's own rim —
@@ -82,7 +82,7 @@ export const GARMENTS = {
   },
   diaper: {
     groups: ['torso', 'legL', 'legR'],
-    inflate: 0.0125,
+    inflate: 0.0112,
     lod: 0.62,
     mask: (x, y, z) => {
       // fat at the back and between the legs, tapering at the waist
@@ -189,9 +189,12 @@ export class Outfit {
         // hard flat shards around every neckline and cuff.
         detail: (x, y, z) => {
           const mk = def.mask(x, y, z);
-          return -def.inflate * (1 - mk) - 0.0055 * (1 - sstep(0.22, 0.62, mk));
+          return -def.inflate * (1 - mk) - 0.0105 * (1 - sstep(0.28, 0.70, mk));
         },
-        margin: 0.030, sinkDepth: 0.004,
+        // an 8 mm-proud shell needs a correspondingly deep dominance sink, or
+        // the torso and sleeve shells interleave at the shoulder into a fan of
+        // hard pale shards
+        margin: 0.030, sinkDepth: 0.013,
         collapse: spec.collapse
       }));
     }
@@ -215,7 +218,7 @@ export class Outfit {
         // sawtooth of single triangles hanging past every hem
         let sum = 0;
         for (const v of [a, b, c]) sum += def.mask(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
-        if (sum / 3 > 0.13) idx.push(a, b, c);
+        if (sum / 3 > 0.30) idx.push(a, b, c);
       }
       vo += n;
     }
@@ -235,7 +238,10 @@ export class Outfit {
     clean.computeBoundingSphere();
 
     const mat = def.material(color);
-    mat.side = THREE.DoubleSide;         // hems are open edges; never cull them
+    // Front faces only. Every hem now tapers to *below* the skin surface, so
+    // there is no open edge left to see through — and back faces at a hem are
+    // exactly what was catching the key light as a fan of bright shards.
+    mat.side = THREE.FrontSide;
     const mesh = this.rig.bind(clean, mat);
     mesh.name = 'outfit:' + name;
     mesh.visible = false;

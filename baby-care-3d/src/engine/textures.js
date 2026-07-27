@@ -175,7 +175,16 @@ function normalFromHeight(size, strength, height) {
   });
 }
 
-function toTexture(c, { srgb = false, repeat = 1, aniso = 8 } = {}) {
+/* `aniso` defaults to 16, not 8. The nursery floor is a 5.4 × 5.0 m plane seen
+ * from eye height at a 15–30° grazing angle: along the view direction a metre
+ * of floor collapses to ~60 screen pixels at the far wall, so the sampling
+ * footprint is roughly 8:1 elongated there and worse in the corners. Eight taps
+ * cannot cover that, so the hardware falls back on a blurrier mip in *both*
+ * axes and the plank pattern beats against the pixel grid instead of averaging
+ * cleanly. Sixteen is the cap on every target we run on, it is only paid on
+ * minified fetches, and it is the difference between a floor that recedes and a
+ * floor that shimmers. */
+function toTexture(c, { srgb = false, repeat = 1, aniso = 16 } = {}) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
@@ -333,10 +342,47 @@ export function wood({
      * only ever visible as an artefact.
      */
     const rows = Math.max(1, Math.round(planks));
-    const perPlank = planks
-      ? Math.max(3, Math.min(5, Math.round((ringScale / rows) * 0.45)))
-      : Math.max(4, Math.min(28, Math.round(ringScale * 0.42)));
-    const ringFreq = planks ? perPlank * rows : perPlank;   // integer ⇒ tiles in v
+    /* Fourth pass — "the floor reads as corduroy" (the last surviving D22).
+     *
+     * Everything above treated a growth ring as a *periodic function of v*: a
+     * sawtooth at `ringFreq` cycles per tile, gently warped. That model can
+     * only ever produce evenly-spaced parallel lines down the board, and no
+     * amount of turning the contrast down changes what it is — at 5 rings per
+     * 0.30 m plank the floor carried a stripe every 60 mm, which at this
+     * camera (eye height 1.42 m, floor seen at 15–30°) is a dark line every
+     * 4–11 screen pixels from the skirting to the foreground. A regular 4-px
+     * stripe across two thirds of the frame is corduroy no matter what colour
+     * it is, and where it drops below two pixels it moirés.
+     *
+     * Real flat-sawn timber is not periodic in v at all. The board is a slab
+     * cut parallel to the log axis, some distance `pith` off the heart, and a
+     * growth ring is a *cylinder*: what you see on the face is the intersection
+     * of that cylinder with the slab, i.e. a curve of constant radius
+     *
+     *      rad = hypot(across, pith)
+     *
+     * That single change is the whole fix, because `rad` is extremely
+     * non-linear in `across`:
+     *
+     *   · a board cut near the heart (small `pith`) sweeps through several
+     *     rings across its width and shows tight lines at the edges with a
+     *     wide, flat, almost plain band up the middle — the cathedral;
+     *   · a board cut from the outside of the log (large `pith`) barely
+     *     changes radius at all across 300 mm and is nearly plain-sawn, one
+     *     or two lazy lines the whole length.
+     *
+     * So the ring count per board is now *emergent and wildly uneven* (0.5–4
+     * across the width instead of a fixed 5), the spacing inside a board is
+     * uneven, and no two boards agree — which is exactly what kills the
+     * regular high-frequency signal the eye was locking onto. The low-frequency
+     * warp is kept and is what makes the arcs wander down the length of the
+     * board rather than running dead straight.
+     */
+    // Rings per unit radius, measured in board widths. `ringScale` stays a
+    // fineness hint; the clamp keeps a board between roughly 1 and 4 rings.
+    const ringR = planks
+      ? Math.max(4, Math.min(9, (ringScale / rows) * 0.85))
+      : Math.max(10, Math.min(56, ringScale * 1.9));
     // Grain fibres run *along* the board (long in u, narrow in v). "Narrow"
     // still has to mean several texels: size/8 is the finest octave a 512² map
     // can hand to a mip chain without it turning into hash noise.
@@ -346,22 +392,39 @@ export function wood({
     const rings = (u, v) => {
       const row = planks ? Math.floor(v * rows) % rows : 0;
       const off = planks ? hash2(row, 0, seed + 17) : 0;
-      // Long, low-frequency figure stretched down the board (period 4 in u,
-      // 11 in v) plus a slower second lobe. Together well under one ring pitch.
-      // Cathedral figure. Amplitude is now nearly a full ring pitch and the
-      // two lobes run at different rates *per plank*, because at ±0.6 of a
-      // pitch every board had the same gentle wave and the floor read as
-      // machine-printed laminate — regular parallel arcs, no two boards ever
-      // disagreeing about where the heart of the log was.
+      /* Position across the board, in board widths. For a plank floor that is
+       * the fractional part of the plank index, which tiles for free because
+       * `rows` is an integer. With `planks = 0` the whole tile is one board and
+       * there is no integer lattice to lean on, so it is mirrored about the
+       * middle — continuous at v = 0 and v = 1, therefore still tileable. */
+      const across = planks
+        ? (v * rows - row) - 0.5
+        : Math.abs(v - 0.5) - 0.25;
+      // Where the heart of the log sits relative to this board: `pith` is how
+      // deep it is behind the face, `lateral` is how far it is off the board's
+      // centre line. The spread is the point — some boards come out
+      // near-quartersawn, some straight off the outside of the log, and they
+      // must not look related. `lateral` is what stops the figure being
+      // mirror-symmetric about the middle of every plank, which is the tell
+      // that gives a procedural board away instantly.
+      const off2 = planks ? hash2(row, 3, seed + 29) : 0.5;
+      const pith = 0.30 + off * off * 1.7;
+      const lateral = (off2 - 0.5) * 1.5;
+      const dx = across - lateral;
+      const rad = Math.sqrt(dx * dx + pith * pith);
+      // The log tapers and its heart wanders, so the whole ring family slides
+      // along the length of the board. This is what turns the flat middle of
+      // the cathedral into an arch instead of a straight band.
       const warp = (fbm2(u, v, 3, 9, 3, seed + row * 13) - 0.5) * (1.05 + off * 0.5)
                  + (fbm2(u, v, 2, 4, 2, seed + 61 + row) - 0.5) * 0.52
                  + (fbm2(u, v, 7, 23, 2, seed + 131 + row * 7) - 0.5) * 0.16;
-      const g = (v + off) * ringFreq + warp;
+      const g = rad * ringR + off * 3.1 + warp;
       let r = g - Math.floor(g);
       r = Math.abs(r * 2 - 1);
-      // A growth ring is a narrow dark line between wide pale bands, not a
-      // symmetric triangle wave.
-      r = Math.pow(r, 1.45);
+      // A growth ring is a darker line between wider pale bands — but only
+      // slightly narrower, not a hairline. 1.45 pushed it to a hard-edged
+      // 2-texel line, which is the one shape a mip chain cannot carry.
+      r = Math.pow(r, 1.2);
       // fine fibre streaks running *along* the grain
       /* Fibre. Two things had to change before this stopped reading as
        * corduroy — dead-parallel fine ribs running the whole length of every
@@ -378,19 +441,38 @@ export function wood({
        *     truthful and — because the pattern no longer runs unbroken across
        *     the frame — much harder for the eye to lock onto.
        */
+      /* Fourth pass. A texel-count floor is the wrong test for the nursery
+       * floor and that is why this kept surviving. The floor is 5.4 × 5.0 m,
+       * tiled 2.4×, so one texel is ~4 mm of *world* — and it is seen at a
+       * 15–30° grazing angle, where a metre of depth collapses into 60 screen
+       * pixels at the far wall. "Six texels per feature" there is one screen
+       * pixel. Anything with a hard crest, at any amplitude, becomes a moiré.
+       *
+       * So fibre is now split by use. A plank surface is by definition big and
+       * tiled and will be seen edge-on, and gets a whisper (0.04) at half the
+       * frequency; furniture and toys are single-tile, seen head-on from 0.3–1.5
+       * m, and keep the full streak because there it is the thing that stops a
+       * cot rail reading as extruded plastic.
+       */
       const patch = smooth(Math.max(0, Math.min(1,
         (fbm2(u, v, 3, 7, 2, seed + 211) - 0.32) * 2.6)));
-      const streak = ridged2(u, v, fibreU, fibreV, 2, seed + 31);
-      return Math.min(1, r * 0.90 + streak * 0.10 * (0.25 + 0.75 * patch));
+      const streak = planks
+        ? ridged2(u, v, Math.round(fibreU * 0.5), Math.round(fibreV * 0.5), 1, seed + 31)
+        : ridged2(u, v, fibreU, fibreV, 2, seed + 31);
+      const fw = planks ? 0.04 : 0.10;
+      return Math.min(1, r * (1 - fw) + streak * fw * (0.25 + 0.75 * patch));
     };
 
     // A joint between two boards: soft-shouldered rather than a hard line, so
     // the mip chain has something to average instead of a 2-texel spike.
+    // ~9 texels wide (≈36 mm on the floor) so that the far half of the room,
+    // where a plank is 15 px deep, still resolves the joint as a soft shadow
+    // rather than as an on/off line that dashes.
     const seam = (v) => {
       if (!planks) return 0;
       const f = v * rows;
       const d = Math.abs(f - Math.round(f)) * rows;     // 0 at the joint
-      return smooth(Math.max(0, 1 - Math.min(1, d * 1.55)));
+      return smooth(Math.max(0, 1 - Math.min(1, d * 1.15)));
     };
 
     // Boards are cut from different logs: a floor with every plank the same
@@ -406,15 +488,19 @@ export function wood({
       // seen from 4 m that reads as stripes, not as timber. The plank-to-plank
       // tone step (below) is what should carry the pattern at that distance.
       const c = mixHex(light, dark, t * 0.52);
-      const s = (1 - seam(v) * 0.44) * (1 + plankTone(v) * 0.20);
+      const s = (1 - seam(v) * 0.34) * (1 + plankTone(v) * 0.20);
       out[0] = c[0] * s; out[1] = c[1] * s; out[2] = c[2] * s;
     });
 
     // Grain sits almost flush on a finished board; the plank joint is the only
     // real groove, so the seam carries most of the relief.
+    // The fibre term is dropped outright on plank surfaces: a relief detail
+    // that is one screen pixel wide does not read as grain, it reads as
+    // sparkle, and the normal map is where grazing-angle aliasing hurts most
+    // (the specular lobe swings the full width of the highlight per pixel).
     const normal = normalFromHeight(size, 1.15, (u, v) =>
       rings(u, v) * 0.22 + seam(v) * 1.05
-      + ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085);
+      + (planks ? 0 : ridged2(u, v, fibreU, Math.round(fibreV * 1.15), 2, seed + 60) * 0.085));
 
     const rough = generate(size, (u, v, out) => {
       const t = rings(u, v);
@@ -573,8 +659,26 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
      * back in `lay` and `drift`, which are the octaves that actually survive to
      * the screen at any distance.
      */
-    const cells = Math.max(8, Math.min(Math.round(density * 0.28), Math.floor(size / 13)));
-    const fineCells = Math.min(Math.round(cells * 1.9), Math.floor(size / 10));
+    /* Fourth pass — "the rug reads as fine noise / dither stipple rather than
+     * pile at this distance".
+     *
+     * The texel-per-tuft test was still the wrong one. What matters is *screen
+     * pixels* per tuft, and the arithmetic for the establishing shot is brutal:
+     * the rug is 2.36 m across, tiled 5×, so one tile is 470 mm; 39 tufts per
+     * tile is a tuft every 12 mm; at 2.5 m the rug spans ~400 px, i.e. 170
+     * px/m, so a tuft is *two pixels* and the fine octave was one and a half.
+     * A two-pixel cellular field with an independent per-cell shade is the
+     * textbook definition of dither, which is exactly what it looked like.
+     *
+     * Tufts are therefore roughly halved in number (size/22 ⇒ ~23 per tile,
+     * 20 mm, 3.5 px) and — see makeCarpet() — the rug's repeat is capped, which
+     * buys the rest. Nothing is lost: real cut pile of this weight has a tuft
+     * every 6–10 mm and you have never been able to resolve one from standing
+     * height. What you *do* see is the lay, the drift and the clumping, and
+     * those get the weight instead.
+     */
+    const cells = Math.max(8, Math.min(Math.round(density * 0.16), Math.floor(size / 22)));
+    const fineCells = Math.min(Math.round(cells * 1.7), Math.floor(size / 14));
     // The pile lies in a direction: long, soft bands (the "vacuum stripe")
     // stretched across the rug, which is most of what sells a cut pile.
     const lay = (u, v) => fbm2(u, v, 5, 14, 3, seed + 5);
@@ -584,7 +688,7 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
       const w = worley(u, v, cells, seed);
       const tuft = Math.pow(1 - w.f1, 1.35);
       const f = Math.pow(1 - worley(u, v, fineCells, seed + 23).f1, 2.0);
-      return tuft * 0.54 + f * 0.09 + lay(u, v) * 0.37;
+      return tuft * 0.54 + f * 0.05 + lay(u, v) * 0.44;
     };
     const map = generate(size, (u, v, out) => {
       const w = worley(u, v, cells, seed);
@@ -598,7 +702,12 @@ export function carpet({ color = 0xffd7e6, seed = 19, size = 512, density = 150 
         + (cl - 0.5) * 0.13           // clumping      — reads at a metre
         + (sweep - 0.5) * 0.20        // directional lay
         + h * 0.11                    // tuft tops     — reads at 30 cm
-        + (w.id - 0.5) * (0.25 + cl * 0.75) * 0.085;   // per tuft, variance-gated
+        // Per tuft. This is white noise by construction — an independent hash
+        // per cell — so it is the one term that can only ever *become* stipple
+        // when the rug is minified. Halved, and gated harder by the clump field
+        // so it survives as "a busy patch of pile" rather than as an even
+        // dither over the whole disc.
+        + (w.id - 0.5) * (0.10 + cl * 0.90) * 0.042;
       const r = (color >> 16 & 255) / 255, g = (color >> 8 & 255) / 255, b = (color & 255) / 255;
       out[0] = r * shade; out[1] = g * shade; out[2] = b * shade;
     });

@@ -260,6 +260,12 @@ export class DressActivity {
     if (bodyDirt > 0.25) this._setGarmentState(this.garments[0], 'dirty');
 
     S.shade(this.root, true, true);
+    // D10 — this rig is ~100 meshes, and shading them all as casters made it
+    // the single most expensive thing in the build: 200 draw calls against a
+    // ~180 budget for the whole frame. Hangers, buttons, knobs and dial faces
+    // contribute nothing to a VSM map this soft, so only the furniture-scale
+    // forms stay in the shadow pass.
+    S.trimShadowCasters(this.root, { minRadius: 0.14 });
     this.targets = [this.root];
     if (ctx.baby?.group) this.targets.push(ctx.baby.group);
 

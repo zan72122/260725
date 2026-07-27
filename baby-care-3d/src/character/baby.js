@@ -16,6 +16,8 @@ import { Hair } from './hair.js';
 import { Outfit } from './outfit.js';
 
 const ZONES = ['face', 'hands', 'feet', 'body', 'hair'];
+const _v1 = new THREE.Vector3();
+const _m1 = new THREE.Matrix4();
 const UV_REPEAT = 7;                 // texture tiles per metre of skin
 
 /** Speech-bubble vocabulary. Japanese, aimed at a four-year-old. */
@@ -371,6 +373,7 @@ export class Baby {
 
     this._idleLife(dt);
     this.anim.update(dt, ctx);
+    this._trackHead(dt);
     // moods carry a head cant — sympathy tilt on sad, the coy duck on shy
     const tilt = this.face?.controls?.headTilt || 0;
     if (tilt) {
@@ -394,6 +397,37 @@ export class Baby {
       this._sayPending.t += dt;
       if (this._sayPending.t > 2.8) this._sayPending = null;
     }
+  }
+
+  /**
+   * Aim the neck and head at whatever the baby is looking at.
+   *
+   * Without it the eyes alone had to cover the whole angle to a toy on the
+   * floor, which meant they sat permanently on their downward clamp with both
+   * irises jammed against the lower lid — the character read as sullen and,
+   * from gameplay distance, as having no eyes at all. Splitting the angle
+   * roughly 60/40 between head and eyes is what people actually do.
+   */
+  _trackHead(dt) {
+    const R = this.rig;
+    const head = R.bones.head;
+    const neck = R.bones.neck;
+    let yaw = 0, pitch = 0;
+    const t = this._lookTarget;
+    if (t) {
+      neck.updateWorldMatrix(true, false);
+      const local = _v1.copy(t).applyMatrix4(_m1.copy(neck.matrixWorld).invert()).sub(head.position);
+      const dz = Math.max(0.06, local.z);
+      yaw = THREE.MathUtils.clamp(Math.atan2(local.x, dz), -0.62, 0.62);
+      pitch = THREE.MathUtils.clamp(-Math.atan2(local.y, Math.hypot(local.x, dz)), -0.34, 0.52);
+    }
+    const k = 1 - Math.exp(-dt * 5.5);
+    this._hYaw = (this._hYaw ?? 0) + (yaw - (this._hYaw ?? 0)) * k;
+    this._hPitch = (this._hPitch ?? 0) + (pitch - (this._hPitch ?? 0)) * k;
+    neck.rotation.y += this._hYaw * 0.40;
+    neck.rotation.x += this._hPitch * 0.40;
+    head.rotation.y += this._hYaw * 0.58;
+    head.rotation.x += this._hPitch * 0.58;
   }
 
   /**

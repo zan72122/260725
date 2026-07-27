@@ -786,6 +786,40 @@ export function shade(root, cast = true, receive = true) {
   return root;
 }
 
+/**
+ * Drop the small stuff out of the shadow pass.
+ *
+ * Every caster is a second draw call, and the VSM map is soft enough that a
+ * coat hanger or a drawer knob contributes noise rather than shading — GTAO in
+ * the post stack already supplies the small-scale contact darkening. A blanket
+ * `shade(root, true, true)` over a scene with a hundred little parts therefore
+ * doubles its cost for nothing. `room.js` does the same trim by name; this is
+ * the geometric version, so it keeps working as props are added.
+ *
+ * `minRadius` is the *world-space* bounding-sphere radius below which a mesh
+ * stops casting. 0.14 m ≈ "smaller than a folded garment".
+ *
+ * Anything tagged `userData.keepShadow` is always kept.
+ */
+export function trimShadowCasters(root, { minRadius = 0.14 } = {}) {
+  let kept = 0, dropped = 0;
+  root.updateWorldMatrix(true, true);
+  root.traverse(n => {
+    if (!n.isMesh || !n.castShadow || n.userData?.keepShadow) return;
+    const g = n.geometry;
+    if (!g) return;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const r = g.boundingSphere?.radius;
+    if (!(r >= 0)) return;
+    // length of the world matrix' first column = the x scale, near enough for
+    // a size threshold on props that are never wildly non-uniform
+    const e = n.matrixWorld.elements;
+    const s = Math.max(Math.hypot(e[0], e[1], e[2]), 1e-4);
+    if (r * s < minRadius) { n.castShadow = false; dropped++; } else kept++;
+  });
+  return { kept, dropped };
+}
+
 /** Copy an anchor's world transform onto `group`, with a local-space offset. */
 export function placeAtAnchor(group, anchor, offset = [0, 0, 0], fallback = [0, 0, 0]) {
   if (anchor && anchor.isObject3D) {

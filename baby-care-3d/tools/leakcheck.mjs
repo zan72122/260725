@@ -112,7 +112,7 @@ try {
         out.push({ cycle: c + 1, name: n, built, after });
       }
     }
-    return { base, out };
+    return { base, out, leakLog: (app.leakLog || []).slice() };
   }, { cycles: CYCLES, only: ONLY });
 
   const f = (v, w = 7) => String(v).padStart(w);
@@ -131,6 +131,13 @@ try {
   }
   const peak = Math.max(...rows.out.map(r => r.built.calls));
   console.log(`\n  peak draw calls while an activity is live: ${peak}  (contract: < 180)`);
+
+  // app.setActivity's own build/dispose census — the in-engine version of the
+  // table above, and the thing that warns in the console when it goes wrong.
+  const bad = (rows.leakLog || []).filter(l => l.nodes !== 0);
+  console.log(`\n  app.leakLog: ${rows.leakLog.length} build/dispose pairs recorded, ` +
+    `${bad.length} with a non-zero scene-node delta`);
+  for (const l of bad.slice(0, 10)) console.log(`    LEAK ${l.activity}: nodes+${l.nodes}`);
 } catch (e) {
   console.error('LEAKCHECK FAILURE:', e.message);
   process.exitCode = 1;

@@ -171,6 +171,10 @@ export class FeedActivity {
     }
 
     S.shade(this.root, true, true);
+    // Crumbs, rice grains and tray hardware are far below the resolution of a
+    // VSM map this soft — they cost a draw call each and shade nothing. GTAO
+    // grounds them instead. (D10)
+    S.trimShadowCasters(this.root, { minRadius: 0.055 });
     this._refreshTargets();
   }
 
